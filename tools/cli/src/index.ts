@@ -17,19 +17,37 @@ program
 program
   .command('run <file>')
   .description('Execute an automation from a JSON file')
-  .action(async (file: string) => {
-    logger.info({ file }, 'Loading automation file');
+  .option('--headless', 'Run browser in headless mode', false)
+  .action(async (file: string, options: { headless: boolean }) => {
     try {
-      const raw = await readFile(file, 'utf-8');
-      const json = JSON.parse(raw);
-      const result = AutomationSchema.safeParse(json);
-      if (!result.success) {
-        logger.error({ errors: result.error.flatten() }, 'Automation file is invalid');
-        process.exit(1);
+      const { AutomationRunner } = await import('./runner/automation-runner.js');
+      const runner = new AutomationRunner();
+      const result = await runner.run(file, { headless: options.headless });
+
+      // Print summary to stdout
+      if (result.success) {
+        logger.info(
+          {
+            stepsCompleted: result.stepsCompleted,
+            stepsTotal: result.stepsTotal,
+            artifacts: result.artifacts.length,
+            durationMs: result.completedAt.getTime() - result.startedAt.getTime(),
+          },
+          'Automation completed successfully',
+        );
+      } else {
+        logger.error(
+          {
+            stepsCompleted: result.stepsCompleted,
+            stepsTotal: result.stepsTotal,
+            errors: result.errors,
+          },
+          'Automation completed with errors',
+        );
+        process.exitCode = 1;
       }
-      logger.info({ id: result.data.id, name: result.data.name }, 'Automation validated — run not yet implemented');
     } catch (err) {
-      logger.error({ err }, 'Failed to load automation file');
+      logger.error({ err }, 'Automation run failed');
       process.exit(1);
     }
   });
