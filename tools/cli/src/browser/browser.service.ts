@@ -31,9 +31,12 @@ export class BrowserService {
       headless: options.headless ?? false,
     });
 
-    const contextOptions: Parameters<Browser['newContext']>[0] = {
+    const contextOptions: {
+      acceptDownloads: boolean;
+      viewport?: { width: number; height: number };
+      userAgent?: string;
+    } = {
       acceptDownloads: true,
-      downloadsPath: this.artifactDir,
     };
 
     if (options.viewport) {
