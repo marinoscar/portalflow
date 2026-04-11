@@ -200,6 +200,12 @@ It should allow users to:
 
 The web application is not just an admin screen. It is meant to be the control center of the platform.
 
+A key part of this experience should be guided, step-by-step automation authoring. Instead of forcing users to define automations as raw JSON from the start, the web UI should help them describe the workflow as an ordered series of business steps. The platform should then use LLM assistance to help translate those guided steps into a structured automation definition that remains reviewable, editable, and executable.
+
+This means the UI should feel closer to building a runbook than writing an unstructured prompt. A user should be able to express what they want to happen step by step, while PortalFlow turns that guidance into a structured automation with explicit actions, tool calls, validation points, and expected outcomes.
+
+The goal is to reduce ambiguity without removing flexibility. Users should guide the journey, the platform should provide the structure, and AI should help fill in the uncertain parts.
+
 ## Automation Definition Format
 
 PortalFlow should use JSON as the automation definition format in the initial version.
@@ -232,6 +238,8 @@ That likely includes areas such as:
 * Logging or evidence capture preferences
 
 Over time, this format may evolve, but the near-term vision is to keep the automation definition explicit and structured.
+
+The automation format should also be able to preserve high-level guided steps that describe the intended business journey, along with checkpoints and AI guidance fields that help the runtime handle expected website variability without forcing repeated discovery cycles during every run.
 
 ## Role of LLMs
 
@@ -323,6 +331,41 @@ This matters because the platform depends on real browser automation, runtime se
 * Predictable operational behavior
 
 Additional environments may be supported later, but Ubuntu should be the design center in the first phase.
+
+## Illustrative Example: Retrieving a Phone Bill PDF
+
+A strong example of PortalFlow’s intended operating model is a workflow to retrieve the latest phone bill PDF from a carrier website.
+
+In a guided authoring experience, a user might describe the workflow in simple business steps such as:
+
+* Get credentials for the phone account from `vaultcli`
+* Navigate to the billing history page
+* Enter the username and continue
+* Enter the password and sign in
+* Select a phone number for OTP verification
+* Wait for the verification code using `smscli`
+* Enter the OTP and continue
+* Confirm the browser is on the correct billing page
+* Analyze the page and select the latest bill by date
+* Download the PDF version of the bill
+* Upload and share the PDF back to the user through a file-sharing tool
+
+This example captures the core philosophy of PortalFlow.
+
+The user provides the intended journey in structured, high-level steps. PortalFlow should then turn that guidance into a formal automation definition.
+
+Within that execution:
+
+* Deterministic structure defines the expected business flow
+* [Playwright](https://playwright.dev/) performs the browser navigation, page interaction, and inspection
+* AI helps decide how to identify the right elements, interpret changing page content, choose the next action, and recover from expected variability
+* [`vaultcli`](https://github.com/marinoscar/vault/blob/main/tools/vaultcli/README.md) provides credentials securely at runtime
+* [`smscli`](https://github.com/marinoscar/sink/blob/main/tools/smscli/README.md) provides OTP retrieval when verification is required
+* Artifact-sharing tooling can return the downloaded document back to the user
+
+This is exactly the kind of hybrid model PortalFlow is meant to support. The system should not force the LLM to rediscover the full website flow from scratch during every run. Instead, the automation should already contain the intended process, checkpoints, and tool expectations. AI is then used selectively to absorb the normal variability of human-oriented web applications.
+
+That distinction is critical. It improves reliability, lowers token usage, reduces execution drift, and makes automations easier to debug, review, and refine over time.
 
 ## Example Use Cases
 
