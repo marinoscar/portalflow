@@ -14,12 +14,17 @@ program
   .description('PortalFlow CLI — run and manage browser automations')
   .version('1.1.2');
 
-// run <file>
+// run [file]
 program
-  .command('run <file>')
-  .description('Execute an automation from a JSON file')
+  .command('run [file]')
+  .description('Execute an automation from a JSON file (omit file to use interactive TUI)')
   .option('--headless', 'Run browser in headless mode', false)
-  .action(async (file: string, options: { headless: boolean }) => {
+  .action(async (file: string | undefined, options: { headless: boolean }) => {
+    if (!file) {
+      const { runRunFlow } = await import('./tui/flows/run.js');
+      await runRunFlow();
+      return;
+    }
     try {
       const { AutomationRunner } = await import('./runner/automation-runner.js');
       const runner = new AutomationRunner();
