@@ -1,38 +1,22 @@
 // Shared helpers for the provider TUI
-
-export type SupportedProvider = 'anthropic' | 'openai';
-
-export const SUPPORTED_PROVIDERS: SupportedProvider[] = ['anthropic', 'openai'];
+import { getPresetById } from '../llm/provider-kinds.js';
 
 export function providerDisplayName(name: string): string {
-  switch (name) {
-    case 'anthropic':
-      return 'Anthropic';
-    case 'openai':
-      return 'OpenAI';
-    default:
-      return name;
-  }
+  const preset = getPresetById(name);
+  if (preset) return preset.label;
+  return name;
 }
 
 export function defaultModelFor(name: string): string {
-  switch (name) {
-    case 'anthropic':
-      return 'claude-sonnet-4-20250514';
-    case 'openai':
-      return 'gpt-4o';
-    default:
-      return '';
-  }
+  const preset = getPresetById(name);
+  if (preset) return preset.defaultModel;
+  return '';
 }
 
 export function defaultBaseUrlFor(name: string): string {
-  switch (name) {
-    case 'openai':
-      return 'https://api.openai.com/v1';
-    default:
-      return '';
-  }
+  const preset = getPresetById(name);
+  if (preset) return preset.baseUrl ?? '';
+  return '';
 }
 
 /**
