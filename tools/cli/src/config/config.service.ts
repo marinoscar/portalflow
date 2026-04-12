@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -60,5 +60,15 @@ export class ConfigService {
       ...providerConfig,
     };
     await this.save(config);
+  }
+
+  /**
+   * Reset the entire configuration file by deleting it.
+   * After this call, `load()` returns an empty config as if the CLI had never been configured.
+   */
+  async reset(): Promise<void> {
+    if (existsSync(this.configFile)) {
+      await unlink(this.configFile);
+    }
   }
 }
