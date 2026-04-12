@@ -160,6 +160,7 @@ On start, the TUI shows your current status (active provider and model, or a pro
 | **Set active provider** | Shows configured providers and lets you pick which one to use. Disabled until at least two providers are configured. |
 | **List providers** | Displays all configured providers with their kind, model, and base URL (if applicable), marking the active one. |
 | **Remove a provider** | Deletes a provider's stored credentials after confirmation. Also clears the active provider if it was the one removed. |
+| **Reset all configurations** | Deletes every provider and the active selection after a two-step confirmation (confirm + type `reset`). Useful when you want to start fresh. |
 | **Exit** | Leaves the TUI. |
 
 The menu loops until you choose Exit, so you can chain multiple actions in a single session. Press `Ctrl+C` at any prompt to cancel cleanly without saving changes.
@@ -236,6 +237,20 @@ portalflow provider config openai --api-key sk-... --base-url https://my-proxy.e
 | `--model <model>` | Model identifier |
 | `--base-url <url>` | Base URL for OpenAI-compatible endpoints |
 | `--kind <kind>` | Provider kind: `anthropic` or `openai-compatible` (inferred from name if omitted) |
+
+### `portalflow provider reset`
+
+Delete all configured providers and clear the active provider selection. This is destructive — all stored API keys and model settings are removed.
+
+```bash
+portalflow provider reset --yes
+```
+
+| Option | Description |
+|---|---|
+| `--yes` | Required. Skip confirmation and proceed (without it the command refuses, by design). |
+
+For an interactive reset with a safer two-step confirmation, run `portalflow provider` and pick "Reset all configurations" from the menu instead.
 
 ### Custom OpenAI-compatible providers
 
@@ -638,3 +653,6 @@ Run `portalflow validate <file>` first to see detailed, field-level error output
 
 **Element not found, LLM fallback fails**
 Verify the `aiGuidance` field describes the target element precisely. Check the screenshot saved to `artifactDir` — it captures the page state at the moment of failure and is the fastest way to diagnose what the browser actually rendered.
+
+**"I want to start fresh"**
+Run `portalflow provider` and pick "Reset all configurations" from the menu, or run `portalflow provider reset --yes` non-interactively. This deletes `~/.portalflow/config.json`.
