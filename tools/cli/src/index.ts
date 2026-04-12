@@ -154,6 +154,32 @@ provider
     },
   );
 
+provider
+  .command('reset')
+  .description('Remove all providers and the active selection (destructive)')
+  .option('--yes', 'Skip confirmation prompt (required for non-interactive use)', false)
+  .action(async (options: { yes: boolean }) => {
+    const config = new ConfigService();
+    const cfg = await config.load();
+    const providerCount = Object.keys(cfg.providers ?? {}).length;
+
+    if (providerCount === 0 && !cfg.activeProvider) {
+      logger.info('Nothing to reset — no configuration exists yet');
+      return;
+    }
+
+    if (!options.yes) {
+      logger.error(
+        'Refusing to reset without confirmation. Pass --yes to proceed, or run `portalflow provider` for the interactive TUI with a safer confirmation flow.',
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    await config.reset();
+    logger.info({ providersRemoved: providerCount }, 'All configurations removed');
+  });
+
 program.parseAsync(process.argv).catch((err) => {
   logger.error({ err }, 'Unexpected error');
   process.exit(1);
