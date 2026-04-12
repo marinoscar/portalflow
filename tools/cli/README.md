@@ -9,6 +9,7 @@ PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser aut
 - [Update](#update)
 - [Uninstall](#uninstall)
 - [Quick Start](#quick-start)
+- [Interactive Provider Setup](#interactive-provider-setup)
 - [Commands](#commands)
 - [Configuration](#configuration)
 - [Environment Variables](#environment-variables)
@@ -107,6 +108,16 @@ rm -rf ~/.portalflow
 
 **1. Configure a provider**
 
+The easiest way is to launch the interactive setup:
+
+```bash
+portalflow provider
+```
+
+This opens a guided TUI that walks you through choosing a provider, entering your API key, and picking a model. See [Interactive Provider Setup](#interactive-provider-setup) for details.
+
+If you prefer scripting or CI, use the non-interactive subcommands:
+
 ```bash
 portalflow provider config anthropic --api-key sk-ant-... --model claude-sonnet-4-20250514
 portalflow provider set anthropic
@@ -133,6 +144,30 @@ portalflow run tools/cli/examples/demo-search.json --headless
 
 ---
 
+## Interactive Provider Setup
+
+Running `portalflow provider` with no subcommand launches a guided Terminal UI for managing LLM providers. It's the recommended way to configure the CLI for the first time.
+
+```bash
+portalflow provider
+```
+
+On start, the TUI shows your current status (active provider and model, or a prompt to configure one if none exist) and presents a menu:
+
+| Action | What it does |
+|---|---|
+| **Configure a provider** | Walks you through choosing a provider (Anthropic or OpenAI), entering an API key, picking a model (with smart defaults), and optionally a base URL for OpenAI-compatible endpoints. Offers to set it as the active provider if none is set yet. |
+| **Set active provider** | Shows configured providers and lets you pick which one to use. Disabled until at least two providers are configured. |
+| **List providers** | Displays all configured providers with their models, marking the active one. |
+| **Remove a provider** | Deletes a provider's stored credentials after confirmation. Also clears the active provider if it was the one removed. |
+| **Exit** | Leaves the TUI. |
+
+The menu loops until you choose Exit, so you can chain multiple actions in a single session. Press `Ctrl+C` at any prompt to cancel cleanly without saving changes.
+
+All non-interactive subcommands (`provider list`, `provider set`, `provider config`) still work as before and remain the recommended approach for scripting and CI.
+
+---
+
 ## Commands
 
 ### `portalflow run <file>`
@@ -154,6 +189,14 @@ Validate an automation JSON file against the schema. Prints structured errors on
 
 ```bash
 portalflow validate automation.json
+```
+
+### `portalflow provider`
+
+With no subcommand, launches the interactive provider setup TUI. See [Interactive Provider Setup](#interactive-provider-setup) for the full walkthrough.
+
+```bash
+portalflow provider
 ```
 
 ### `portalflow provider list`
@@ -511,7 +554,7 @@ tools/cli/
 ## Troubleshooting
 
 **"No LLM provider configured"**
-Run `portalflow provider config <name> --api-key <key>` then `portalflow provider set <name>`.
+Run `portalflow provider` to launch the interactive setup, or use `portalflow provider config <name> --api-key <key>` followed by `portalflow provider set <name>`.
 
 **"browserType.launch: Executable doesn't exist"**
 The Playwright Chromium binary is missing. Run:
