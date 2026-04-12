@@ -2,8 +2,10 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import type { ProviderKind } from '../llm/provider-kinds.js';
 
 export interface ProviderConfig {
+  kind?: ProviderKind;
   apiKey?: string;
   model?: string;
   baseUrl?: string;

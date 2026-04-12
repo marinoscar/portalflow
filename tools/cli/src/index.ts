@@ -4,6 +4,7 @@ import { readFile } from 'fs/promises';
 import pino from 'pino';
 import { AutomationSchema } from './schema/automation.schema.js';
 import { ConfigService } from './config/config.service.js';
+import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
 
 const logger = pino({ level: 'info' });
 const program = new Command();
@@ -95,8 +96,12 @@ provider
     } else {
       const active = cfg.activeProvider ?? '(none)';
       for (const name of providers) {
+        const prov = cfg.providers?.[name];
         const marker = name === active ? ' [active]' : '';
-        logger.info(`  ${name}${marker}`);
+        const kind = inferKind(name, prov?.kind);
+        const model = prov?.model ?? '(no model)';
+        const baseUrlPart = kind === 'openai-compatible' && prov?.baseUrl ? `   baseUrl: ${prov.baseUrl}` : '';
+        logger.info(`  ${name}${marker}   kind: ${kind}   model: ${model}${baseUrlPart}`);
       }
     }
   });
@@ -116,15 +121,38 @@ provider
   .option('--api-key <key>', 'API key for the provider')
   .option('--model <model>', 'Default model to use')
   .option('--base-url <url>', 'Base URL for the provider API')
-  .action(async (name: string, options: { apiKey?: string; model?: string; baseUrl?: string }) => {
-    const config = new ConfigService();
-    const providerConfig: Record<string, string> = {};
-    if (options.apiKey) providerConfig['apiKey'] = options.apiKey;
-    if (options.model) providerConfig['model'] = options.model;
-    if (options.baseUrl) providerConfig['baseUrl'] = options.baseUrl;
-    await config.setProviderConfig(name, providerConfig);
-    logger.info({ provider: name }, 'Provider configuration saved');
-  });
+  .option('--kind <kind>', 'Provider kind: anthropic or openai-compatible')
+  .action(
+    async (
+      name: string,
+      options: { apiKey?: string; model?: string; baseUrl?: string; kind?: string },
+    ) => {
+      const VALID_KINDS: ProviderKind[] = ['anthropic', 'openai-compatible'];
+      if (options.kind !== undefined && !VALID_KINDS.includes(options.kind as ProviderKind)) {
+        logger.error(
+          { kind: options.kind },
+          `Invalid --kind value. Must be one of: ${VALID_KINDS.join(', ')}`,
+        );
+        process.exit(1);
+      }
+
+      const config = new ConfigService();
+      const cfg = await config.load();
+      const existing = cfg.providers?.[name];
+
+      // Determine kind: explicit flag > infer from name/existing config
+      const resolvedKind: ProviderKind = options.kind
+        ? (options.kind as ProviderKind)
+        : inferKind(name, existing?.kind);
+
+      const providerConfig: Record<string, string> = { kind: resolvedKind };
+      if (options.apiKey) providerConfig['apiKey'] = options.apiKey;
+      if (options.model) providerConfig['model'] = options.model;
+      if (options.baseUrl) providerConfig['baseUrl'] = options.baseUrl;
+      await config.setProviderConfig(name, providerConfig);
+      logger.info({ provider: name, kind: resolvedKind }, 'Provider configuration saved');
+    },
+  );
 
 program.parseAsync(process.argv).catch((err) => {
   logger.error({ err }, 'Unexpected error');

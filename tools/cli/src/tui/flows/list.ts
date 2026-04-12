@@ -1,6 +1,7 @@
 import pc from 'picocolors';
 import type { ConfigService } from '../../config/config.service.js';
 import { providerDisplayName } from '../helpers.js';
+import { inferKind } from '../../llm/provider-kinds.js';
 import * as p from '@clack/prompts';
 
 export async function runListFlow(configService: ConfigService): Promise<void> {
@@ -21,10 +22,12 @@ export async function runListFlow(configService: ConfigService): Promise<void> {
     const displayName = providerDisplayName(name);
     const model = prov?.model ?? pc.dim('(no model)');
     const activeMarker = name === active ? pc.green(' [active]') : '';
+    const kind = inferKind(name, prov?.kind);
 
     lines.push(`${pc.bold(displayName)}${activeMarker}`);
+    lines.push(`  kind : ${pc.yellow(kind)}`);
     lines.push(`  model: ${pc.cyan(model)}`);
-    if (prov?.baseUrl) {
+    if (kind === 'openai-compatible' && prov?.baseUrl) {
       lines.push(`  url  : ${pc.dim(prov.baseUrl)}`);
     }
   }

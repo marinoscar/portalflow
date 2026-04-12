@@ -36,7 +36,7 @@ PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser aut
 - **Node.js 18+**
 - **npm**
 - **git**
-- An API key for [Anthropic](https://console.anthropic.com/) or [OpenAI](https://platform.openai.com/)
+- An API key for your chosen LLM provider (Anthropic, OpenAI, or any OpenAI-compatible endpoint)
 
 ---
 
@@ -156,9 +156,9 @@ On start, the TUI shows your current status (active provider and model, or a pro
 
 | Action | What it does |
 |---|---|
-| **Configure a provider** | Walks you through choosing a provider (Anthropic or OpenAI), entering an API key, picking a model (with smart defaults), and optionally a base URL for OpenAI-compatible endpoints. Offers to set it as the active provider if none is set yet. |
+| **Configure a provider** | Shows a preset picker with all built-in providers (Anthropic, OpenAI, Kimi, DeepSeek, Groq, Mistral, Together AI, OpenRouter, Ollama) plus a "Custom" option. Prompts for API key, model, and base URL (pre-filled from preset), then offers to set it as active. |
 | **Set active provider** | Shows configured providers and lets you pick which one to use. Disabled until at least two providers are configured. |
-| **List providers** | Displays all configured providers with their models, marking the active one. |
+| **List providers** | Displays all configured providers with their kind, model, and base URL (if applicable), marking the active one. |
 | **Remove a provider** | Deletes a provider's stored credentials after confirmation. Also clears the active provider if it was the one removed. |
 | **Exit** | Leaves the TUI. |
 
@@ -209,11 +209,11 @@ portalflow provider list
 
 ### `portalflow provider set <name>`
 
-Set the active LLM provider. Valid names: `anthropic`, `openai`.
+Set the active LLM provider by name.
 
 ```bash
 portalflow provider set anthropic
-portalflow provider set openai
+portalflow provider set kimi
 ```
 
 ### `portalflow provider config <name>`
@@ -223,6 +223,10 @@ Configure credentials and model for a provider. Settings are written to `~/.port
 ```bash
 portalflow provider config anthropic --api-key sk-ant-... --model claude-sonnet-4-20250514
 portalflow provider config openai --api-key sk-... --model gpt-4o
+portalflow provider config kimi --kind openai-compatible \
+  --api-key sk-... \
+  --model moonshot-v1-32k \
+  --base-url https://api.moonshot.cn/v1
 portalflow provider config openai --api-key sk-... --base-url https://my-proxy.example.com/v1
 ```
 
@@ -231,6 +235,56 @@ portalflow provider config openai --api-key sk-... --base-url https://my-proxy.e
 | `--api-key <key>` | Provider API key |
 | `--model <model>` | Model identifier |
 | `--base-url <url>` | Base URL for OpenAI-compatible endpoints |
+| `--kind <kind>` | Provider kind: `anthropic` or `openai-compatible` (inferred from name if omitted) |
+
+### Custom OpenAI-compatible providers
+
+Any OpenAI-compatible endpoint is supported. The built-in presets provide pre-filled base URLs and default models. You can also add a fully custom endpoint.
+
+#### Built-in presets
+
+| ID | Label | Default base URL | Default model |
+|---|---|---|---|
+| `anthropic` | Anthropic Claude | (native API) | `claude-sonnet-4-20250514` |
+| `openai` | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| `kimi` | Moonshot Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-32k` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| `mistral` | Mistral | `https://api.mistral.ai/v1` | `mistral-large-latest` |
+| `together` | Together AI | `https://api.together.xyz/v1` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `anthropic/claude-sonnet-4` |
+| `ollama` | Ollama (local) | `http://localhost:11434/v1` | `llama3.3` |
+
+#### Configure via TUI
+
+Run `portalflow provider` to open the interactive setup. The "Configure a provider" step presents all built-in presets (with pre-filled base URLs) and a "Custom OpenAI-compatible provider" option at the bottom.
+
+#### Configure non-interactively
+
+```bash
+# Use a built-in preset (kind inferred automatically)
+portalflow provider config kimi --api-key sk-... --model moonshot-v1-32k \
+  --base-url https://api.moonshot.cn/v1
+portalflow provider set kimi
+
+# Configure Groq
+portalflow provider config groq --api-key gsk_... \
+  --base-url https://api.groq.com/openai/v1 \
+  --model llama-3.3-70b-versatile
+portalflow provider set groq
+
+# Configure a fully custom proxy
+portalflow provider config my-proxy \
+  --kind openai-compatible \
+  --api-key sk-... \
+  --base-url https://my-proxy.example.com/v1 \
+  --model gpt-4o
+portalflow provider set my-proxy
+
+# Configure local Ollama (no API key needed)
+portalflow provider config ollama --base-url http://localhost:11434/v1 --model llama3.3
+portalflow provider set ollama
+```
 
 ---
 
@@ -240,20 +294,30 @@ Provider configuration is stored at `~/.portalflow/config.json`:
 
 ```json
 {
-  "activeProvider": "anthropic",
+  "activeProvider": "kimi",
   "providers": {
     "anthropic": {
+      "kind": "anthropic",
       "apiKey": "sk-ant-...",
       "model": "claude-sonnet-4-20250514"
     },
     "openai": {
+      "kind": "openai-compatible",
       "apiKey": "sk-...",
       "model": "gpt-4o",
       "baseUrl": "https://api.openai.com/v1"
+    },
+    "kimi": {
+      "kind": "openai-compatible",
+      "apiKey": "sk-...",
+      "model": "moonshot-v1-32k",
+      "baseUrl": "https://api.moonshot.cn/v1"
     }
   }
 }
 ```
+
+The `kind` field controls which API client is used: `anthropic` uses the native Anthropic Messages API; `openai-compatible` uses the OpenAI client with a custom `baseUrl`. Existing configs without a `kind` field are automatically upgraded on first use: `anthropic` maps to kind `anthropic`, everything else maps to `openai-compatible`.
 
 ---
 
@@ -263,9 +327,9 @@ Environment variables override the values in `~/.portalflow/config.json` at runt
 
 | Variable | Description |
 |---|---|
-| `PORTALFLOW_LLM_PROVIDER` | Override the active provider (`anthropic` or `openai`) |
-| `ANTHROPIC_API_KEY` | Fallback API key for Anthropic |
-| `OPENAI_API_KEY` | Fallback API key for OpenAI |
+| `PORTALFLOW_LLM_PROVIDER` | Override the active provider (must match a configured provider name) |
+| `ANTHROPIC_API_KEY` | Fallback API key for Anthropic when no config file entry exists |
+| `OPENAI_API_KEY` | Fallback API key for OpenAI when no config file entry exists |
 | `LOG_LEVEL` | Pino log level: `trace`, `debug`, `info`, `warn`, `error` (default: `info`) |
 | `PORTALFLOW_INSTALL_DIR` | Installer: override clone location (default: `~/.portalflow-cli`) |
 
@@ -554,7 +618,7 @@ tools/cli/
 ## Troubleshooting
 
 **"No LLM provider configured"**
-Run `portalflow provider` to launch the interactive setup, or use `portalflow provider config <name> --api-key <key>` followed by `portalflow provider set <name>`.
+Run `portalflow provider` to launch the interactive setup, or see `portalflow provider --help` for non-interactive configuration options.
 
 **"browserType.launch: Executable doesn't exist"**
 The Playwright Chromium binary is missing. Run:
