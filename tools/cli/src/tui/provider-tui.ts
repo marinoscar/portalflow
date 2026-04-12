@@ -6,8 +6,9 @@ import { runConfigureFlow } from './flows/configure.js';
 import { runSetActiveFlow } from './flows/set-active.js';
 import { runListFlow } from './flows/list.js';
 import { runRemoveFlow } from './flows/remove.js';
+import { runResetFlow } from './flows/reset.js';
 
-type MenuAction = 'configure' | 'set-active' | 'list' | 'remove' | 'exit';
+type MenuAction = 'configure' | 'set-active' | 'list' | 'remove' | 'reset' | 'exit';
 
 export async function runProviderTui(): Promise<void> {
   const configService = new ConfigService();
@@ -65,6 +66,11 @@ export async function runProviderTui(): Promise<void> {
           hint: hasNone ? 'none configured' : undefined,
         },
         {
+          value: 'reset' as MenuAction,
+          label: 'Reset all configurations',
+          hint: hasNone ? 'nothing to reset' : pc.yellow('deletes everything'),
+        },
+        {
           value: 'exit' as MenuAction,
           label: 'Exit',
         },
@@ -99,6 +105,14 @@ export async function runProviderTui(): Promise<void> {
 
       case 'remove':
         await runRemoveFlow(configService);
+        break;
+
+      case 'reset':
+        if (hasNone && !freshCfg.activeProvider) {
+          p.log.info('Nothing to reset — no configuration exists yet.');
+        } else {
+          await runResetFlow(configService);
+        }
         break;
 
       case 'exit':
