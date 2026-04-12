@@ -58,11 +58,16 @@ program
     }
   });
 
-// validate <file>
+// validate [file]
 program
-  .command('validate <file>')
-  .description('Validate an automation JSON file against the schema')
-  .action(async (file: string) => {
+  .command('validate [file]')
+  .description('Validate an automation JSON file against the schema (omit file to use interactive TUI)')
+  .action(async (file: string | undefined) => {
+    if (!file) {
+      const { runValidateFlow } = await import('./tui/flows/validate.js');
+      await runValidateFlow();
+      return;
+    }
     logger.info({ file }, 'Validating automation file');
     try {
       const raw = await readFile(file, 'utf-8');
