@@ -77,7 +77,11 @@ program
 // provider
 const provider = program
   .command('provider')
-  .description('Manage LLM provider configuration');
+  .description('Manage LLM provider configuration (interactive TUI when run without subcommand)')
+  .action(async () => {
+    const { runProviderTui } = await import('./tui/provider-tui.js');
+    await runProviderTui();
+  });
 
 provider
   .command('list')
