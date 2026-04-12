@@ -26,6 +26,15 @@ export function defaultModelFor(name: string): string {
   }
 }
 
+export function defaultBaseUrlFor(name: string): string {
+  switch (name) {
+    case 'openai':
+      return 'https://api.openai.com/v1';
+    default:
+      return '';
+  }
+}
+
 /**
  * Mask an API key for safe display.
  * Shows first 5 + last 4 chars with asterisks in the middle.
