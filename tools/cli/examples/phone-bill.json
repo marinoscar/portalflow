@@ -1,0 +1,152 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440002",
+  "name": "Retrieve Phone Bill PDF",
+  "version": "1.0.0",
+  "description": "Log into a carrier portal, handle OTP, and download the latest bill PDF",
+  "goal": "Retrieve the most recent phone bill PDF from the carrier website",
+  "inputs": [
+    {
+      "name": "username",
+      "type": "secret",
+      "required": true,
+      "source": "vaultcli",
+      "value": "carrier/phone-account",
+      "description": "Login username from vault"
+    },
+    {
+      "name": "password",
+      "type": "secret",
+      "required": true,
+      "source": "vaultcli",
+      "value": "carrier/phone-account",
+      "description": "Login password from vault"
+    }
+  ],
+  "steps": [
+    {
+      "id": "step-1",
+      "name": "Navigate to carrier login",
+      "type": "navigate",
+      "action": { "url": "https://example-carrier.com/login" },
+      "validation": { "type": "url_contains", "value": "login" },
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 15000
+    },
+    {
+      "id": "step-2",
+      "name": "Enter username",
+      "type": "interact",
+      "action": { "interaction": "type", "inputRef": "username" },
+      "selectors": { "primary": "#username", "fallbacks": ["input[name='username']", "input[type='email']"] },
+      "aiGuidance": "Find the username or email input field on the login form",
+      "onFailure": "abort",
+      "maxRetries": 3,
+      "timeout": 10000
+    },
+    {
+      "id": "step-3",
+      "name": "Enter password",
+      "type": "interact",
+      "action": { "interaction": "type", "inputRef": "password" },
+      "selectors": { "primary": "#password", "fallbacks": ["input[name='password']", "input[type='password']"] },
+      "aiGuidance": "Find the password input field",
+      "onFailure": "abort",
+      "maxRetries": 3,
+      "timeout": 10000
+    },
+    {
+      "id": "step-4",
+      "name": "Click sign in",
+      "type": "interact",
+      "action": { "interaction": "click" },
+      "selectors": { "primary": "button[type='submit']", "fallbacks": ["#login-button", ".btn-login"] },
+      "aiGuidance": "Click the sign in or login button",
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 10000
+    },
+    {
+      "id": "step-5",
+      "name": "Wait for OTP prompt",
+      "type": "wait",
+      "action": { "condition": "selector", "value": "#otp-input, input[name='otp']" },
+      "aiGuidance": "Wait for the OTP/verification code input to appear",
+      "onFailure": "abort",
+      "maxRetries": 0,
+      "timeout": 30000
+    },
+    {
+      "id": "step-6",
+      "name": "Retrieve OTP via smscli",
+      "type": "tool_call",
+      "action": {
+        "tool": "smscli",
+        "command": "get-otp",
+        "args": { "sender": "ExampleCarrier", "pattern": "\\d{6}" },
+        "outputName": "otpCode"
+      },
+      "onFailure": "abort",
+      "maxRetries": 1,
+      "timeout": 120000
+    },
+    {
+      "id": "step-7",
+      "name": "Enter OTP code",
+      "type": "interact",
+      "action": { "interaction": "type", "inputRef": "otpCode" },
+      "selectors": { "primary": "#otp-input", "fallbacks": ["input[name='otp']", "input[name='verificationCode']"] },
+      "aiGuidance": "Enter the verification code into the OTP field",
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 10000
+    },
+    {
+      "id": "step-8",
+      "name": "Submit OTP",
+      "type": "interact",
+      "action": { "interaction": "click" },
+      "selectors": { "primary": "button[type='submit']", "fallbacks": ["#verify-button", ".btn-verify"] },
+      "aiGuidance": "Click the verify or continue button to submit the OTP",
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 10000
+    },
+    {
+      "id": "step-9",
+      "name": "Navigate to billing",
+      "type": "navigate",
+      "action": { "url": "https://example-carrier.com/billing" },
+      "validation": { "type": "url_contains", "value": "billing" },
+      "onFailure": "retry",
+      "maxRetries": 2,
+      "timeout": 15000
+    },
+    {
+      "id": "step-10",
+      "name": "Download latest bill",
+      "description": "Find and click the download link for the most recent bill",
+      "type": "download",
+      "action": { "trigger": "click" },
+      "selectors": { "primary": "a.download-bill:first-of-type", "fallbacks": [".bill-list a[href*='pdf']:first-of-type"] },
+      "aiGuidance": "Find the download link or button for the most recent bill (usually the first one in the list, ordered by date)",
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 30000
+    }
+  ],
+  "tools": [
+    { "name": "smscli", "config": { "timeout": "120000" } },
+    { "name": "vaultcli" }
+  ],
+  "outputs": [
+    { "name": "billPdf", "type": "file", "description": "Downloaded phone bill PDF" }
+  ],
+  "settings": {
+    "headless": false,
+    "viewport": { "width": 1280, "height": 800 },
+    "defaultTimeout": 30000,
+    "screenshotOnFailure": true,
+    "artifactDir": "./artifacts"
+  }
+}
