@@ -12,7 +12,7 @@ const program = new Command();
 program
   .name('portalflow')
   .description('PortalFlow CLI — run and manage browser automations')
-  .version('1.1.1');
+  .version('1.1.2');
 
 // run <file>
 program
