@@ -1,6 +1,7 @@
 import { ConfigService } from '../config/config.service.js';
 import { AnthropicProvider } from './anthropic.provider.js';
 import { OpenAiProvider } from './openai.provider.js';
+import { inferKind } from './provider-kinds.js';
 import type {
   ActionDecision,
   ElementQuery,
@@ -10,7 +11,7 @@ import type {
   PageContext,
 } from './provider.interface.js';
 
-const ANTHROPIC_DEFAULT_MODEL = 'claude-3-5-sonnet-20241022';
+const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-20250514';
 const OPENAI_DEFAULT_MODEL = 'gpt-4o';
 
 export class LlmService {
@@ -26,8 +27,9 @@ export class LlmService {
 
     if (activeProviderName) {
       const providerCfg = cfg.providers?.[activeProviderName];
+      const kind = inferKind(activeProviderName, providerCfg?.kind);
 
-      if (activeProviderName === 'anthropic') {
+      if (kind === 'anthropic') {
         const apiKey =
           providerCfg?.apiKey ?? process.env['ANTHROPIC_API_KEY'];
         if (!apiKey) {
@@ -44,26 +46,20 @@ export class LlmService {
         return;
       }
 
-      if (activeProviderName === 'openai') {
-        const apiKey =
-          providerCfg?.apiKey ?? process.env['OPENAI_API_KEY'];
-        if (!apiKey) {
-          throw new Error(
-            'OpenAI API key not found. Set it via `portalflow provider config openai --api-key <key>` or the OPENAI_API_KEY environment variable.',
-          );
-        }
-        const llmConfig: LlmProviderConfig = {
-          apiKey,
-          model: providerCfg?.model ?? OPENAI_DEFAULT_MODEL,
-          baseUrl: providerCfg?.baseUrl,
-        };
-        this.provider = new OpenAiProvider(llmConfig);
-        return;
-      }
-
-      throw new Error(
-        `Unknown LLM provider "${activeProviderName}". Supported providers: anthropic, openai.`,
-      );
+      // kind === 'openai-compatible'
+      const apiKey =
+        providerCfg?.apiKey ??
+        (activeProviderName === 'openai' ? process.env['OPENAI_API_KEY'] : undefined);
+      const baseUrl =
+        providerCfg?.baseUrl ??
+        (activeProviderName === 'openai' ? 'https://api.openai.com/v1' : undefined);
+      const llmConfig: LlmProviderConfig = {
+        apiKey: apiKey ?? '',
+        model: providerCfg?.model ?? OPENAI_DEFAULT_MODEL,
+        baseUrl,
+      };
+      this.provider = new OpenAiProvider(llmConfig);
+      return;
     }
 
     // No active provider in config — fall back to env vars
@@ -84,7 +80,7 @@ export class LlmService {
     }
 
     throw new Error(
-      'No LLM provider configured. Run `portalflow provider config <anthropic|openai> --api-key <key>` or set ANTHROPIC_API_KEY / OPENAI_API_KEY.',
+      "No LLM provider configured. Run 'portalflow provider' to launch the interactive setup, or see 'portalflow provider --help' for non-interactive configuration.",
     );
   }
 
