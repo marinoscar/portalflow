@@ -64,6 +64,10 @@ export function topLevelHelpText(): string {
       'portalflow validate --help',
       'portalflow provider --help',
       'portalflow settings --help',
+      '',
+      'Full automation JSON reference:',
+      '  https://github.com/marinoscar/portalflow/blob/main/docs/AUTOMATION-JSON-SPEC.md',
+      '  (or docs/AUTOMATION-JSON-SPEC.md in your local checkout)',
     ]),
   ]);
 }
@@ -106,6 +110,9 @@ export function runHelpText(): string {
       '  when the browser context closes cleanly.',
       `- First run after install bootstraps ${PORTALFLOW_HOME}/ and seeds example`,
       `  automations into ${PORTALFLOW_HOME}/automations/.`,
+      '- The loop step supports bounded iteration over items (with AI-guided',
+      '  discovery) or bounded repetition with an exit condition. See the full',
+      '  spec at docs/AUTOMATION-JSON-SPEC.md#14-the-loop-step-in-depth for details.',
     ]),
     section('Exit codes:', [
       '0   All steps completed successfully',

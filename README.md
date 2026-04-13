@@ -98,3 +98,9 @@ The [`@portalflow/cli`](tools/cli/README.md) package is the primary runtime. It 
 ### Chrome extension — record, edit, and export automations
 
 The [`@portalflow/extension`](tools/extension/README.md) package is a Manifest V3 Chrome extension that records browser workflows, lets you edit them in a side panel (with optional LLM assist), and exports them as JSON files that the CLI can run unmodified. Auto-detects password and OTP fields and wires them to `vaultcli` and `smscli` respectively. See [`tools/extension/README.md`](tools/extension/README.md) for installation and usage.
+
+### Automation JSON format reference
+
+The [`docs/AUTOMATION-JSON-SPEC.md`](docs/AUTOMATION-JSON-SPEC.md) file is the authoritative reference for the automation JSON format that both the CLI and the Chrome extension use. It documents every field, every step type, every action shape, selector cascades, template syntax, failure policies, the `loop` step in depth, common patterns, three full worked examples, and a schema reference appendix.
+
+Both the CLI and the extension produce and consume files that conform to this spec via the shared `@portalflow/schema` workspace package.

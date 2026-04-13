@@ -420,6 +420,8 @@ portalflow run automation.json
 
 The schema package is a workspace dependency: `@portalflow/schema` is declared in the extension's `package.json` with `"*"` as the version specifier, resolved by the npm workspace to `tools/schema`.
 
+For the complete schema reference — every field, every step type, every enum value, every worked example — see [`docs/AUTOMATION-JSON-SPEC.md`](../../docs/AUTOMATION-JSON-SPEC.md) in the repo root. The extension produces files that conform to the same spec the CLI consumes; the two share `@portalflow/schema` as the single source of truth.
+
 ---
 
 ## Known Limitations
