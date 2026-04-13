@@ -48,23 +48,109 @@ A Manifest V3 Chrome extension that records browser workflows, lets you edit the
 
 ## Installation
 
-### Option A: One-liner (recommended for personal use)
+`install.sh` automates everything except the one-time Chrome "Load unpacked" click. It is the recommended install path for personal use. Options B and C are for CI, packaging, or contributors who already have a repo checkout.
+
+### Option A: Automated install script
+
+#### Quick install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash
 ```
 
-The script clones the repo to `~/.portalflow-recorder`, installs dependencies, builds the extension into a stable path, and prints the exact Chrome "Load unpacked" instructions with the directory path. It also installs a `portalflow-recorder-update` command into `~/.local/bin` so you can update with a single command.
+The script is idempotent — running it again updates the extension in place.
 
-Re-run the same one-liner (or `portalflow-recorder-update`) to pull the latest code and rebuild. After an update, just click the reload icon on the extension card in `chrome://extensions` — the dist path stays the same.
+#### What the script does
 
-To uninstall:
+The script runs five steps in sequence:
+
+| Step | What happens |
+|------|-------------|
+| 1. Prerequisites | Checks for `git`, `node` (18+), and `npm`. Probes for Chrome/Chromium and warns if not found (non-fatal). |
+| 2. Source code | If run via curl, clones the repo to `~/.portalflow-recorder` (or pulls if it already exists). If run from inside an existing checkout, uses that checkout and runs `git pull` instead. |
+| 3. Dependencies | Runs `npm install --workspace=tools/extension` from the repo root (monorepo-aware). |
+| 4. Build | Runs `npm run build` inside `tools/extension/`, producing the `dist/` directory. Verifies that `dist/manifest.json` exists before continuing. |
+| 5. Update helper | Writes a small updater wrapper to `tools/extension/.portalflow-recorder-update.sh` and symlinks it to `~/.local/bin/portalflow-recorder-update`. Creates `~/.local/bin` if it does not exist. |
+
+After all five steps, the script prints the path to `dist/` and tries to copy it to the clipboard.
+
+#### Files the installer creates
+
+| Path | Purpose |
+|------|---------|
+| `~/.portalflow-recorder/` | Full shallow clone of the repository |
+| `~/.portalflow-recorder/tools/extension/dist/` | Built extension — this is the "Load unpacked" target in Chrome |
+| `~/.portalflow-recorder/tools/extension/.portalflow-installed` | Marker file used to distinguish first install from subsequent updates |
+| `~/.portalflow-recorder/tools/extension/.portalflow-recorder-update.sh` | Updater wrapper that re-runs `install.sh` |
+| `~/.local/bin/portalflow-recorder-update` | Symlink to the updater wrapper |
+
+When `PORTALFLOW_EXTENSION_DIR` is set, the first path changes accordingly and all paths under it follow.
+
+#### Run the script locally (no curl)
+
+If you already have a clone of the repository, run the script directly from inside it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash -s -- --uninstall
+cd /path/to/portalflow
+./tools/extension/install.sh
 ```
 
-Override the install location by setting `PORTALFLOW_EXTENSION_DIR` before running the script.
+The script detects that it is running from inside a git checkout (by checking for `package.json` and `manifest.json` next to itself) and uses that checkout instead of cloning to `~/.portalflow-recorder`. It still runs `git pull` to bring the checkout up to date and installs the `portalflow-recorder-update` symlink pointing back into your local clone.
+
+#### Updating
+
+Run either of these:
+
+```bash
+portalflow-recorder-update
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash
+```
+
+Both pull the latest code and rebuild. The `dist/` path does not change between updates, so after rebuilding you only need to click the reload icon on the extension card in `chrome://extensions` — no new "Load unpacked" step required.
+
+#### Uninstalling
+
+Remove the update helper symlink and get instructions for removing the extension from Chrome:
+
+```bash
+# If installed via curl
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash -s -- --uninstall
+
+# If running from a local checkout
+./tools/extension/install.sh --uninstall
+```
+
+The uninstaller removes `~/.local/bin/portalflow-recorder-update` and prints the steps to remove the extension from Chrome. The install directory (`~/.portalflow-recorder`) is left in place. Remove it manually when you no longer need it:
+
+```bash
+rm -rf ~/.portalflow-recorder
+```
+
+#### Customization via environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORTALFLOW_EXTENSION_DIR` | `~/.portalflow-recorder` | Override where the repo is cloned and the extension is built |
+
+Example — install to a non-default location:
+
+```bash
+PORTALFLOW_EXTENSION_DIR=~/dev/portalflow-ext \
+  curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash
+```
+
+#### PATH setup for the update helper
+
+The installer places `portalflow-recorder-update` in `~/.local/bin`. If that directory is not already on your `PATH`, the script warns you. Add this line to `~/.bashrc`, `~/.zshrc`, or your shell's equivalent:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Reload your shell (`source ~/.bashrc` or open a new terminal) before running `portalflow-recorder-update` for the first time.
 
 ### Option B: Build from source manually
 
@@ -405,6 +491,63 @@ tools/extension/
 ---
 
 ## Troubleshooting
+
+**The installer says git / Node.js / npm is not installed**
+
+- Install git: `sudo apt install git` (Debian/Ubuntu) or the equivalent for your distribution
+- Install Node.js 18 or later via the NodeSource setup script:
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt install -y nodejs
+  ```
+  Or use a version manager such as `nvm`. npm ships with Node.js and does not need a separate install.
+- After installing, open a new terminal so the updated `PATH` takes effect, then re-run the installer.
+
+**`portalflow-recorder-update` command not found after install**
+
+`~/.local/bin` is not on your `PATH`. Add this line to your shell profile (`~/.bashrc`, `~/.zshrc`, or equivalent):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then reload (`source ~/.bashrc`) or open a new terminal.
+
+**The installer fails during `npm install`**
+
+- Workspace audit warnings printed during install are normal and non-fatal; the build can still succeed.
+- If the install fails with a lock-file conflict or corrupted cache, clear the npm cache and retry:
+  ```bash
+  npm cache clean --force
+  curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash
+  ```
+- As a last resort, remove the install directory and start fresh:
+  ```bash
+  rm -rf ~/.portalflow-recorder
+  curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash
+  ```
+
+**I want to reinstall the extension from scratch**
+
+1. Run the uninstaller to remove the update helper symlink:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash -s -- --uninstall
+   ```
+2. Remove the install directory:
+   ```bash
+   rm -rf ~/.portalflow-recorder
+   ```
+3. Re-run the installer:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash
+   ```
+
+**The installer does not copy the dist path to my clipboard**
+
+The script tries clipboard utilities in this order: `xclip`, `xsel`, `pbcopy`, `wl-copy`. If none are found, it skips the copy silently. Options:
+
+- Install one of the utilities (Linux example): `sudo apt install xclip`
+- Or copy the path directly from the terminal output — the script always prints the `dist/` path before attempting the clipboard copy.
 
 **The toolbar icon does not appear after loading**
 
