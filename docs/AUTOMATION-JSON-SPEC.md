@@ -279,6 +279,23 @@ Once an input is resolved, it becomes a context variable. Steps can reference it
 | `vaultcli` | The key path passed to `vaultcli get-secret`   |
 | `cli_arg`  | The CLI argument name; falls back to env var   |
 
+### Resolving inputs at runtime
+
+When an automation runs, every declared input is resolved before the first step executes. The resolution order depends on the `source`:
+
+| Source | Resolution order |
+|---|---|
+| `literal` | CLI override (`--input name=value`) → `input.value` |
+| `env` | CLI override → `process.env[input.value]` → `process.env[input.name]` |
+| `vaultcli` | CLI override → `vaultcli get <input.value>` |
+| `cli_arg` | CLI override → `input.value` (as default) |
+
+In every case, a CLI override via `--input <name>=<value>` or `--inputs-json '{...}'` takes precedence. This is useful for testing, scripting, and overriding defaults without editing the JSON.
+
+If an input is marked `required: true` and cannot be resolved, the run aborts with a descriptive error.
+
+When running the CLI interactively via `portalflow run` (without a file argument), the TUI detects missing required inputs and prompts for each, using the input's `value` field as the pre-filled default (for `cli_arg` sources).
+
 ---
 
 ## 5. Steps — Common Fields
@@ -1268,6 +1285,20 @@ A type step uses `inputRef` (not a template) to type the password:
   "timeout": 10000
 }
 ```
+
+### Default values in templates
+
+Template expressions support an inline default value via colon syntax: `{{name:default}}`. When the variable `name` is unset, the default value is used instead. If the variable is set to any value (including the empty string), the default is ignored.
+
+The default value is everything after the **first** colon in the expression. This means defaults may contain colons themselves:
+
+- `{{billCount:3}}` — yields `3` when `billCount` is unset
+- `{{url:http://localhost:3000/api}}` — yields the URL when `url` is unset
+- `{{greeting:}}` — yields the empty string when `greeting` is unset
+
+The default is NOT whitespace-trimmed, so `{{name: hello }}` yields `" hello "` (with the leading and trailing spaces preserved).
+
+This is useful in combination with the `cli_arg` input source: an automation can reference `{{billCount:3}}` in its steps, allowing runs with or without `--input billCount=N` to succeed while preserving sane defaults.
 
 ---
 
