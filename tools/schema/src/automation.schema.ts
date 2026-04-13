@@ -59,6 +59,31 @@ export const DownloadActionSchema = z.object({
   expectedFilename: z.string().optional(),
 });
 
+export const LoopItemsSchema = z.object({
+  description: z.string(),
+  selectorPattern: z.string().optional(),
+  itemVar: z.string().default('item'),
+  order: z.enum(['first', 'last', 'newest', 'oldest', 'natural']).default('natural'),
+});
+
+export const LoopExitWhenSchema = z.object({
+  check: z.enum([
+    'element_exists',
+    'element_missing',
+    'url_matches',
+    'text_contains',
+    'variable_equals',
+  ]),
+  value: z.string(),
+});
+
+export const LoopActionSchema = z.object({
+  maxIterations: z.union([z.number().int().min(1), z.string()]),
+  items: LoopItemsSchema.optional(),
+  exitWhen: LoopExitWhenSchema.optional(),
+  indexVar: z.string().default('loop_index'),
+});
+
 // ---------------------------------------------------------------------------
 // Step
 // ---------------------------------------------------------------------------
@@ -73,27 +98,38 @@ export const ValidationSchema = z.object({
   value: z.string(),
 });
 
-export const StepSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().optional(),
-  type: z.enum(['navigate', 'interact', 'wait', 'extract', 'tool_call', 'condition', 'download']),
-  action: z.union([
-    NavigateActionSchema,
-    InteractActionSchema,
-    WaitActionSchema,
-    ExtractActionSchema,
-    ToolCallActionSchema,
-    ConditionActionSchema,
-    DownloadActionSchema,
-  ]),
-  aiGuidance: z.string().optional(),
-  selectors: SelectorsSchema.optional(),
-  validation: ValidationSchema.optional(),
-  onFailure: z.enum(['retry', 'skip', 'abort']).default('abort'),
-  maxRetries: z.number().int().min(0).default(3),
-  timeout: z.number().int().min(0).default(30000),
-});
+// Forward-declare the Step type so TypeScript can resolve the z.lazy() recursion.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Step = any;
+
+export const StepSchema: z.ZodType<Step> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    type: z.enum([
+      'navigate', 'interact', 'wait', 'extract',
+      'tool_call', 'condition', 'download', 'loop',
+    ]),
+    action: z.union([
+      NavigateActionSchema,
+      InteractActionSchema,
+      WaitActionSchema,
+      ExtractActionSchema,
+      ToolCallActionSchema,
+      ConditionActionSchema,
+      DownloadActionSchema,
+      LoopActionSchema,
+    ]),
+    aiGuidance: z.string().optional(),
+    selectors: SelectorsSchema.optional(),
+    validation: ValidationSchema.optional(),
+    onFailure: z.enum(['retry', 'skip', 'abort']).default('abort'),
+    maxRetries: z.number().int().min(0).default(3),
+    timeout: z.number().int().min(0).default(30000),
+    substeps: z.array(StepSchema).optional(),
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Tool reference

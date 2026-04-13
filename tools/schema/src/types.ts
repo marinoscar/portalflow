@@ -6,6 +6,9 @@ import {
   ExtractActionSchema,
   InputSchema,
   InteractActionSchema,
+  LoopActionSchema,
+  LoopExitWhenSchema,
+  LoopItemsSchema,
   NavigateActionSchema,
   OutputSchema,
   SelectorsSchema,
@@ -34,6 +37,9 @@ export type ExtractAction = z.infer<typeof ExtractActionSchema>;
 export type ToolCallAction = z.infer<typeof ToolCallActionSchema>;
 export type ConditionAction = z.infer<typeof ConditionActionSchema>;
 export type DownloadAction = z.infer<typeof DownloadActionSchema>;
+export type LoopAction = z.infer<typeof LoopActionSchema>;
+export type LoopItems = z.infer<typeof LoopItemsSchema>;
+export type LoopExitWhen = z.infer<typeof LoopExitWhenSchema>;
 
 export type Action =
   | NavigateAction
@@ -42,7 +48,8 @@ export type Action =
   | ExtractAction
   | ToolCallAction
   | ConditionAction
-  | DownloadAction;
+  | DownloadAction
+  | LoopAction;
 
 // Convenience enums derived from the schema literals
 export type InputType = Input['type'];
