@@ -766,6 +766,25 @@ export class StepExecutor {
     if (reasoning !== undefined) {
       this.context.setVariable(`${step.id}_reasoning`, reasoning);
     }
+
+    // Branch into a named function based on the boolean result. No args are
+    // passed — the function reads shared context. Schema refinement has
+    // already validated that the referenced function exists.
+    if (result && action.thenCall) {
+      const fnName = this.context.resolveTemplate(action.thenCall);
+      this.context.logger.info(
+        { stepId: step.id, thenCall: fnName },
+        `Condition true — invoking thenCall function "${fnName}"`,
+      );
+      await this.invokeFunction(fnName, {}, step.id);
+    } else if (!result && action.elseCall) {
+      const fnName = this.context.resolveTemplate(action.elseCall);
+      this.context.logger.info(
+        { stepId: step.id, elseCall: fnName },
+        `Condition false — invoking elseCall function "${fnName}"`,
+      );
+      await this.invokeFunction(fnName, {}, step.id);
+    }
   }
 
   // ---------------------------------------------------------------------------
