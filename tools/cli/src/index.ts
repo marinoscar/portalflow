@@ -21,6 +21,18 @@ program
   .description('PortalFlow CLI — run and manage browser automations')
   .version('1.1.3')
   .action(async () => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    const bootstrap = await bootstrapDefaults();
+    if (bootstrap.createdDirs.length > 0 || bootstrap.seededFiles.length > 0) {
+      logger.info(
+        {
+          portalflowHome: bootstrap.portalflowHome,
+          createdDirs: bootstrap.createdDirs,
+          seededFiles: bootstrap.seededFiles,
+        },
+        'First-run setup: created default directories and seeded example automations',
+      );
+    }
     const { runMainTui } = await import('./tui/main-tui.js');
     await runMainTui();
   });
@@ -47,6 +59,18 @@ program
       automationsDir?: string;
     },
   ) => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    const bootstrap = await bootstrapDefaults();
+    if (bootstrap.createdDirs.length > 0 || bootstrap.seededFiles.length > 0) {
+      logger.info(
+        {
+          portalflowHome: bootstrap.portalflowHome,
+          createdDirs: bootstrap.createdDirs,
+          seededFiles: bootstrap.seededFiles,
+        },
+        'First-run setup: created default directories and seeded example automations',
+      );
+    }
     if (!file) {
       const { runRunFlow } = await import('./tui/flows/run.js');
       await runRunFlow();
@@ -97,6 +121,18 @@ program
   .command('validate [file]')
   .description('Validate an automation JSON file against the schema (omit file to use interactive TUI)')
   .action(async (file: string | undefined) => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    const bootstrap = await bootstrapDefaults();
+    if (bootstrap.createdDirs.length > 0 || bootstrap.seededFiles.length > 0) {
+      logger.info(
+        {
+          portalflowHome: bootstrap.portalflowHome,
+          createdDirs: bootstrap.createdDirs,
+          seededFiles: bootstrap.seededFiles,
+        },
+        'First-run setup: created default directories and seeded example automations',
+      );
+    }
     if (!file) {
       const { runValidateFlow } = await import('./tui/flows/validate.js');
       await runValidateFlow();
@@ -229,6 +265,18 @@ const settings = program
   .command('settings')
   .description('Manage storage paths and video recording (interactive TUI when run without subcommand)')
   .action(async () => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    const bootstrap = await bootstrapDefaults();
+    if (bootstrap.createdDirs.length > 0 || bootstrap.seededFiles.length > 0) {
+      logger.info(
+        {
+          portalflowHome: bootstrap.portalflowHome,
+          createdDirs: bootstrap.createdDirs,
+          seededFiles: bootstrap.seededFiles,
+        },
+        'First-run setup: created default directories and seeded example automations',
+      );
+    }
     const { runSettingsTui } = await import('./tui/settings-tui.js');
     await runSettingsTui();
   });
@@ -237,6 +285,8 @@ settings
   .command('list')
   .description('Show current storage paths and video recording settings')
   .action(async () => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    await bootstrapDefaults();
     const config = new ConfigService();
     const cfg = await config.load();
     const paths = resolvePaths(cfg);
@@ -258,6 +308,8 @@ settings
     videos?: string;
     downloads?: string;
   }) => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    await bootstrapDefaults();
     const config = new ConfigService();
     const update: Partial<PathsConfig> = {};
     if (opts.automations) update.automations = opts.automations;
@@ -287,6 +339,8 @@ settings
     width?: number;
     height?: number;
   }) => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    await bootstrapDefaults();
     const config = new ConfigService();
     const update: Partial<VideoConfig> = {};
     if (opts.enable) update.enabled = true;
