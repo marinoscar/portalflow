@@ -10,7 +10,12 @@ export type Message =
   | { type: 'RESUME_RECORDING' }
   | { type: 'CLEAR_SESSION' }
   | { type: 'RECORDED_EVENT'; event: RawEvent }
-  | { type: 'SESSION_UPDATED'; session: RecordingSession | null };
+  | { type: 'SESSION_UPDATED'; session: RecordingSession | null }
+  | { type: 'LLM_IMPROVE_SELECTOR'; stepDescription: string; currentSelector: string }
+  | { type: 'LLM_GENERATE_GUIDANCE'; stepDescription: string }
+  | { type: 'LLM_POLISH_METADATA'; steps: Array<{ name: string; type: string; description?: string }> }
+  | { type: 'LLM_RESULT'; ok: true; data: unknown }
+  | { type: 'LLM_ERROR'; ok: false; error: string };
 
 export function sendMessage<T = unknown>(msg: Message): Promise<T> {
   return new Promise((resolve, reject) => {

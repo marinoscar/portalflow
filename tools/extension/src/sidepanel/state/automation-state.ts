@@ -14,7 +14,8 @@ export type AutomationAction =
   | { type: 'UPDATE_STEP'; index: number; changes: Partial<Step> }
   | { type: 'MOVE_STEP'; from: number; to: number }
   | { type: 'REMOVE_STEP'; index: number }
-  | { type: 'ADD_STEP'; step: Step };
+  | { type: 'ADD_STEP'; step: Step }
+  | { type: 'INSERT_STEP'; index: number; step: Step };
 
 export function automationReducer(
   state: AutomationState,
@@ -78,6 +79,15 @@ export function automationReducer(
     case 'ADD_STEP': {
       if (!a) return state;
       const steps = [...a.steps, action.step];
+      steps.forEach((s, idx) => {
+        s.id = `step-${idx + 1}`;
+      });
+      return { automation: { ...a, steps } };
+    }
+    case 'INSERT_STEP': {
+      if (!a) return state;
+      const steps = [...a.steps];
+      steps.splice(action.index, 0, action.step);
       steps.forEach((s, idx) => {
         s.id = `step-${idx + 1}`;
       });

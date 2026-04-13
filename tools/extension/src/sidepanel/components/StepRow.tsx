@@ -7,6 +7,9 @@ import type {
   ToolCallAction,
   Selectors,
 } from '@portalflow/schema';
+import { useHasActiveProvider, useLlmCall } from '../hooks/useLlm';
+import { VaultModal } from './VaultModal';
+import { SmsOtpModal } from './SmsOtpModal';
 
 interface Props {
   step: Step;
@@ -16,9 +19,21 @@ interface Props {
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  onConvertToVault?: (vaultKey: string, inputName: string) => void;
+  onInsertOtpBefore?: (sender: string, pattern: string) => void;
 }
 
-export function StepRow({ step, index, total, onUpdate, onRemove, onMoveUp, onMoveDown }: Props) {
+export function StepRow({
+  step,
+  index,
+  total,
+  onUpdate,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+  onConvertToVault,
+  onInsertOtpBefore,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -61,7 +76,14 @@ export function StepRow({ step, index, total, onUpdate, onRemove, onMoveUp, onMo
           </button>
         </div>
       </div>
-      {expanded && <StepEditor step={step} onUpdate={onUpdate} />}
+      {expanded && (
+        <StepEditor
+          step={step}
+          onUpdate={onUpdate}
+          onConvertToVault={onConvertToVault}
+          onInsertOtpBefore={onInsertOtpBefore}
+        />
+      )}
     </div>
   );
 }
@@ -69,12 +91,68 @@ export function StepRow({ step, index, total, onUpdate, onRemove, onMoveUp, onMo
 function StepEditor({
   step,
   onUpdate,
+  onConvertToVault,
+  onInsertOtpBefore,
 }: {
   step: Step;
   onUpdate: (changes: Partial<Step>) => void;
+  onConvertToVault?: (vaultKey: string, inputName: string) => void;
+  onInsertOtpBefore?: (sender: string, pattern: string) => void;
 }) {
+  const [showVaultModal, setShowVaultModal] = useState(false);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+
+  // Determine if conversion banners should show
+  const isTypeInteractWithoutRef =
+    step.type === 'interact' &&
+    (step.action as InteractAction).interaction === 'type' &&
+    !(step.action as InteractAction).inputRef;
+
   return (
     <div className="step-editor">
+      {isTypeInteractWithoutRef && (
+        <div className="conversion-banners">
+          {onConvertToVault && (
+            <button
+              className="banner banner-warning"
+              onClick={() => setShowVaultModal(true)}
+              type="button"
+            >
+              <strong>Contains a secret?</strong> Convert to a vaultcli credential &rarr;
+            </button>
+          )}
+          {onInsertOtpBefore && (
+            <button
+              className="banner banner-info"
+              onClick={() => setShowOtpModal(true)}
+              type="button"
+            >
+              <strong>Entering an OTP?</strong> Insert an smscli retrieval step &rarr;
+            </button>
+          )}
+        </div>
+      )}
+
+      {showVaultModal && onConvertToVault && (
+        <VaultModal
+          onConfirm={({ vaultKey, inputName }) => {
+            onConvertToVault(vaultKey, inputName);
+            setShowVaultModal(false);
+          }}
+          onCancel={() => setShowVaultModal(false)}
+        />
+      )}
+
+      {showOtpModal && onInsertOtpBefore && (
+        <SmsOtpModal
+          onConfirm={({ sender, pattern }) => {
+            onInsertOtpBefore(sender, pattern);
+            setShowOtpModal(false);
+          }}
+          onCancel={() => setShowOtpModal(false)}
+        />
+      )}
+
       {step.type === 'navigate' && (
         <NavigateEditor action={step.action as NavigateAction} onUpdate={onUpdate} />
       )}
@@ -130,7 +208,9 @@ function InteractEditor({
         <select
           value={action.interaction}
           onChange={(e) =>
-            onUpdate({ action: { ...action, interaction: e.target.value as InteractAction['interaction'] } })
+            onUpdate({
+              action: { ...action, interaction: e.target.value as InteractAction['interaction'] },
+            })
           }
         >
           {(['click', 'type', 'select', 'check', 'uncheck', 'hover', 'focus'] as const).map(
@@ -182,7 +262,9 @@ function WaitEditor({
         <select
           value={action.condition}
           onChange={(e) =>
-            onUpdate({ action: { ...action, condition: e.target.value as WaitAction['condition'] } })
+            onUpdate({
+              action: { ...action, condition: e.target.value as WaitAction['condition'] },
+            })
           }
         >
           {(['selector', 'navigation', 'delay', 'network_idle'] as const).map((c) => (
@@ -257,6 +339,9 @@ function SelectorsEditor({
   step: Step;
   onUpdate: (changes: Partial<Step>) => void;
 }) {
+  const hasProvider = useHasActiveProvider();
+  const { call, loading } = useLlmCall();
+
   if (
     step.type === 'navigate' ||
     step.type === 'wait' ||
@@ -268,10 +353,49 @@ function SelectorsEditor({
 
   const selectors: Selectors = step.selectors ?? { primary: '' };
 
+  const handleImproveSelector = async () => {
+    const result = await call<{ primary: string; fallbacks?: string[] }>({
+      type: 'LLM_IMPROVE_SELECTOR',
+      stepDescription: step.name + (step.description ? ` — ${step.description}` : ''),
+      currentSelector: selectors.primary,
+    });
+    if (result && result.primary) {
+      onUpdate({
+        selectors: {
+          primary: result.primary,
+          fallbacks: result.fallbacks ?? [],
+        },
+      });
+    }
+  };
+
+  const handleGenerateGuidance = async () => {
+    const result = await call<string>({
+      type: 'LLM_GENERATE_GUIDANCE',
+      stepDescription: step.name + (step.description ? ` — ${step.description}` : ''),
+    });
+    if (result) onUpdate({ aiGuidance: result });
+  };
+
   return (
     <>
       <label className="field">
-        <span>Primary selector</span>
+        <span>
+          Primary selector
+          <button
+            type="button"
+            className="btn-inline-llm"
+            onClick={handleImproveSelector}
+            disabled={!hasProvider || loading}
+            title={
+              !hasProvider
+                ? 'Configure an LLM provider in settings'
+                : 'Suggest a more stable selector'
+            }
+          >
+            {loading ? '...' : 'Improve with LLM'}
+          </button>
+        </span>
         <input
           type="text"
           value={selectors.primary}
@@ -283,7 +407,22 @@ function SelectorsEditor({
         />
       </label>
       <label className="field">
-        <span>AI guidance</span>
+        <span>
+          AI guidance
+          <button
+            type="button"
+            className="btn-inline-llm"
+            onClick={handleGenerateGuidance}
+            disabled={!hasProvider || loading}
+            title={
+              !hasProvider
+                ? 'Configure an LLM provider in settings'
+                : 'Generate a natural-language hint'
+            }
+          >
+            {loading ? '...' : 'Generate with LLM'}
+          </button>
+        </span>
         <textarea
           value={step.aiGuidance ?? ''}
           onChange={(e) => onUpdate({ aiGuidance: e.target.value })}

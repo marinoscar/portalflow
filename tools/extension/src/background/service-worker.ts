@@ -1,6 +1,10 @@
 import { loadSession, saveSession, updateSession } from '../storage/session.storage';
 import type { Message } from '../shared/messaging';
 import type { NavigateEvent, RawEvent, RecordingSession } from '../shared/types';
+import { LlmService } from '../llm/llm.service';
+import { PROMPTS } from '../llm/prompts';
+
+const llmService = new LlmService();
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[PortalFlow] Extension installed');
@@ -145,6 +149,52 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
         sendResponse({ ok: true });
         return;
       }
+      case 'LLM_IMPROVE_SELECTOR': {
+        try {
+          const result = await llmService.complete({
+            system: PROMPTS.improveSelector.system,
+            user: `Step: ${msg.stepDescription}\nCurrent selector: ${msg.currentSelector}`,
+          });
+          const parsed = tryParseJson(result.text);
+          sendResponse({
+            type: 'LLM_RESULT',
+            ok: true,
+            data: parsed ?? { primary: msg.currentSelector, fallbacks: [] },
+          });
+        } catch (err) {
+          sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });
+        }
+        return;
+      }
+      case 'LLM_GENERATE_GUIDANCE': {
+        try {
+          const result = await llmService.complete({
+            system: PROMPTS.generateGuidance.system,
+            user: msg.stepDescription,
+          });
+          sendResponse({ type: 'LLM_RESULT', ok: true, data: result.text.trim() });
+        } catch (err) {
+          sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });
+        }
+        return;
+      }
+      case 'LLM_POLISH_METADATA': {
+        try {
+          const stepSummary = msg.steps
+            .map((s, i) => `${i + 1}. [${s.type}] ${s.name}`)
+            .join('\n');
+          const result = await llmService.complete({
+            system: PROMPTS.polishMetadata.system,
+            user: `Steps:\n${stepSummary}`,
+            maxTokens: 512,
+          });
+          const parsed = tryParseJson(result.text);
+          sendResponse({ type: 'LLM_RESULT', ok: true, data: parsed });
+        } catch (err) {
+          sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });
+        }
+        return;
+      }
     }
   })().catch((err) => {
     console.error('[PortalFlow] Message handler error', err);
@@ -180,5 +230,27 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
     ts: Date.now(),
   });
 });
+
+function tryParseJson(text: string): unknown {
+  // Strip markdown code fences if present
+  const cleaned = text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Try to extract a JSON object from the text
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
 
 export {};

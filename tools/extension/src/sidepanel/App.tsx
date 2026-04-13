@@ -205,6 +205,62 @@ export function App() {
                     beginEdit();
                     dispatch({ type: 'MOVE_STEP', from: idx, to: idx + 1 });
                   }}
+                  onConvertToVault={(vaultKey, inputName) => {
+                    beginEdit();
+                    const existing = automation.inputs.find((i) => i.name === inputName);
+                    if (!existing) {
+                      dispatch({
+                        type: 'ADD_INPUT',
+                        input: {
+                          name: inputName,
+                          type: 'secret',
+                          required: true,
+                          source: 'vaultcli',
+                          value: vaultKey,
+                          description: 'Retrieved from vaultcli',
+                        },
+                      });
+                    }
+                    dispatch({
+                      type: 'UPDATE_STEP',
+                      index: idx,
+                      changes: {
+                        action: {
+                          interaction: 'type',
+                          inputRef: inputName,
+                        } as Step['action'],
+                      },
+                    });
+                  }}
+                  onInsertOtpBefore={(sender, pattern) => {
+                    beginEdit();
+                    const newToolStep: Step = {
+                      id: `step-${idx + 1}`,
+                      name: 'Retrieve OTP via smscli',
+                      type: 'tool_call',
+                      action: {
+                        tool: 'smscli',
+                        command: 'get-otp',
+                        args: { sender, pattern },
+                        outputName: 'otpCode',
+                      },
+                      onFailure: 'abort',
+                      maxRetries: 1,
+                      timeout: 120000,
+                    };
+                    dispatch({
+                      type: 'INSERT_STEP',
+                      index: idx,
+                      step: newToolStep,
+                    });
+                    dispatch({
+                      type: 'UPDATE_STEP',
+                      index: idx + 1,
+                      changes: {
+                        action: { interaction: 'type', inputRef: 'otpCode' } as Step['action'],
+                      },
+                    });
+                  }}
                 />
               ))}
             </section>
