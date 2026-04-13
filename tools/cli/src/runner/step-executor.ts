@@ -521,7 +521,14 @@ export class StepExecutor {
       'Executing tool call',
     );
 
-    const result = await tool.execute(action.command, action.args ?? {});
+    // Resolve template variables in tool call arguments
+    const resolvedArgs = action.args
+      ? Object.fromEntries(
+          Object.entries(action.args).map(([k, v]) => [k, this.context.resolveTemplate(v)]),
+        )
+      : {};
+
+    const result = await tool.execute(action.command, resolvedArgs);
 
     if (!result.success) {
       throw new Error(
@@ -545,30 +552,31 @@ export class StepExecutor {
 
   private async executeCondition(step: Step): Promise<void> {
     const action = step.action as ConditionAction;
+    const condValue = this.context.resolveTemplate(action.value);
     let result = false;
 
     switch (action.check) {
       case 'element_exists': {
-        result = await this.pageService.elementExists(action.value);
+        result = await this.pageService.elementExists(condValue);
         break;
       }
 
       case 'url_matches': {
         const currentUrl = await this.pageService.getUrl();
-        result = currentUrl.includes(action.value);
+        result = currentUrl.includes(condValue);
         break;
       }
 
       case 'text_contains': {
         // Check full page text for the value
         const html = await this.pageService.getHtml();
-        result = html.includes(action.value);
+        result = html.includes(condValue);
         break;
       }
 
       case 'variable_equals': {
         // action.value format: "varName=expectedValue"
-        const eqIdx = action.value.indexOf('=');
+        const eqIdx = condValue.indexOf('=');
         if (eqIdx === -1) {
           this.context.logger.warn(
             { stepId: step.id },
@@ -576,8 +584,8 @@ export class StepExecutor {
           );
           break;
         }
-        const varName = action.value.slice(0, eqIdx);
-        const expected = action.value.slice(eqIdx + 1);
+        const varName = condValue.slice(0, eqIdx);
+        const expected = condValue.slice(eqIdx + 1);
         result = this.context.getVariable(varName) === expected;
         break;
       }
