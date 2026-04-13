@@ -333,3 +333,358 @@ describe('Condition step schema', () => {
     }
   });
 });
+
+describe('Functions and call step schema', () => {
+  const baseAutomation = (overrides: Record<string, unknown> = {}) => ({
+    ...BASE_AUTOMATION,
+    steps: [],
+    ...overrides,
+  });
+
+  it('should validate functions-demo.json example when present', async () => {
+    const filePath = join(examplesDir, 'functions-demo.json');
+    let raw: string;
+    try {
+      raw = await readFile(filePath, 'utf-8');
+    } catch {
+      return;
+    }
+    const result = AutomationSchema.safeParse(JSON.parse(raw));
+    if (!result.success) {
+      console.error(JSON.stringify(result.error.flatten(), null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate an automation with a function and a top-level call step', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'login',
+          parameters: [{ name: 'user', required: true }],
+          steps: [
+            {
+              id: 'login-1',
+              name: 'Type username',
+              type: 'interact',
+              action: { interaction: 'type', value: '{{user}}' },
+              selectors: { primary: '#username' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        {
+          id: 'call-login',
+          name: 'Call login',
+          type: 'call',
+          action: { function: 'login', args: { user: 'alice' } },
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate a call step inside a loop substep referencing a function', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'downloadBill',
+          parameters: [{ name: 'billRow', required: true }],
+          steps: [
+            {
+              id: 'dl-1',
+              name: 'Click row',
+              type: 'interact',
+              action: { interaction: 'click' },
+              selectors: { primary: '{{billRow}}' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        {
+          id: 'loop-1',
+          name: 'Loop',
+          type: 'loop',
+          action: { maxIterations: 3 },
+          substeps: [
+            {
+              id: 'call-1',
+              name: 'Download one',
+              type: 'call',
+              action: {
+                function: 'downloadBill',
+                args: { billRow: '{{item}}' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate a function calling another function (composition)', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'inner',
+          steps: [
+            {
+              id: 'inner-1',
+              name: 'Click',
+              type: 'interact',
+              action: { interaction: 'click' },
+              selectors: { primary: '#x' },
+            },
+          ],
+        },
+        {
+          name: 'outer',
+          steps: [
+            {
+              id: 'outer-1',
+              name: 'Delegate',
+              type: 'call',
+              action: { function: 'inner' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        {
+          id: 'root',
+          name: 'Call outer',
+          type: 'call',
+          action: { function: 'outer' },
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate a condition action with thenCall and elseCall', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'handleCaptcha',
+          steps: [
+            {
+              id: 'hc-1',
+              name: 'Wait',
+              type: 'wait',
+              action: { condition: 'delay', value: '1000' },
+            },
+          ],
+        },
+        {
+          name: 'continueFlow',
+          steps: [
+            {
+              id: 'cf-1',
+              name: 'Click next',
+              type: 'interact',
+              action: { interaction: 'click' },
+              selectors: { primary: '#next' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        {
+          id: 'cond',
+          name: 'Check captcha',
+          type: 'condition',
+          action: {
+            ai: 'Is a CAPTCHA visible on the page?',
+            thenCall: 'handleCaptcha',
+            elseCall: 'continueFlow',
+          },
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject duplicate function names', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'dup',
+          steps: [
+            {
+              id: 'a',
+              name: 'A',
+              type: 'interact',
+              action: { interaction: 'click' },
+              selectors: { primary: '#a' },
+            },
+          ],
+        },
+        {
+          name: 'dup',
+          steps: [
+            {
+              id: 'b',
+              name: 'B',
+              type: 'interact',
+              action: { interaction: 'click' },
+              selectors: { primary: '#b' },
+            },
+          ],
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const msgs = result.error.issues.map((i) => i.message);
+      expect(msgs.some((m) => /Duplicate function name/.test(m))).toBe(true);
+    }
+  });
+
+  it('should reject a call step referencing an undefined function', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'realFn',
+          steps: [
+            {
+              id: 'r',
+              name: 'R',
+              type: 'wait',
+              action: { condition: 'delay', value: '100' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        {
+          id: 'bad-call',
+          name: 'Call wrong name',
+          type: 'call',
+          action: { function: 'wrongName' },
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const msgs = result.error.issues.map((i) => i.message);
+      expect(msgs.some((m) => /unknown function "wrongName"/.test(m))).toBe(true);
+    }
+  });
+
+  it('should reject a condition thenCall referencing an undefined function', () => {
+    const automation = baseAutomation({
+      steps: [
+        {
+          id: 'cond',
+          name: 'Check',
+          type: 'condition',
+          action: {
+            check: 'element_exists',
+            value: '#x',
+            thenCall: 'doesNotExist',
+          },
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const msgs = result.error.issues.map((i) => i.message);
+      expect(msgs.some((m) => /thenCall references unknown function "doesNotExist"/.test(m))).toBe(true);
+    }
+  });
+
+  it('should validate a function with no parameters', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'ping',
+          steps: [
+            {
+              id: 'p',
+              name: 'P',
+              type: 'wait',
+              action: { condition: 'delay', value: '50' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        { id: 'c', name: 'C', type: 'call', action: { function: 'ping' } },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate a function with a default parameter and required:false', () => {
+    const automation = baseAutomation({
+      functions: [
+        {
+          name: 'greet',
+          parameters: [
+            { name: 'name', required: false, default: 'world' },
+          ],
+          steps: [
+            {
+              id: 'g',
+              name: 'Greet {{name}}',
+              type: 'wait',
+              action: { condition: 'delay', value: '10' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        { id: 'c', name: 'Call', type: 'call', action: { function: 'greet' } },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const fn = result.data.functions?.[0];
+      expect(fn?.parameters?.[0].required).toBe(false);
+      expect(fn?.parameters?.[0].default).toBe('world');
+    }
+  });
+
+  it('should validate parameter arg values supplied via templates', () => {
+    const automation = baseAutomation({
+      inputs: [{ name: 'target', type: 'string', required: true, source: 'literal', value: '#x' }],
+      functions: [
+        {
+          name: 'tap',
+          parameters: [{ name: 'selector', required: true }],
+          steps: [
+            {
+              id: 't',
+              name: 'Tap',
+              type: 'interact',
+              action: { interaction: 'click' },
+              selectors: { primary: '{{selector}}' },
+            },
+          ],
+        },
+      ],
+      steps: [
+        {
+          id: 'c',
+          name: 'Call tap',
+          type: 'call',
+          action: { function: 'tap', args: { selector: '{{target}}' } },
+        },
+      ],
+    });
+    const result = AutomationSchema.safeParse(automation);
+    expect(result.success).toBe(true);
+  });
+});
