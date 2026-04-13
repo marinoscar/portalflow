@@ -125,6 +125,10 @@ export class StepExecutor {
       case 'loop':
         await this.executeLoop(step);
         break;
+      case 'call':
+        throw new Error(
+          `Step "${step.id}": call step type is declared but the runtime dispatcher is not yet implemented.`,
+        );
       default: {
         const exhaustive: never = step.type;
         throw new Error(`Unknown step type: ${String(exhaustive)}`);

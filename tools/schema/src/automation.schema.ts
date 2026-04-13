@@ -109,6 +109,14 @@ export const LoopActionSchema = z.object({
   indexVar: z.string().default('loop_index'),
 });
 
+// A call to a named function defined in the top-level `functions` array.
+// `args` values may contain template expressions; they are resolved at call
+// time and assigned to the function's declared parameters.
+export const CallActionSchema = z.object({
+  function: z.string().min(1),
+  args: z.record(z.string()).optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Step
 // ---------------------------------------------------------------------------
@@ -132,13 +140,14 @@ type ToolCallActionOutput = z.output<typeof ToolCallActionSchema>;
 type ConditionActionOutput = z.output<typeof ConditionActionSchema>;
 type DownloadActionOutput = z.output<typeof DownloadActionSchema>;
 type LoopActionOutput = z.output<typeof LoopActionSchema>;
+type CallActionOutput = z.output<typeof CallActionSchema>;
 
 // Forward-declare the Step interface so TypeScript can resolve z.lazy() recursion.
 export interface Step {
   id: string;
   name: string;
   description?: string;
-  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop';
+  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
   action: NavigateActionOutput
     | InteractActionOutput
     | WaitActionOutput
@@ -146,7 +155,8 @@ export interface Step {
     | ToolCallActionOutput
     | ConditionActionOutput
     | DownloadActionOutput
-    | LoopActionOutput;
+    | LoopActionOutput
+    | CallActionOutput;
   aiGuidance?: string;
   selectors?: z.output<typeof SelectorsSchema>;
   validation?: z.output<typeof ValidationSchema>;
@@ -168,7 +178,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
     description: z.string().optional(),
     type: z.enum([
       'navigate', 'interact', 'wait', 'extract',
-      'tool_call', 'condition', 'download', 'loop',
+      'tool_call', 'condition', 'download', 'loop', 'call',
     ]),
     action: z.union([
       NavigateActionSchema,
@@ -179,6 +189,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
       ConditionActionSchema,
       DownloadActionSchema,
       LoopActionSchema,
+      CallActionSchema,
     ]),
     aiGuidance: z.string().optional(),
     selectors: SelectorsSchema.optional(),
@@ -189,6 +200,28 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
     substeps: z.array(StepSchema).optional(),
   }),
 );
+
+// ---------------------------------------------------------------------------
+// Functions (reusable step blocks)
+// ---------------------------------------------------------------------------
+
+// A function parameter declaration. Similar to a top-level InputSchema but
+// simpler — parameters come from the caller's `args` map, not from env/vault.
+export const FunctionParameterSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  default: z.string().optional(),
+  required: z.boolean().default(true),
+});
+
+// A named, reusable block of steps. `steps` reuses the recursive StepSchema,
+// so function bodies can contain loops, conditions, nested call steps, etc.
+export const FunctionDefinitionSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  parameters: z.array(FunctionParameterSchema).optional(),
+  steps: z.array(StepSchema),
+});
 
 // ---------------------------------------------------------------------------
 // Tool reference
@@ -248,6 +281,7 @@ export const AutomationSchema = z.object({
   goal: z.string(),
   inputs: z.array(InputSchema),
   steps: z.array(StepSchema),
+  functions: z.array(FunctionDefinitionSchema).optional(),
   tools: z.array(ToolRefSchema).optional(),
   outputs: z.array(OutputSchema).optional(),
   settings: SettingsSchema.optional(),
