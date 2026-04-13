@@ -1,9 +1,14 @@
+import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
 import type { Download, Page } from 'playwright';
 
 const DEFAULT_TIMEOUT = 30_000;
 
 export class PageService {
-  constructor(private readonly getPage: () => Page) {}
+  constructor(
+    private readonly getPage: () => Page,
+    private readonly getDownloadDir?: () => string,
+  ) {}
 
   async navigate(url: string): Promise<void> {
     try {
@@ -176,6 +181,21 @@ export class PageService {
       ]);
     } catch (err) {
       throw new Error(`waitForDownload() failed to capture download event: ${String(err)}`);
+    }
+
+    // If a download directory is configured, save the file there using the
+    // suggested filename. Otherwise fall back to the Playwright default temp path.
+    if (this.getDownloadDir) {
+      try {
+        const downloadDir = this.getDownloadDir();
+        mkdirSync(downloadDir, { recursive: true });
+        const suggested = download.suggestedFilename();
+        const destPath = join(downloadDir, suggested);
+        await download.saveAs(destPath);
+        return destPath;
+      } catch (err) {
+        throw new Error(`waitForDownload() could not save download to configured dir: ${String(err)}`);
+      }
     }
 
     try {

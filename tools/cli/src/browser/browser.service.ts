@@ -6,6 +6,14 @@ export interface BrowserOptions {
   headless?: boolean;
   viewport?: { width: number; height: number };
   userAgent?: string;
+  // Separate directories for each artifact type
+  screenshotDir: string;
+  videoDir: string;
+  downloadDir: string;
+  // Video recording
+  recordVideo?: boolean;
+  videoSize?: { width: number; height: number };
+  // Legacy (kept for backward compat, falls back to screenshotDir)
   artifactDir?: string;
 }
 
@@ -13,18 +21,26 @@ export class BrowserService {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private artifactDir: string = '.';
+  private screenshotDir: string = '.';
+  private videoDir: string = '.';
+  private downloadDir: string = '.';
+  private videoEnabled: boolean = false;
 
   async launch(options: BrowserOptions): Promise<void> {
     const { chromium } = await import('playwright');
 
-    this.artifactDir = options.artifactDir ?? '.';
+    this.screenshotDir = options.screenshotDir ?? options.artifactDir ?? '.';
+    this.videoDir = options.videoDir ?? '.';
+    this.downloadDir = options.downloadDir ?? '.';
+    this.videoEnabled = options.recordVideo ?? false;
 
-    // Ensure artifact directory exists
-    try {
-      mkdirSync(this.artifactDir, { recursive: true });
-    } catch {
-      // Directory already exists or cannot be created — continue
+    // Ensure all artifact directories exist
+    for (const dir of [this.screenshotDir, this.videoDir, this.downloadDir]) {
+      try {
+        mkdirSync(dir, { recursive: true });
+      } catch {
+        // Directory already exists or cannot be created — continue
+      }
     }
 
     this.browser = await chromium.launch({
@@ -35,6 +51,7 @@ export class BrowserService {
       acceptDownloads: boolean;
       viewport?: { width: number; height: number };
       userAgent?: string;
+      recordVideo?: { dir: string; size?: { width: number; height: number } };
     } = {
       acceptDownloads: true,
     };
@@ -45,6 +62,13 @@ export class BrowserService {
 
     if (options.userAgent) {
       contextOptions.userAgent = options.userAgent;
+    }
+
+    if (this.videoEnabled) {
+      contextOptions.recordVideo = {
+        dir: this.videoDir,
+        size: options.videoSize ?? { width: 1280, height: 720 },
+      };
     }
 
     this.context = await this.browser.newContext(contextOptions);
@@ -60,15 +84,35 @@ export class BrowserService {
     return this.page;
   }
 
+  getDownloadDir(): string {
+    return this.downloadDir;
+  }
+
   async screenshot(name: string): Promise<string> {
     const page = this.getPage();
     const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filePath = join(this.artifactDir, `${sanitized}.png`);
+    const filePath = join(this.screenshotDir, `${sanitized}.png`);
     await page.screenshot({ path: filePath, fullPage: false });
     return filePath;
   }
 
-  async close(): Promise<void> {
+  async close(): Promise<{ videoPaths: string[] }> {
+    const videoPaths: string[] = [];
+
+    // Collect video path BEFORE closing context — the path is known up front
+    // even though the file is only written after context.close()
+    if (this.videoEnabled && this.page && !this.page.isClosed()) {
+      try {
+        const video = this.page.video();
+        if (video) {
+          const videoPath = await video.path();
+          if (videoPath) videoPaths.push(videoPath);
+        }
+      } catch {
+        // Non-fatal — continue with close
+      }
+    }
+
     try {
       if (this.page && !this.page.isClosed()) {
         await this.page.close();
@@ -92,5 +136,7 @@ export class BrowserService {
     this.page = null;
     this.context = null;
     this.browser = null;
+
+    return { videoPaths };
   }
 }
