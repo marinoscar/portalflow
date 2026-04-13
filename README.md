@@ -93,7 +93,7 @@ PortalFlow is an AI-powered platform for human-like browser automation. It is in
 
 ### CLI — run and manage automations
 
-The `portalflow` CLI is the primary runtime. It reads automation JSON files, executes each step in a real browser session, handles credential retrieval via `vaultcli`, fetches OTP codes via `smscli`, and reports results. See `tools/cli/` for build and usage instructions.
+The [`@portalflow/cli`](tools/cli/README.md) package is the primary runtime. It reads automation JSON files, executes each step in a real Chrome browser via Playwright, handles credential retrieval through `vaultcli`, fetches OTP codes through `smscli`, and reports structured results. Also ships with interactive TUIs for every command, 9 built-in LLM presets (Anthropic, OpenAI, Kimi, DeepSeek, Groq, Mistral, Together AI, OpenRouter, Ollama, plus custom endpoints), configurable storage paths, and optional video recording. See [`tools/cli/README.md`](tools/cli/README.md) for installation and usage.
 
 ### Chrome extension — record, edit, and export automations
 
