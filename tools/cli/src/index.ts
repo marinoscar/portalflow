@@ -6,6 +6,7 @@ import { AutomationSchema } from './schema/automation.schema.js';
 import { ConfigService, type PathsConfig, type VideoConfig } from './config/config.service.js';
 import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
 import { resolvePaths, resolveVideo } from './runner/paths.js';
+import * as helpText from './help-text.js';
 
 function parseIntArg(v: string): number {
   const n = parseInt(v, 10);
@@ -17,9 +18,19 @@ const logger = pino({ level: 'info' });
 const program = new Command();
 
 program
+  .configureHelp({
+    sortSubcommands: false,
+    sortOptions: false,
+    showGlobalOptions: true,
+  })
+  .showSuggestionAfterError(true)
+  .showHelpAfterError('(use --help for more information)');
+
+program
   .name('portalflow')
   .description('PortalFlow CLI — run and manage browser automations')
   .version('1.1.4')
+  .addHelpText('after', helpText.topLevelHelpText())
   .action(async () => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
     const bootstrap = await bootstrapDefaults();
@@ -48,6 +59,7 @@ program
   .option('--screenshot-dir <dir>', 'Directory to store screenshots')
   .option('--download-dir <dir>', 'Directory to store downloaded files')
   .option('--automations-dir <dir>', 'Directory to look for automation files')
+  .addHelpText('after', helpText.runHelpText())
   .action(async (
     file: string | undefined,
     options: {
@@ -120,6 +132,7 @@ program
 program
   .command('validate [file]')
   .description('Validate an automation JSON file against the schema (omit file to use interactive TUI)')
+  .addHelpText('after', helpText.validateHelpText())
   .action(async (file: string | undefined) => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
     const bootstrap = await bootstrapDefaults();
@@ -159,6 +172,7 @@ program
 const provider = program
   .command('provider')
   .description('Manage LLM provider configuration (interactive TUI when run without subcommand)')
+  .addHelpText('after', helpText.providerHelpText())
   .action(async () => {
     const { runProviderTui } = await import('./tui/provider-tui.js');
     await runProviderTui();
@@ -167,6 +181,7 @@ const provider = program
 provider
   .command('list')
   .description('List configured LLM providers')
+  .addHelpText('after', helpText.providerListHelpText())
   .action(async () => {
     const config = new ConfigService();
     const cfg = await config.load();
@@ -189,6 +204,7 @@ provider
 provider
   .command('set <name>')
   .description('Set the active LLM provider')
+  .addHelpText('after', helpText.providerSetHelpText())
   .action(async (name: string) => {
     const config = new ConfigService();
     await config.setActiveProvider(name);
@@ -202,6 +218,7 @@ provider
   .option('--model <model>', 'Default model to use')
   .option('--base-url <url>', 'Base URL for the provider API')
   .option('--kind <kind>', 'Provider kind: anthropic or openai-compatible')
+  .addHelpText('after', helpText.providerConfigHelpText())
   .action(
     async (
       name: string,
@@ -238,6 +255,7 @@ provider
   .command('reset')
   .description('Remove all providers and the active selection (destructive)')
   .option('--yes', 'Skip confirmation prompt (required for non-interactive use)', false)
+  .addHelpText('after', helpText.providerResetHelpText())
   .action(async (options: { yes: boolean }) => {
     const config = new ConfigService();
     const cfg = await config.load();
@@ -264,6 +282,7 @@ provider
 const settings = program
   .command('settings')
   .description('Manage storage paths and video recording (interactive TUI when run without subcommand)')
+  .addHelpText('after', helpText.settingsHelpText())
   .action(async () => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
     const bootstrap = await bootstrapDefaults();
@@ -284,6 +303,7 @@ const settings = program
 settings
   .command('list')
   .description('Show current storage paths and video recording settings')
+  .addHelpText('after', helpText.settingsListHelpText())
   .action(async () => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
     await bootstrapDefaults();
@@ -302,6 +322,7 @@ settings
   .option('--screenshots <dir>', 'Directory to store screenshots')
   .option('--videos <dir>', 'Directory to store recorded videos')
   .option('--downloads <dir>', 'Directory to store downloaded files')
+  .addHelpText('after', helpText.settingsPathsHelpText())
   .action(async (opts: {
     automations?: string;
     screenshots?: string;
@@ -333,6 +354,7 @@ settings
   .option('--disable', 'Disable video recording by default')
   .option('--width <n>', 'Video width in pixels', parseIntArg)
   .option('--height <n>', 'Video height in pixels', parseIntArg)
+  .addHelpText('after', helpText.settingsVideoHelpText())
   .action(async (opts: {
     enable?: boolean;
     disable?: boolean;

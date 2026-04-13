@@ -109,6 +109,21 @@ rm -rf ~/.portalflow
 
 ## Quick Start
 
+### Getting detailed help
+
+Every command has extended help with examples, exit codes, precedence rules,
+and related commands. Run `--help` on any command to see it:
+
+```bash
+portalflow --help                        # Top-level overview
+portalflow run --help                    # Run command details + examples
+portalflow provider config --help        # Provider configuration examples for all presets
+portalflow settings paths --help         # Path configuration examples
+```
+
+The help output is designed to be self-contained — an AI agent or new
+developer should be able to use any command without reading external docs.
+
 ### Interactive mode (easiest)
 
 Run `portalflow` with no arguments to launch a guided menu:
