@@ -18,7 +18,7 @@
   "dependencies": {
     "@emotion/react": "^11.x",
     "@emotion/styled": "^11.x",
-    "@mui/icons-material": "^5.x",
+    "@mui/icons-material": "^9.x",
     "@mui/material": "^5.x",
     "react": "^18.x",
     "react-dom": "^18.x",
