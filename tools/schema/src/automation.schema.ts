@@ -46,12 +46,37 @@ export const ToolCallActionSchema = z.object({
   outputName: z.string().optional(),
 });
 
-export const ConditionActionSchema = z.object({
-  check: z.enum(['element_exists', 'url_matches', 'text_contains', 'variable_equals']),
-  value: z.string(),
-  thenStep: z.string().optional(),
-  elseStep: z.string().optional(),
-});
+export const ConditionActionSchema = z
+  .object({
+    check: z
+      .enum(['element_exists', 'url_matches', 'text_contains', 'variable_equals'])
+      .optional(),
+    value: z.string().optional(),
+    ai: z.string().optional(),
+    thenStep: z.string().optional(),
+    elseStep: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      const hasCheck = data.check !== undefined;
+      const hasAi = data.ai !== undefined && data.ai.trim().length > 0;
+      return (hasCheck || hasAi) && !(hasCheck && hasAi);
+    },
+    {
+      message:
+        'condition action must have exactly one of "check" (deterministic) or "ai" (plain-English question), not both',
+    },
+  )
+  .refine(
+    (data) => {
+      if (data.check === undefined) return true;
+      return data.value !== undefined;
+    },
+    {
+      message: 'condition action with a deterministic "check" requires a "value"',
+      path: ['value'],
+    },
+  );
 
 export const DownloadActionSchema = z.object({
   trigger: z.enum(['click', 'navigation']),
