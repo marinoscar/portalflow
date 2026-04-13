@@ -23,6 +23,8 @@ export interface RunOptions {
   screenshotDir?: string;
   downloadDir?: string;
   automationsDir?: string;
+  /** CLI-supplied input overrides. Any key present here wins over the input's source. */
+  inputs?: Map<string, string>;
 }
 
 export class AutomationRunner {
@@ -81,12 +83,20 @@ export class AutomationRunner {
     for (const input of automation.inputs) {
       let resolved: string | undefined;
 
+      // CLI override wins over every source — check it first.
+      const cliOverride = options?.inputs?.get(input.name);
+
       switch (input.source ?? 'literal') {
         case 'env':
-          resolved = input.value ? process.env[input.value] : process.env[input.name];
+          resolved = cliOverride ?? (input.value ? process.env[input.value] : process.env[input.name]);
           break;
 
         case 'vaultcli': {
+          if (cliOverride !== undefined) {
+            logger.info({ input: input.name }, 'vaultcli source: using CLI override instead of vault lookup');
+            resolved = cliOverride;
+            break;
+          }
           if (!input.value) {
             logger.warn({ input: input.name }, 'vaultcli source requires a value (secret key); skipping');
             break;
@@ -108,16 +118,24 @@ export class AutomationRunner {
         }
 
         case 'literal':
-          resolved = input.value;
+          resolved = cliOverride ?? input.value;
           break;
 
-        case 'cli_arg':
-          // Future: read from commander args; for now fall back to env
-          resolved = input.value ? process.env[input.value] : process.env[input.name];
-          if (!resolved) {
-            logger.debug({ input: input.name }, 'cli_arg source: no value found in env (future feature)');
+        case 'cli_arg': {
+          // 1. CLI flag override wins first
+          if (cliOverride !== undefined) {
+            resolved = cliOverride;
+            break;
           }
+          // 2. Fall back to the input's declared default (value field)
+          if (input.value !== undefined && input.value !== '') {
+            resolved = input.value;
+            logger.debug({ input: input.name }, 'cli_arg source: using default from input.value');
+            break;
+          }
+          // 3. Nothing — leaves resolved as undefined, will error below if required
           break;
+        }
       }
 
       if (resolved !== undefined) {
@@ -125,7 +143,8 @@ export class AutomationRunner {
         logger.debug({ input: input.name }, 'Input resolved and stored as context variable');
       } else if (input.required) {
         throw new Error(
-          `Required input "${input.name}" could not be resolved (source: ${input.source ?? 'literal'}).`,
+          `Required input "${input.name}" could not be resolved (source: ${input.source ?? 'literal'}).\n` +
+            `Provide a value via --input ${input.name}=<value> or run interactively with 'portalflow run' (no file argument) to be prompted.`,
         );
       } else {
         logger.debug({ input: input.name }, 'Optional input not resolved; skipping');
