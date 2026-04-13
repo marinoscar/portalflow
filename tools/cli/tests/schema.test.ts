@@ -253,3 +253,83 @@ describe('Loop step schema', () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe('Condition step schema', () => {
+  const makeStep = (action: unknown) => ({
+    id: 'step-cond',
+    name: 'Check',
+    type: 'condition',
+    action,
+  });
+
+  it('should validate a deterministic check with a value', () => {
+    const step = makeStep({ check: 'element_exists', value: '#otp-input' });
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate a deterministic check with thenStep and elseStep', () => {
+    const step = makeStep({
+      check: 'url_matches',
+      value: '/billing',
+      thenStep: 'step-billing',
+      elseStep: 'step-retry',
+    });
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate an ai condition with a plain-English question', () => {
+    const step = makeStep({
+      ai: 'Is the user currently logged in and viewing the billing history page?',
+    });
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate an ai condition with thenStep and elseStep', () => {
+    const step = makeStep({
+      ai: 'Does the page show a CAPTCHA challenge?',
+      thenStep: 'step-handle-captcha',
+      elseStep: 'step-continue',
+    });
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject a condition step with both check and ai set', () => {
+    const step = makeStep({
+      check: 'element_exists',
+      value: '#error',
+      ai: 'Is there an error banner visible?',
+    });
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const msg = JSON.stringify(result.error.issues);
+      expect(msg).toMatch(/exactly one of/i);
+    }
+  });
+
+  it('should reject a condition step with neither check nor ai', () => {
+    const step = makeStep({});
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject an ai condition with an empty/whitespace question', () => {
+    const step = makeStep({ ai: '   ' });
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject a deterministic check without a value', () => {
+    const step = makeStep({ check: 'element_exists' });
+    const result = StepSchema.safeParse(step);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message);
+      expect(messages.some((m) => /requires a "value"/.test(m))).toBe(true);
+    }
+  });
+});
