@@ -2,6 +2,8 @@ import OpenAI from 'openai';
 import pino from 'pino';
 import type {
   ActionDecision,
+  ConditionEvaluation,
+  ConditionQuery,
   ElementQuery,
   ElementResult,
   ItemsQuery,
@@ -105,6 +107,35 @@ ${truncateHtml(pageContext.html)}`;
       return parseJsonResponse<ItemsResult>(text, 'findItems');
     } catch (err) {
       logger.error({ err, description }, 'OpenAiProvider.findItems failed');
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  async evaluateCondition(query: ConditionQuery): Promise<ConditionEvaluation> {
+    const { question, pageContext } = query;
+
+    const userMessage = `Page URL: ${pageContext.url}
+Page title: ${pageContext.title}
+HTML:
+${truncateHtml(pageContext.html)}
+
+Question: ${question}`;
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        max_tokens: 1024,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPTS.conditionEvaluator },
+          { role: 'user', content: userMessage },
+        ],
+      });
+
+      const text = response.choices[0]?.message?.content ?? '';
+      return parseJsonResponse<ConditionEvaluation>(text, 'evaluateCondition');
+    } catch (err) {
+      logger.error({ err, question }, 'OpenAiProvider.evaluateCondition failed');
       throw err instanceof Error ? err : new Error(String(err));
     }
   }

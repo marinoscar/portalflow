@@ -37,11 +37,23 @@ export interface ItemsResult {
   explanation: string;
 }
 
+export interface ConditionQuery {
+  question: string;       // plain-English question about the page
+  pageContext: PageContext;
+}
+
+export interface ConditionEvaluation {
+  result: boolean;        // true/false answer
+  confidence: number;     // 0-1 confidence in the answer
+  reasoning: string;      // why the AI reached this conclusion
+}
+
 export interface LlmProvider {
   readonly name: string;
 
   findElement(query: ElementQuery): Promise<ElementResult>;
   findItems(query: ItemsQuery): Promise<ItemsResult>;
+  evaluateCondition(query: ConditionQuery): Promise<ConditionEvaluation>;
   decideAction(
     stepDescription: string,
     pageContext: PageContext,

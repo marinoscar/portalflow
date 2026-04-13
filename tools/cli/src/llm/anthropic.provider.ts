@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import pino from 'pino';
 import type {
   ActionDecision,
+  ConditionEvaluation,
+  ConditionQuery,
   ElementQuery,
   ElementResult,
   ItemsQuery,
@@ -104,6 +106,36 @@ ${truncateHtml(pageContext.html)}`;
       return parseJsonResponse<ItemsResult>(text, 'findItems');
     } catch (err) {
       logger.error({ err, description }, 'AnthropicProvider.findItems failed');
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  async evaluateCondition(query: ConditionQuery): Promise<ConditionEvaluation> {
+    const { question, pageContext } = query;
+
+    const userMessage = `Page URL: ${pageContext.url}
+Page title: ${pageContext.title}
+HTML:
+${truncateHtml(pageContext.html)}
+
+Question: ${question}`;
+
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 1024,
+        system: SYSTEM_PROMPTS.conditionEvaluator,
+        messages: [{ role: 'user', content: userMessage }],
+      });
+
+      const text = response.content
+        .filter((b) => b.type === 'text')
+        .map((b) => (b as { type: 'text'; text: string }).text)
+        .join('');
+
+      return parseJsonResponse<ConditionEvaluation>(text, 'evaluateCondition');
+    } catch (err) {
+      logger.error({ err, question }, 'AnthropicProvider.evaluateCondition failed');
       throw err instanceof Error ? err : new Error(String(err));
     }
   }

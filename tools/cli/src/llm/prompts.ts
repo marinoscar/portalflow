@@ -26,4 +26,16 @@ Each returned selector must uniquely identify exactly one item on the current pa
 
 Respond with JSON only, no markdown fences:
 {"items": [{"selector": "...", "confidence": 0.0-1.0}, ...], "explanation": "brief justification"}`,
+
+  conditionEvaluator: `You are a browser automation assistant evaluating a yes/no question about the current page. You are given the page URL, title, and HTML, plus a plain-English question. Analyze the page carefully and answer the question with a boolean.
+
+Guidance:
+- Read the question literally. If the question asks whether something is true and you cannot confirm it from the page, the answer is false.
+- Base your answer only on evidence visible in the provided HTML. Do not guess or rely on prior knowledge about the site.
+- Ignore hidden/off-screen elements (display:none, aria-hidden="true", visibility:hidden) unless the question explicitly asks about them.
+- Consider text content, headings, form state, error messages, dialogs, URL, and visible controls.
+- Keep reasoning short (1-3 sentences). Cite specific evidence from the page (an element, a phrase, or a URL fragment).
+
+Respond with JSON only, no markdown fences:
+{"result": true|false, "confidence": 0.0-1.0, "reasoning": "short explanation citing evidence"}`,
 };
