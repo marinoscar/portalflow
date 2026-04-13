@@ -55,6 +55,11 @@ export const ConditionActionSchema = z
     ai: z.string().optional(),
     thenStep: z.string().optional(),
     elseStep: z.string().optional(),
+    // Name of a function to invoke when the condition evaluates to true/false.
+    // No args are accepted here — the function reads shared context. For
+    // parametrized branching, use a regular `call` step after the condition.
+    thenCall: z.string().optional(),
+    elseCall: z.string().optional(),
   })
   .refine(
     (data) => {
@@ -317,6 +322,24 @@ export const AutomationSchema = z
               code: z.ZodIssueCode.custom,
               message: `call step "${step.id}" references unknown function "${action.function}"`,
               path: [...stepPath, 'action', 'function'],
+            });
+          }
+        }
+
+        if (step.type === 'condition') {
+          const action = step.action as { thenCall?: string; elseCall?: string };
+          if (action.thenCall && !isTemplate(action.thenCall) && !definedFunctions.has(action.thenCall)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `condition step "${step.id}" thenCall references unknown function "${action.thenCall}"`,
+              path: [...stepPath, 'action', 'thenCall'],
+            });
+          }
+          if (action.elseCall && !isTemplate(action.elseCall) && !definedFunctions.has(action.elseCall)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `condition step "${step.id}" elseCall references unknown function "${action.elseCall}"`,
+              path: [...stepPath, 'action', 'elseCall'],
             });
           }
         }
