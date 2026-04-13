@@ -6,6 +6,8 @@ import type {
   ActionDecision,
   ElementQuery,
   ElementResult,
+  ItemsQuery,
+  ItemsResult,
   LlmProvider,
   LlmProviderConfig,
   PageContext,
@@ -93,6 +95,10 @@ export class LlmService {
 
   async findElement(query: ElementQuery): Promise<ElementResult> {
     return this.getProvider().findElement(query);
+  }
+
+  async findItems(query: ItemsQuery): Promise<ItemsResult> {
+    return this.getProvider().findItems(query);
   }
 
   async decideAction(

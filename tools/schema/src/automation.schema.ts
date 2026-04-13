@@ -98,11 +98,45 @@ export const ValidationSchema = z.object({
   value: z.string(),
 });
 
-// Forward-declare the Step type so TypeScript can resolve the z.lazy() recursion.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Step = any;
+// Concrete action output types (with defaults resolved) for each step kind.
+type NavigateActionOutput = z.output<typeof NavigateActionSchema>;
+type InteractActionOutput = z.output<typeof InteractActionSchema>;
+type WaitActionOutput = z.output<typeof WaitActionSchema>;
+type ExtractActionOutput = z.output<typeof ExtractActionSchema>;
+type ToolCallActionOutput = z.output<typeof ToolCallActionSchema>;
+type ConditionActionOutput = z.output<typeof ConditionActionSchema>;
+type DownloadActionOutput = z.output<typeof DownloadActionSchema>;
+type LoopActionOutput = z.output<typeof LoopActionSchema>;
 
-export const StepSchema: z.ZodType<Step> = z.lazy(() =>
+// Forward-declare the Step interface so TypeScript can resolve z.lazy() recursion.
+export interface Step {
+  id: string;
+  name: string;
+  description?: string;
+  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop';
+  action: NavigateActionOutput
+    | InteractActionOutput
+    | WaitActionOutput
+    | ExtractActionOutput
+    | ToolCallActionOutput
+    | ConditionActionOutput
+    | DownloadActionOutput
+    | LoopActionOutput;
+  aiGuidance?: string;
+  selectors?: z.output<typeof SelectorsSchema>;
+  validation?: z.output<typeof ValidationSchema>;
+  onFailure: 'retry' | 'skip' | 'abort';
+  maxRetries: number;
+  timeout: number;
+  substeps?: Step[];
+}
+
+// The input type is relaxed to `unknown` to avoid TypeScript fighting the
+// z.lazy() recursion with optional-vs-required default field mismatches.
+// Runtime validation still enforces all constraints; only the static _input
+// annotation is widened here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
   z.object({
     id: z.string(),
     name: z.string(),

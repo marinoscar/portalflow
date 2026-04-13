@@ -44,6 +44,9 @@ export class StepExecutor {
       case 'download':
         await this.executeDownload(step);
         break;
+      case 'loop':
+        await this.executeLoop(step);
+        break;
       default: {
         const exhaustive: never = step.type;
         throw new Error(`Unknown step type: ${String(exhaustive)}`);
@@ -51,6 +54,13 @@ export class StepExecutor {
     }
 
     await this.validateStep(step);
+  }
+
+  // Stub — implementation added in Phase 4. Extracted to keep typecheck green
+  // after Phase 1 adds 'loop' to the step type enum.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async executeLoop(_step: Step): Promise<void> {
+    throw new Error('loop step execution not yet implemented');
   }
 
   // ---------------------------------------------------------------------------

@@ -13,16 +13,17 @@ import {
   OutputSchema,
   SelectorsSchema,
   SettingsSchema,
-  StepSchema,
   ToolCallActionSchema,
   ToolRefSchema,
   ValidationSchema,
   WaitActionSchema,
 } from './automation.schema.js';
 
+// Re-export Step directly since it is declared as an interface (not via z.infer<>) for recursion support
+export type { Step } from './automation.schema.js';
+
 export type Automation = z.infer<typeof AutomationSchema>;
 export type Input = z.infer<typeof InputSchema>;
-export type Step = z.infer<typeof StepSchema>;
 export type Selectors = z.infer<typeof SelectorsSchema>;
 export type Validation = z.infer<typeof ValidationSchema>;
 export type ToolRef = z.infer<typeof ToolRefSchema>;
@@ -54,8 +55,8 @@ export type Action =
 // Convenience enums derived from the schema literals
 export type InputType = Input['type'];
 export type InputSource = NonNullable<Input['source']>;
-export type StepType = Step['type'];
-export type OnFailure = Step['onFailure'];
+export type StepType = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop';
+export type OnFailure = 'retry' | 'skip' | 'abort';
 export type InteractionType = InteractAction['interaction'];
 export type WaitCondition = WaitAction['condition'];
 export type ExtractTarget = ExtractAction['target'];
