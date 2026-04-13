@@ -2,6 +2,8 @@
 
 PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser automations. It loads a structured JSON automation definition, drives a real Chrome browser via Playwright, and delegates element-finding and decision-making to a configurable LLM when CSS selectors fail. Works with Anthropic Claude natively and any OpenAI-compatible endpoint (OpenAI, Moonshot Kimi, DeepSeek, Groq, Mistral, Together AI, OpenRouter, local Ollama, or a custom proxy). The result is reliable, maintainable automation that degrades gracefully when page markup changes.
 
+> **Authoring automation JSON files?** See [`docs/AUTOMATION-JSON-SPEC.md`](../../docs/AUTOMATION-JSON-SPEC.md) for the complete reference covering every field, every step type, and worked examples.
+
 ## Features
 
 - **Interactive TUI for every command** — run `portalflow` bare to launch a guided menu, or invoke any command without its required argument to get a wizard (file picker, preview, confirmation)
@@ -659,6 +661,7 @@ Each step has a common envelope plus a `type`-specific `action`.
 | `tool_call` | `tool`, `command`, `args`, `outputName?` | Invoke an external tool (`smscli` or `vaultcli`) |
 | `condition` | `check`, `value` | Assert `element_exists`, `url_matches`, `text_contains`, or `variable_equals` |
 | `download` | `trigger`, `expectedFilename?` | Trigger and capture a file download via `click` or `navigation` |
+| `loop` | `maxIterations`, `items?`, `exitWhen?`, `indexVar?` | Bounded iteration over items (with optional AI discovery) or bounded repetition with an exit condition. Child steps go in `substeps`. See [the full loop spec](../../docs/AUTOMATION-JSON-SPEC.md#14-the-loop-step-in-depth) |
 
 ### Step Options
 
@@ -673,6 +676,8 @@ All step types share these fields:
 | `onFailure` | `"abort"` | `"retry"`, `"skip"`, or `"abort"` |
 | `maxRetries` | `3` | Maximum retry attempts (exponential backoff: 1s, 2s, 4s, ...) |
 | `timeout` | `30000` | Step timeout in milliseconds |
+
+The `substeps` field is also accepted on every step object but is only used by the `loop` step type, which places its child steps there. See [`docs/AUTOMATION-JSON-SPEC.md`](../../docs/AUTOMATION-JSON-SPEC.md) for the full field reference.
 
 ### Settings
 
@@ -780,7 +785,7 @@ A three-step automation that navigates to a page, types a search query, and extr
 
 Use `{{inputName}}` template syntax inside `action.url` and other string fields to substitute input values at runtime.
 
-See `examples/demo-search.json` for a complete working example, and `examples/phone-bill.json` for a template covering portal login, OTP via smscli, and file download.
+See `examples/demo-search.json` for a complete working example, `examples/phone-bill.json` for a template covering portal login, OTP via smscli, and file download, and `examples/att-bills-last-n.json` for the canonical `loop` step example.
 
 ---
 

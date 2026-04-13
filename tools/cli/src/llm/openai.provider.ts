@@ -4,6 +4,8 @@ import type {
   ActionDecision,
   ElementQuery,
   ElementResult,
+  ItemsQuery,
+  ItemsResult,
   LlmProvider,
   LlmProviderConfig,
   PageContext,
@@ -70,6 +72,39 @@ Find this element: ${description}${failedNote}`;
       return parseJsonResponse<ElementResult>(text, 'findElement');
     } catch (err) {
       logger.error({ err, description }, 'OpenAiProvider.findElement failed');
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  async findItems(query: ItemsQuery): Promise<ItemsResult> {
+    const { description, pageContext, maxItems, order, existingSelectors } = query;
+    const existingNote =
+      existingSelectors && existingSelectors.length > 0
+        ? `\nAlready found via pattern (fill the rest if needed): ${existingSelectors.join(', ')}`
+        : '';
+
+    const userMessage = `Description: ${description}
+Order: ${order}
+Max items: ${maxItems}${existingNote}
+
+Page HTML (truncated):
+${truncateHtml(pageContext.html)}`;
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        max_tokens: 2048,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPTS.itemsFinder },
+          { role: 'user', content: userMessage },
+        ],
+      });
+
+      const text = response.choices[0]?.message?.content ?? '';
+      return parseJsonResponse<ItemsResult>(text, 'findItems');
+    } catch (err) {
+      logger.error({ err, description }, 'OpenAiProvider.findItems failed');
       throw err instanceof Error ? err : new Error(String(err));
     }
   }

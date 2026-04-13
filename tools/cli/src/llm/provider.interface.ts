@@ -24,10 +24,24 @@ export interface ActionDecision {
   reasoning: string;
 }
 
+export interface ItemsQuery {
+  description: string;
+  pageContext: PageContext;
+  maxItems: number;
+  order: 'first' | 'last' | 'newest' | 'oldest' | 'natural';
+  existingSelectors?: string[];
+}
+
+export interface ItemsResult {
+  items: Array<{ selector: string; confidence: number }>;
+  explanation: string;
+}
+
 export interface LlmProvider {
   readonly name: string;
 
   findElement(query: ElementQuery): Promise<ElementResult>;
+  findItems(query: ItemsQuery): Promise<ItemsResult>;
   decideAction(
     stepDescription: string,
     pageContext: PageContext,

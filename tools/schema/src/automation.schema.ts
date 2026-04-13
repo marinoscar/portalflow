@@ -59,6 +59,31 @@ export const DownloadActionSchema = z.object({
   expectedFilename: z.string().optional(),
 });
 
+export const LoopItemsSchema = z.object({
+  description: z.string(),
+  selectorPattern: z.string().optional(),
+  itemVar: z.string().default('item'),
+  order: z.enum(['first', 'last', 'newest', 'oldest', 'natural']).default('natural'),
+});
+
+export const LoopExitWhenSchema = z.object({
+  check: z.enum([
+    'element_exists',
+    'element_missing',
+    'url_matches',
+    'text_contains',
+    'variable_equals',
+  ]),
+  value: z.string(),
+});
+
+export const LoopActionSchema = z.object({
+  maxIterations: z.union([z.number().int().min(1), z.string()]),
+  items: LoopItemsSchema.optional(),
+  exitWhen: LoopExitWhenSchema.optional(),
+  indexVar: z.string().default('loop_index'),
+});
+
 // ---------------------------------------------------------------------------
 // Step
 // ---------------------------------------------------------------------------
@@ -73,27 +98,72 @@ export const ValidationSchema = z.object({
   value: z.string(),
 });
 
-export const StepSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().optional(),
-  type: z.enum(['navigate', 'interact', 'wait', 'extract', 'tool_call', 'condition', 'download']),
-  action: z.union([
-    NavigateActionSchema,
-    InteractActionSchema,
-    WaitActionSchema,
-    ExtractActionSchema,
-    ToolCallActionSchema,
-    ConditionActionSchema,
-    DownloadActionSchema,
-  ]),
-  aiGuidance: z.string().optional(),
-  selectors: SelectorsSchema.optional(),
-  validation: ValidationSchema.optional(),
-  onFailure: z.enum(['retry', 'skip', 'abort']).default('abort'),
-  maxRetries: z.number().int().min(0).default(3),
-  timeout: z.number().int().min(0).default(30000),
-});
+// Concrete action output types (with defaults resolved) for each step kind.
+type NavigateActionOutput = z.output<typeof NavigateActionSchema>;
+type InteractActionOutput = z.output<typeof InteractActionSchema>;
+type WaitActionOutput = z.output<typeof WaitActionSchema>;
+type ExtractActionOutput = z.output<typeof ExtractActionSchema>;
+type ToolCallActionOutput = z.output<typeof ToolCallActionSchema>;
+type ConditionActionOutput = z.output<typeof ConditionActionSchema>;
+type DownloadActionOutput = z.output<typeof DownloadActionSchema>;
+type LoopActionOutput = z.output<typeof LoopActionSchema>;
+
+// Forward-declare the Step interface so TypeScript can resolve z.lazy() recursion.
+export interface Step {
+  id: string;
+  name: string;
+  description?: string;
+  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop';
+  action: NavigateActionOutput
+    | InteractActionOutput
+    | WaitActionOutput
+    | ExtractActionOutput
+    | ToolCallActionOutput
+    | ConditionActionOutput
+    | DownloadActionOutput
+    | LoopActionOutput;
+  aiGuidance?: string;
+  selectors?: z.output<typeof SelectorsSchema>;
+  validation?: z.output<typeof ValidationSchema>;
+  onFailure: 'retry' | 'skip' | 'abort';
+  maxRetries: number;
+  timeout: number;
+  substeps?: Step[];
+}
+
+// The input type is relaxed to `unknown` to avoid TypeScript fighting the
+// z.lazy() recursion with optional-vs-required default field mismatches.
+// Runtime validation still enforces all constraints; only the static _input
+// annotation is widened here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    type: z.enum([
+      'navigate', 'interact', 'wait', 'extract',
+      'tool_call', 'condition', 'download', 'loop',
+    ]),
+    action: z.union([
+      NavigateActionSchema,
+      InteractActionSchema,
+      WaitActionSchema,
+      ExtractActionSchema,
+      ToolCallActionSchema,
+      ConditionActionSchema,
+      DownloadActionSchema,
+      LoopActionSchema,
+    ]),
+    aiGuidance: z.string().optional(),
+    selectors: SelectorsSchema.optional(),
+    validation: ValidationSchema.optional(),
+    onFailure: z.enum(['retry', 'skip', 'abort']).default('abort'),
+    maxRetries: z.number().int().min(0).default(3),
+    timeout: z.number().int().min(0).default(30000),
+    substeps: z.array(StepSchema).optional(),
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Tool reference

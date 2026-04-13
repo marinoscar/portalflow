@@ -3,6 +3,9 @@ import type {
   DownloadAction,
   ExtractAction,
   InteractAction,
+  LoopAction,
+  LoopExitWhen,
+  LoopItems,
   NavigateAction,
   Step,
   ToolCallAction,
@@ -10,8 +13,17 @@ import type {
 } from '@portalflow/schema';
 import type { PageService } from '../browser/page.service.js';
 import type { ElementResolver } from '../browser/element-resolver.js';
+import type { BrowserService } from '../browser/browser.service.js';
+import type { PageContextCapture } from '../browser/context.js';
+import type { LlmService } from '../llm/llm.service.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext } from './run-context.js';
+
+const RETRY_BASE_DELAY_MS = 1_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class StepExecutor {
   constructor(
@@ -19,7 +31,73 @@ export class StepExecutor {
     private readonly elementResolver: ElementResolver,
     private readonly tools: Map<string, Tool>,
     private readonly context: RunContext,
+    private readonly browserService: BrowserService,
+    private readonly screenshotOnFailure: boolean,
+    private readonly contextCapture: PageContextCapture,
+    private readonly llmService: LlmService,
   ) {}
+
+  /**
+   * Executes a step with its retry/skip/abort policy.
+   * Returns true if execution should continue to the next step, false to abort.
+   */
+  async executeWithPolicy(step: Step): Promise<boolean> {
+    const policy = step.onFailure;
+    const maxRetries = step.maxRetries;
+    let attempts = 0;
+
+    while (true) {
+      try {
+        await this.execute(step);
+        return true; // success
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        attempts += 1;
+
+        if (policy === 'retry' && attempts <= maxRetries) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempts - 1);
+          this.context.logger.warn(
+            { stepId: step.id, attempt: attempts, maxRetries, delayMs: delay },
+            `Step failed (attempt ${attempts}/${maxRetries}), retrying after ${delay}ms: ${message}`,
+          );
+          await sleep(delay);
+          continue;
+        }
+
+        // Record the error
+        this.context.addError(step.id, step.name, message);
+
+        if (policy === 'skip') {
+          this.context.logger.warn(
+            { stepId: step.id, policy: 'skip' },
+            `Step failed and will be skipped: ${message}`,
+          );
+          return true; // continue to next step
+        }
+
+        // abort (or retry exhausted)
+        this.context.logger.error(
+          { stepId: step.id, policy },
+          `Step failed — aborting run: ${message}`,
+        );
+
+        if (this.screenshotOnFailure) {
+          try {
+            const screenshotPath = await this.browserService.screenshot(`failure_${step.id}`);
+            this.context.addArtifact(screenshotPath);
+            this.context.logger.info({ screenshotPath }, 'Failure screenshot captured');
+          } catch (screenshotErr) {
+            this.context.logger.warn(
+              { err: String(screenshotErr) },
+              'Failed to capture failure screenshot',
+            );
+          }
+        }
+
+        return false; // stop execution
+      }
+    }
+  }
 
   async execute(step: Step): Promise<void> {
     switch (step.type) {
@@ -44,6 +122,9 @@ export class StepExecutor {
       case 'download':
         await this.executeDownload(step);
         break;
+      case 'loop':
+        await this.executeLoop(step);
+        break;
       default: {
         const exhaustive: never = step.type;
         throw new Error(`Unknown step type: ${String(exhaustive)}`);
@@ -51,6 +132,161 @@ export class StepExecutor {
     }
 
     await this.validateStep(step);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Loop
+  // ---------------------------------------------------------------------------
+
+  private async executeLoop(step: Step): Promise<void> {
+    const action = step.action as LoopAction;
+    const substeps: Step[] = step.substeps ?? [];
+
+    if (substeps.length === 0) {
+      this.context.logger.warn({ stepId: step.id }, 'loop has no substeps; skipping');
+      return;
+    }
+
+    const maxIterations = this.resolveMaxIterations(action.maxIterations);
+
+    const items = action.items
+      ? await this.discoverItems(action.items, maxIterations)
+      : null;
+
+    const iterationCap = items ? Math.min(maxIterations, items.length) : maxIterations;
+
+    this.context.logger.info(
+      { stepId: step.id, maxIterations, iterationCap, hasItems: items !== null },
+      'loop start',
+    );
+
+    const indexVar = action.indexVar ?? 'loop_index';
+
+    for (let i = 0; i < iterationCap; i++) {
+      if (action.exitWhen && (await this.evaluateExitCondition(action.exitWhen))) {
+        this.context.logger.info({ stepId: step.id, iteration: i }, 'loop exit condition met');
+        break;
+      }
+
+      this.context.setVariable(indexVar, String(i));
+      if (items && action.items) {
+        const currentItem = items[i];
+        if (currentItem !== undefined) {
+          this.context.setVariable(action.items.itemVar, currentItem);
+        }
+      }
+
+      this.context.logger.info({ stepId: step.id, iteration: i }, 'loop iteration start');
+
+      let substepAborted = false;
+      for (const substep of substeps) {
+        const success = await this.executeWithPolicy(substep);
+        if (!success) {
+          substepAborted = true;
+          break;
+        }
+        this.context.incrementCompleted();
+      }
+
+      if (substepAborted) {
+        throw new Error(`Substep aborted in iteration ${i} of loop ${step.id}`);
+      }
+
+      this.context.logger.info({ stepId: step.id, iteration: i }, 'loop iteration complete');
+    }
+
+    this.context.logger.info({ stepId: step.id }, 'loop complete');
+  }
+
+  private resolveMaxIterations(raw: number | string): number {
+    if (typeof raw === 'number') return raw;
+    const resolved = this.context.resolveTemplate(raw);
+    const parsed = parseInt(resolved, 10);
+    if (isNaN(parsed) || parsed < 1) {
+      throw new Error(`loop maxIterations resolved to invalid value: "${resolved}"`);
+    }
+    return parsed;
+  }
+
+  private async discoverItems(itemsConfig: LoopItems, maxItems: number): Promise<string[]> {
+    const page = this.browserService.getPage();
+
+    if (itemsConfig.selectorPattern) {
+      try {
+        const handles = await page.$$(itemsConfig.selectorPattern);
+        if (handles.length >= maxItems) {
+          const selectors = Array.from({ length: Math.min(handles.length, maxItems) }, (_, idx) =>
+            `${itemsConfig.selectorPattern}:nth-of-type(${idx + 1})`,
+          );
+          this.context.logger.info(
+            { pattern: itemsConfig.selectorPattern, count: selectors.length },
+            'loop items discovered via deterministic pattern',
+          );
+          return selectors;
+        }
+      } catch (err) {
+        this.context.logger.warn(
+          { pattern: itemsConfig.selectorPattern, err: String(err) },
+          'deterministic pattern failed, falling back to LLM',
+        );
+      }
+    }
+
+    const pageContext = await this.contextCapture.capture();
+    const result = await this.llmService.findItems({
+      description: itemsConfig.description,
+      pageContext,
+      maxItems,
+      order: itemsConfig.order,
+      existingSelectors: itemsConfig.selectorPattern
+        ? [itemsConfig.selectorPattern]
+        : undefined,
+    });
+
+    this.context.logger.info(
+      { count: result.items.length, source: 'llm' },
+      'loop items discovered via LLM',
+    );
+
+    const validated: string[] = [];
+    for (const item of result.items) {
+      try {
+        const exists = await page.$(item.selector);
+        if (exists) validated.push(item.selector);
+      } catch {
+        // skip invalid selectors
+      }
+    }
+
+    return validated.slice(0, maxItems);
+  }
+
+  private async evaluateExitCondition(cond: LoopExitWhen): Promise<boolean> {
+    const page = this.browserService.getPage();
+    const value = this.context.resolveTemplate(cond.value);
+    switch (cond.check) {
+      case 'element_exists':
+        return !!(await page.$(value).catch(() => null));
+      case 'element_missing':
+        return !(await page.$(value).catch(() => null));
+      case 'url_matches':
+        return page.url().includes(value);
+      case 'text_contains': {
+        const content = await page.content();
+        return content.includes(value);
+      }
+      case 'variable_equals': {
+        const eqIdx = value.indexOf('=');
+        if (eqIdx === -1) return false;
+        const varName = value.slice(0, eqIdx).trim();
+        const expected = value.slice(eqIdx + 1).trim();
+        return this.context.getVariable(varName) === expected;
+      }
+      default: {
+        const exhaustive: never = cond.check;
+        throw new Error(`Unknown exit condition: ${String(exhaustive)}`);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -71,10 +307,18 @@ export class StepExecutor {
   private async executeInteract(step: Step): Promise<void> {
     const action = step.action as InteractAction;
 
+    // Resolve template variables in selectors before element resolution
+    const resolvedPrimary = step.selectors?.primary
+      ? this.context.resolveTemplate(step.selectors.primary)
+      : undefined;
+    const resolvedFallbacks = step.selectors?.fallbacks?.map((f) =>
+      this.context.resolveTemplate(f),
+    );
+
     // Resolve the selector via primary / fallback / AI
     const resolved = await this.elementResolver.resolve(
-      step.selectors?.primary,
-      step.selectors?.fallbacks,
+      resolvedPrimary,
+      resolvedFallbacks,
       step.aiGuidance,
       step.description ?? step.name,
     );
@@ -150,10 +394,11 @@ export class StepExecutor {
 
     switch (action.condition) {
       case 'selector': {
-        const selector = action.value ?? '';
-        if (!selector) {
+        const rawSelector = action.value ?? '';
+        if (!rawSelector) {
           throw new Error(`Step "${step.id}": wait with condition "selector" requires a value.`);
         }
+        const selector = this.context.resolveTemplate(rawSelector);
         await this.pageService.waitForSelector(selector, action.timeout);
         break;
       }
@@ -276,7 +521,14 @@ export class StepExecutor {
       'Executing tool call',
     );
 
-    const result = await tool.execute(action.command, action.args ?? {});
+    // Resolve template variables in tool call arguments
+    const resolvedArgs = action.args
+      ? Object.fromEntries(
+          Object.entries(action.args).map(([k, v]) => [k, this.context.resolveTemplate(v)]),
+        )
+      : {};
+
+    const result = await tool.execute(action.command, resolvedArgs);
 
     if (!result.success) {
       throw new Error(
@@ -300,30 +552,31 @@ export class StepExecutor {
 
   private async executeCondition(step: Step): Promise<void> {
     const action = step.action as ConditionAction;
+    const condValue = this.context.resolveTemplate(action.value);
     let result = false;
 
     switch (action.check) {
       case 'element_exists': {
-        result = await this.pageService.elementExists(action.value);
+        result = await this.pageService.elementExists(condValue);
         break;
       }
 
       case 'url_matches': {
         const currentUrl = await this.pageService.getUrl();
-        result = currentUrl.includes(action.value);
+        result = currentUrl.includes(condValue);
         break;
       }
 
       case 'text_contains': {
         // Check full page text for the value
         const html = await this.pageService.getHtml();
-        result = html.includes(action.value);
+        result = html.includes(condValue);
         break;
       }
 
       case 'variable_equals': {
         // action.value format: "varName=expectedValue"
-        const eqIdx = action.value.indexOf('=');
+        const eqIdx = condValue.indexOf('=');
         if (eqIdx === -1) {
           this.context.logger.warn(
             { stepId: step.id },
@@ -331,8 +584,8 @@ export class StepExecutor {
           );
           break;
         }
-        const varName = action.value.slice(0, eqIdx);
-        const expected = action.value.slice(eqIdx + 1);
+        const varName = condValue.slice(0, eqIdx);
+        const expected = condValue.slice(eqIdx + 1);
         result = this.context.getVariable(varName) === expected;
         break;
       }
@@ -374,9 +627,15 @@ export class StepExecutor {
         throw new Error(`Step "${step.id}": download with trigger "click" requires a selector.`);
       }
 
+      // Resolve template variables in selectors before element resolution
+      const resolvedPrimary = this.context.resolveTemplate(step.selectors.primary);
+      const resolvedFallbacks = step.selectors.fallbacks?.map((f) =>
+        this.context.resolveTemplate(f),
+      );
+
       const resolved = await this.elementResolver.resolve(
-        step.selectors.primary,
-        step.selectors.fallbacks,
+        resolvedPrimary,
+        resolvedFallbacks,
         step.aiGuidance,
         step.description ?? step.name,
       );

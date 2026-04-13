@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { AutomationSchema } from '@portalflow/schema';
-import type { Automation, Step } from '@portalflow/schema';
+import type { Automation } from '@portalflow/schema';
 import { BrowserService } from '../browser/browser.service.js';
 import { PageService } from '../browser/page.service.js';
 import { PageContextCapture } from '../browser/context.js';
@@ -24,8 +24,6 @@ export interface RunOptions {
   downloadDir?: string;
   automationsDir?: string;
 }
-
-const RETRY_BASE_DELAY_MS = 1_000;
 
 export class AutomationRunner {
   async run(automationPath: string, options?: RunOptions): Promise<RunResult> {
@@ -209,9 +207,18 @@ export class AutomationRunner {
     // ------------------------------------------------------------------
     // 10. Create StepExecutor
     // ------------------------------------------------------------------
-    const stepExecutor = new StepExecutor(pageService, elementResolver, tools, context);
-
     const screenshotOnFailure = settings?.screenshotOnFailure ?? true;
+
+    const stepExecutor = new StepExecutor(
+      pageService,
+      elementResolver,
+      tools,
+      context,
+      browserService,
+      screenshotOnFailure,
+      contextCapture,
+      llmService,
+    );
 
     // ------------------------------------------------------------------
     // 11. Execute steps
@@ -221,14 +228,7 @@ export class AutomationRunner {
     for (const step of steps) {
       logger.info({ stepId: step.id, stepName: step.name, type: step.type }, 'Executing step');
 
-      const success = await this.executeWithPolicy(
-        step,
-        stepExecutor,
-        context,
-        browserService,
-        logger,
-        screenshotOnFailure,
-      );
+      const success = await stepExecutor.executeWithPolicy(step);
 
       if (!success) {
         // abort policy — stop processing further steps
@@ -279,77 +279,4 @@ export class AutomationRunner {
     return result;
   }
 
-  // ---------------------------------------------------------------------------
-  // Retry / skip / abort policy dispatcher
-  // ---------------------------------------------------------------------------
-
-  private async executeWithPolicy(
-    step: Step,
-    stepExecutor: StepExecutor,
-    context: RunContext,
-    browserService: BrowserService,
-    logger: ReturnType<typeof createRunLogger>,
-    screenshotOnFailure: boolean,
-  ): Promise<boolean> {
-    const policy = step.onFailure;
-    const maxRetries = step.maxRetries;
-    let attempts = 0;
-
-    while (true) {
-      try {
-        await stepExecutor.execute(step);
-        return true; // success
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        attempts += 1;
-
-        if (policy === 'retry' && attempts <= maxRetries) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempts - 1);
-          logger.warn(
-            { stepId: step.id, attempt: attempts, maxRetries, delayMs: delay },
-            `Step failed (attempt ${attempts}/${maxRetries}), retrying after ${delay}ms: ${message}`,
-          );
-          await sleep(delay);
-          continue;
-        }
-
-        // Record the error
-        context.addError(step.id, step.name, message);
-
-        if (policy === 'skip') {
-          logger.warn(
-            { stepId: step.id, policy: 'skip' },
-            `Step failed and will be skipped: ${message}`,
-          );
-          return true; // continue to next step
-        }
-
-        // abort (or retry exhausted)
-        logger.error(
-          { stepId: step.id, policy },
-          `Step failed — aborting run: ${message}`,
-        );
-
-        if (screenshotOnFailure) {
-          try {
-            const screenshotPath = await browserService.screenshot(`failure_${step.id}`);
-            context.addArtifact(screenshotPath);
-            logger.info({ screenshotPath }, 'Failure screenshot captured');
-          } catch (screenshotErr) {
-            logger.warn({ err: String(screenshotErr) }, 'Failed to capture failure screenshot');
-          }
-        }
-
-        return false; // stop execution
-      }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

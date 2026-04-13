@@ -4,6 +4,8 @@ import type {
   ActionDecision,
   ElementQuery,
   ElementResult,
+  ItemsQuery,
+  ItemsResult,
   LlmProvider,
   LlmProviderConfig,
   PageContext,
@@ -68,6 +70,40 @@ Find this element: ${description}${failedNote}`;
       return parseJsonResponse<ElementResult>(text, 'findElement');
     } catch (err) {
       logger.error({ err, description }, 'AnthropicProvider.findElement failed');
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  async findItems(query: ItemsQuery): Promise<ItemsResult> {
+    const { description, pageContext, maxItems, order, existingSelectors } = query;
+    const existingNote =
+      existingSelectors && existingSelectors.length > 0
+        ? `\nAlready found via pattern (fill the rest if needed): ${existingSelectors.join(', ')}`
+        : '';
+
+    const userMessage = `Description: ${description}
+Order: ${order}
+Max items: ${maxItems}${existingNote}
+
+Page HTML (truncated):
+${truncateHtml(pageContext.html)}`;
+
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 2048,
+        system: SYSTEM_PROMPTS.itemsFinder,
+        messages: [{ role: 'user', content: userMessage }],
+      });
+
+      const text = response.content
+        .filter((b) => b.type === 'text')
+        .map((b) => (b as { type: 'text'; text: string }).text)
+        .join('');
+
+      return parseJsonResponse<ItemsResult>(text, 'findItems');
+    } catch (err) {
+      logger.error({ err, description }, 'AnthropicProvider.findItems failed');
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
