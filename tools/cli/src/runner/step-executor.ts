@@ -10,8 +10,15 @@ import type {
 } from '@portalflow/schema';
 import type { PageService } from '../browser/page.service.js';
 import type { ElementResolver } from '../browser/element-resolver.js';
+import type { BrowserService } from '../browser/browser.service.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext } from './run-context.js';
+
+const RETRY_BASE_DELAY_MS = 1_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class StepExecutor {
   constructor(
@@ -19,7 +26,71 @@ export class StepExecutor {
     private readonly elementResolver: ElementResolver,
     private readonly tools: Map<string, Tool>,
     private readonly context: RunContext,
+    private readonly browserService: BrowserService,
+    private readonly screenshotOnFailure: boolean,
   ) {}
+
+  /**
+   * Executes a step with its retry/skip/abort policy.
+   * Returns true if execution should continue to the next step, false to abort.
+   */
+  async executeWithPolicy(step: Step): Promise<boolean> {
+    const policy = step.onFailure;
+    const maxRetries = step.maxRetries;
+    let attempts = 0;
+
+    while (true) {
+      try {
+        await this.execute(step);
+        return true; // success
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        attempts += 1;
+
+        if (policy === 'retry' && attempts <= maxRetries) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempts - 1);
+          this.context.logger.warn(
+            { stepId: step.id, attempt: attempts, maxRetries, delayMs: delay },
+            `Step failed (attempt ${attempts}/${maxRetries}), retrying after ${delay}ms: ${message}`,
+          );
+          await sleep(delay);
+          continue;
+        }
+
+        // Record the error
+        this.context.addError(step.id, step.name, message);
+
+        if (policy === 'skip') {
+          this.context.logger.warn(
+            { stepId: step.id, policy: 'skip' },
+            `Step failed and will be skipped: ${message}`,
+          );
+          return true; // continue to next step
+        }
+
+        // abort (or retry exhausted)
+        this.context.logger.error(
+          { stepId: step.id, policy },
+          `Step failed — aborting run: ${message}`,
+        );
+
+        if (this.screenshotOnFailure) {
+          try {
+            const screenshotPath = await this.browserService.screenshot(`failure_${step.id}`);
+            this.context.addArtifact(screenshotPath);
+            this.context.logger.info({ screenshotPath }, 'Failure screenshot captured');
+          } catch (screenshotErr) {
+            this.context.logger.warn(
+              { err: String(screenshotErr) },
+              'Failed to capture failure screenshot',
+            );
+          }
+        }
+
+        return false; // stop execution
+      }
+    }
+  }
 
   async execute(step: Step): Promise<void> {
     switch (step.type) {
