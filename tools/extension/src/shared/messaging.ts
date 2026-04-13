@@ -1,5 +1,5 @@
 import type { Automation } from '@portalflow/schema';
-import type { RawEvent, RecordingSession } from './types';
+import type { HtmlSnapshot, RawEvent, RecordingSession } from './types';
 
 /** All message types flowing between content script, service worker, and UI. */
 export type Message =
@@ -10,7 +10,7 @@ export type Message =
   | { type: 'PAUSE_RECORDING' }
   | { type: 'RESUME_RECORDING' }
   | { type: 'CLEAR_SESSION' }
-  | { type: 'RECORDED_EVENT'; event: RawEvent }
+  | { type: 'RECORDED_EVENT'; event: RawEvent; snapshot?: HtmlSnapshot }
   | { type: 'SESSION_UPDATED'; session: RecordingSession | null }
   | { type: 'LLM_IMPROVE_SELECTOR'; stepDescription: string; currentSelector: string }
   | { type: 'LLM_GENERATE_GUIDANCE'; stepDescription: string }

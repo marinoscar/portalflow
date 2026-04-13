@@ -2,6 +2,7 @@ import { buildSelector } from './selector-builder';
 import { isPasswordField } from './detectors/credential-detector';
 import { isOtpField } from './detectors/otp-detector';
 import { sendMessage } from '../shared/messaging';
+import { captureSnapshot } from './snapshot';
 import type { FieldKind, RawEvent, RecordingSession } from '../shared/types';
 
 const SESSION_KEY = 'portalflow:session';
@@ -21,8 +22,36 @@ function classifyField(el: HTMLInputElement): FieldKind {
   return 'normal';
 }
 
-function emit(event: RawEvent) {
-  sendMessage({ type: 'RECORDED_EVENT', event }).catch((err) => {
+async function emit(event: RawEvent) {
+  let snapshotResult: Awaited<ReturnType<typeof captureSnapshot>> | undefined;
+  try {
+    snapshotResult = await captureSnapshot();
+  } catch (err) {
+    console.warn('[PortalFlow] Snapshot capture failed', err);
+  }
+
+  const eventWithSnapshot: RawEvent = snapshotResult
+    ? { ...event, snapshotId: snapshotResult.id }
+    : event;
+
+  // Promote the capture-time fields into a full HtmlSnapshot with a
+  // capturedAt timestamp the service worker will use as the first-seen time.
+  const snapshot = snapshotResult
+    ? {
+        id: snapshotResult.id,
+        content: snapshotResult.content,
+        sizeBytes: snapshotResult.sizeBytes,
+        url: snapshotResult.url,
+        title: snapshotResult.title,
+        capturedAt: Date.now(),
+      }
+    : undefined;
+
+  sendMessage({
+    type: 'RECORDED_EVENT',
+    event: eventWithSnapshot,
+    snapshot,
+  }).catch((err) => {
     console.error('[PortalFlow] Failed to send event', err);
   });
 }
