@@ -88,3 +88,13 @@ In that vision, PortalFlow becomes a system that can understand a task, navigate
 ## Summary
 
 PortalFlow is an AI-powered platform for human-like browser automation. It is intended to navigate web applications, complete end-to-end workflows, handle real-world interruptions such as OTP steps, and provide a controllable environment for running and managing intelligent automations.
+
+## Tools
+
+### CLI — run and manage automations
+
+The `portalflow` CLI is the primary runtime. It reads automation JSON files, executes each step in a real browser session, handles credential retrieval via `vaultcli`, fetches OTP codes via `smscli`, and reports results. See `tools/cli/` for build and usage instructions.
+
+### Chrome extension — record, edit, and export automations
+
+The [`@portalflow/extension`](tools/extension/README.md) package is a Manifest V3 Chrome extension that records browser workflows, lets you edit them in a side panel (with optional LLM assist), and exports them as JSON files that the CLI can run unmodified. Auto-detects password and OTP fields and wires them to `vaultcli` and `smscli` respectively. See [`tools/extension/README.md`](tools/extension/README.md) for installation and usage.
