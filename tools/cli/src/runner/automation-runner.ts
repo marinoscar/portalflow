@@ -216,6 +216,8 @@ export class AutomationRunner {
       context,
       browserService,
       screenshotOnFailure,
+      contextCapture,
+      llmService,
     );
 
     // ------------------------------------------------------------------

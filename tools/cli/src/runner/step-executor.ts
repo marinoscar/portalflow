@@ -3,6 +3,9 @@ import type {
   DownloadAction,
   ExtractAction,
   InteractAction,
+  LoopAction,
+  LoopExitWhen,
+  LoopItems,
   NavigateAction,
   Step,
   ToolCallAction,
@@ -11,6 +14,8 @@ import type {
 import type { PageService } from '../browser/page.service.js';
 import type { ElementResolver } from '../browser/element-resolver.js';
 import type { BrowserService } from '../browser/browser.service.js';
+import type { PageContextCapture } from '../browser/context.js';
+import type { LlmService } from '../llm/llm.service.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext } from './run-context.js';
 
@@ -28,6 +33,8 @@ export class StepExecutor {
     private readonly context: RunContext,
     private readonly browserService: BrowserService,
     private readonly screenshotOnFailure: boolean,
+    private readonly contextCapture: PageContextCapture,
+    private readonly llmService: LlmService,
   ) {}
 
   /**
@@ -127,11 +134,159 @@ export class StepExecutor {
     await this.validateStep(step);
   }
 
-  // Stub — implementation added in Phase 4. Extracted to keep typecheck green
-  // after Phase 1 adds 'loop' to the step type enum.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private async executeLoop(_step: Step): Promise<void> {
-    throw new Error('loop step execution not yet implemented');
+  // ---------------------------------------------------------------------------
+  // Loop
+  // ---------------------------------------------------------------------------
+
+  private async executeLoop(step: Step): Promise<void> {
+    const action = step.action as LoopAction;
+    const substeps: Step[] = step.substeps ?? [];
+
+    if (substeps.length === 0) {
+      this.context.logger.warn({ stepId: step.id }, 'loop has no substeps; skipping');
+      return;
+    }
+
+    const maxIterations = this.resolveMaxIterations(action.maxIterations);
+
+    const items = action.items
+      ? await this.discoverItems(action.items, maxIterations)
+      : null;
+
+    const iterationCap = items ? Math.min(maxIterations, items.length) : maxIterations;
+
+    this.context.logger.info(
+      { stepId: step.id, maxIterations, iterationCap, hasItems: items !== null },
+      'loop start',
+    );
+
+    const indexVar = action.indexVar ?? 'loop_index';
+
+    for (let i = 0; i < iterationCap; i++) {
+      if (action.exitWhen && (await this.evaluateExitCondition(action.exitWhen))) {
+        this.context.logger.info({ stepId: step.id, iteration: i }, 'loop exit condition met');
+        break;
+      }
+
+      this.context.setVariable(indexVar, String(i));
+      if (items && action.items) {
+        const currentItem = items[i];
+        if (currentItem !== undefined) {
+          this.context.setVariable(action.items.itemVar, currentItem);
+        }
+      }
+
+      this.context.logger.info({ stepId: step.id, iteration: i }, 'loop iteration start');
+
+      let substepAborted = false;
+      for (const substep of substeps) {
+        const success = await this.executeWithPolicy(substep);
+        if (!success) {
+          substepAborted = true;
+          break;
+        }
+        this.context.incrementCompleted();
+      }
+
+      if (substepAborted) {
+        throw new Error(`Substep aborted in iteration ${i} of loop ${step.id}`);
+      }
+
+      this.context.logger.info({ stepId: step.id, iteration: i }, 'loop iteration complete');
+    }
+
+    this.context.logger.info({ stepId: step.id }, 'loop complete');
+  }
+
+  private resolveMaxIterations(raw: number | string): number {
+    if (typeof raw === 'number') return raw;
+    const resolved = this.context.resolveTemplate(raw);
+    const parsed = parseInt(resolved, 10);
+    if (isNaN(parsed) || parsed < 1) {
+      throw new Error(`loop maxIterations resolved to invalid value: "${resolved}"`);
+    }
+    return parsed;
+  }
+
+  private async discoverItems(itemsConfig: LoopItems, maxItems: number): Promise<string[]> {
+    const page = this.browserService.getPage();
+
+    if (itemsConfig.selectorPattern) {
+      try {
+        const handles = await page.$$(itemsConfig.selectorPattern);
+        if (handles.length >= maxItems) {
+          const selectors = Array.from({ length: Math.min(handles.length, maxItems) }, (_, idx) =>
+            `${itemsConfig.selectorPattern}:nth-of-type(${idx + 1})`,
+          );
+          this.context.logger.info(
+            { pattern: itemsConfig.selectorPattern, count: selectors.length },
+            'loop items discovered via deterministic pattern',
+          );
+          return selectors;
+        }
+      } catch (err) {
+        this.context.logger.warn(
+          { pattern: itemsConfig.selectorPattern, err: String(err) },
+          'deterministic pattern failed, falling back to LLM',
+        );
+      }
+    }
+
+    const pageContext = await this.contextCapture.capture();
+    const result = await this.llmService.findItems({
+      description: itemsConfig.description,
+      pageContext,
+      maxItems,
+      order: itemsConfig.order,
+      existingSelectors: itemsConfig.selectorPattern
+        ? [itemsConfig.selectorPattern]
+        : undefined,
+    });
+
+    this.context.logger.info(
+      { count: result.items.length, source: 'llm' },
+      'loop items discovered via LLM',
+    );
+
+    const validated: string[] = [];
+    for (const item of result.items) {
+      try {
+        const exists = await page.$(item.selector);
+        if (exists) validated.push(item.selector);
+      } catch {
+        // skip invalid selectors
+      }
+    }
+
+    return validated.slice(0, maxItems);
+  }
+
+  private async evaluateExitCondition(cond: LoopExitWhen): Promise<boolean> {
+    const page = this.browserService.getPage();
+    const value = this.context.resolveTemplate(cond.value);
+    switch (cond.check) {
+      case 'element_exists':
+        return !!(await page.$(value).catch(() => null));
+      case 'element_missing':
+        return !(await page.$(value).catch(() => null));
+      case 'url_matches':
+        return page.url().includes(value);
+      case 'text_contains': {
+        const content = await page.content();
+        return content.includes(value);
+      }
+      case 'variable_equals': {
+        const eqIdx = value.indexOf('=');
+        if (eqIdx === -1) return false;
+        const varName = value.slice(0, eqIdx).trim();
+        const expected = value.slice(eqIdx + 1).trim();
+        return this.context.getVariable(varName) === expected;
+      }
+      default: {
+        const exhaustive: never = cond.check;
+        throw new Error(`Unknown exit condition: ${String(exhaustive)}`);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -152,10 +307,18 @@ export class StepExecutor {
   private async executeInteract(step: Step): Promise<void> {
     const action = step.action as InteractAction;
 
+    // Resolve template variables in selectors before element resolution
+    const resolvedPrimary = step.selectors?.primary
+      ? this.context.resolveTemplate(step.selectors.primary)
+      : undefined;
+    const resolvedFallbacks = step.selectors?.fallbacks?.map((f) =>
+      this.context.resolveTemplate(f),
+    );
+
     // Resolve the selector via primary / fallback / AI
     const resolved = await this.elementResolver.resolve(
-      step.selectors?.primary,
-      step.selectors?.fallbacks,
+      resolvedPrimary,
+      resolvedFallbacks,
       step.aiGuidance,
       step.description ?? step.name,
     );
@@ -231,10 +394,11 @@ export class StepExecutor {
 
     switch (action.condition) {
       case 'selector': {
-        const selector = action.value ?? '';
-        if (!selector) {
+        const rawSelector = action.value ?? '';
+        if (!rawSelector) {
           throw new Error(`Step "${step.id}": wait with condition "selector" requires a value.`);
         }
+        const selector = this.context.resolveTemplate(rawSelector);
         await this.pageService.waitForSelector(selector, action.timeout);
         break;
       }
@@ -455,9 +619,15 @@ export class StepExecutor {
         throw new Error(`Step "${step.id}": download with trigger "click" requires a selector.`);
       }
 
+      // Resolve template variables in selectors before element resolution
+      const resolvedPrimary = this.context.resolveTemplate(step.selectors.primary);
+      const resolvedFallbacks = step.selectors.fallbacks?.map((f) =>
+        this.context.resolveTemplate(f),
+      );
+
       const resolved = await this.elementResolver.resolve(
-        step.selectors.primary,
-        step.selectors.fallbacks,
+        resolvedPrimary,
+        resolvedFallbacks,
         step.aiGuidance,
         step.description ?? step.name,
       );
