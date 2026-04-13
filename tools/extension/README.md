@@ -48,7 +48,25 @@ A Manifest V3 Chrome extension that records browser workflows, lets you edit the
 
 ## Installation
 
-### Build from source
+### Option A: One-liner (recommended for personal use)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash
+```
+
+The script clones the repo to `~/.portalflow-recorder`, installs dependencies, builds the extension into a stable path, and prints the exact Chrome "Load unpacked" instructions with the directory path. It also installs a `portalflow-recorder-update` command into `~/.local/bin` so you can update with a single command.
+
+Re-run the same one-liner (or `portalflow-recorder-update`) to pull the latest code and rebuild. After an update, just click the reload icon on the extension card in `chrome://extensions` — the dist path stays the same.
+
+To uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/extension/install.sh | bash -s -- --uninstall
+```
+
+Override the install location by setting `PORTALFLOW_EXTENSION_DIR` before running the script.
+
+### Option B: Build from source manually
 
 From the repository root:
 
@@ -57,19 +75,23 @@ npm install                          # installs all workspace dependencies
 npm -w tools/extension run build     # builds into tools/extension/dist/
 ```
 
-### Load the extension in Chrome
-
-1. Open `chrome://extensions` in Chrome
-2. Enable **Developer mode** (toggle in the top-right corner)
-3. Click **Load unpacked**
-4. Select the `tools/extension/dist/` directory
-5. The PortalFlow Recorder icon appears in the Chrome toolbar
-
-To package the extension into a zip for distribution:
+### Option C: Package for distribution
 
 ```bash
 npm -w tools/extension run package   # produces tools/extension/portalflow-extension.zip
 ```
+
+### Load the extension in Chrome (all options)
+
+Regardless of which install method you use, Chrome requires a one-time manual step to load an unpacked extension:
+
+1. Open `chrome://extensions` in Chrome
+2. Enable **Developer mode** (toggle in the top-right corner)
+3. Click **Load unpacked**
+4. Select the `dist/` directory printed by the installer (or `tools/extension/dist/` for a local build)
+5. The PortalFlow Recorder icon appears in the Chrome toolbar
+
+After an update, click the reload icon on the extension card in `chrome://extensions` — no need to Load unpacked again.
 
 ---
 
