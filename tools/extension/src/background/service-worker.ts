@@ -186,6 +186,7 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
           const result = await llmService.complete({
             system: PROMPTS.polishMetadata.system,
             user: `Steps:\n${stepSummary}`,
+            maxTokens: 16384,
           });
           const parsed = tryParseJson(result.text);
           sendResponse({ type: 'LLM_RESULT', ok: true, data: parsed });
@@ -236,7 +237,7 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
           const result = await llmService.complete({
             system: PROMPTS.improveSteps.system,
             user: userPrompt,
-            maxTokens: 8192,
+            maxTokens: 16384,
           });
 
           const parsed = tryParseJson(result.text);
