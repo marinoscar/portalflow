@@ -5,9 +5,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/generate-icons.mjs && vite",
-    "build": "node scripts/generate-icons.mjs && vite build",
-    "typecheck": "tsc --noEmit",
+    "build:schema": "cd ../schema && npm run build",
+    "prebuild": "npm run build:schema",
+    "predev": "npm run build:schema",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "npm run build:schema && tsc --noEmit",
     "package": "npm run build && cd dist && zip -r ../portalflow-extension.zip ."
   },
   "dependencies": {
@@ -22,7 +25,6 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
-    "sharp": "^0.33.5",
     "typescript": "^5.7.3",
     "vite": "^6.0.7"
   }
