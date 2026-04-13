@@ -39,6 +39,10 @@ export class RunContext {
     return this.variables.get(name);
   }
 
+  deleteVariable(name: string): void {
+    this.variables.delete(name);
+  }
+
   /**
    * Replaces all {{varName}} placeholders in the template string with the
    * corresponding variable value from the context.
