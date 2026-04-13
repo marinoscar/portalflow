@@ -133,3 +133,184 @@ body {
   color: #94a3b8;
   line-height: 1.4;
 }
+
+/* Cards */
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: #0f172a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Form fields */
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.field > span {
+  color: #475569;
+  margin-bottom: 3px;
+  font-weight: 500;
+}
+.field input[type="text"],
+.field input[type="number"],
+.field textarea,
+.field select {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #ffffff;
+  color: #0f172a;
+  width: 100%;
+}
+.field textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+.field-inline {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Buttons */
+.btn-small {
+  padding: 4px 10px;
+  font-size: 11px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-small:hover { background: #f1f5f9; }
+
+.btn-ghost {
+  padding: 4px 8px;
+  font-size: 13px;
+  background: transparent;
+  color: #475569;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-ghost:hover:not(:disabled) { background: #f1f5f9; }
+.btn-ghost:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-ghost.btn-danger:hover { background: #fee2e2; color: #b91c1c; }
+
+/* Inputs list rows */
+.input-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 1.2fr 1.3fr auto;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+.input-row input,
+.input-row select {
+  padding: 4px 6px;
+  font-size: 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  background: #ffffff;
+}
+
+/* Step rows */
+.step-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: #f8fafc;
+}
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.step-index {
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  min-width: 20px;
+}
+.step-type-badge {
+  background: #0f172a;
+  color: #ffffff;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.step-name {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #0f172a;
+  border-radius: 3px;
+  min-width: 0;
+}
+.step-name:focus {
+  outline: none;
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+.step-controls {
+  display: flex;
+  gap: 2px;
+}
+.step-editor {
+  padding: 10px 12px;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+.advanced-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Export error box */
+.error-box {
+  margin-top: 10px;
+  padding: 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #991b1b;
+}
+.error-box ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+
+.muted {
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 4px 0;
+}
