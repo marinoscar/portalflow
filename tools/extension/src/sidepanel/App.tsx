@@ -5,6 +5,7 @@ import type { Message } from '../shared/messaging';
 import type { Input, Step } from '@portalflow/schema';
 import { automationReducer, type AutomationState } from './state/automation-state';
 import { eventsToAutomation } from '../converter/events-to-automation';
+import { AiAssistant } from './components/AiAssistant';
 import { MetadataForm } from './components/MetadataForm';
 import { InputsList } from './components/InputsList';
 import { StepRow } from './components/StepRow';
@@ -187,6 +188,17 @@ export function App() {
 
         {automation && (
           <>
+            <AiAssistant
+              automation={automation}
+              onUpdateMetadata={(changes) => {
+                beginEdit();
+                dispatch({ type: 'UPDATE_METADATA', changes });
+              }}
+              onReplaceSteps={(steps) => {
+                beginEdit();
+                dispatch({ type: 'REPLACE_STEPS', steps });
+              }}
+            />
             <MetadataForm
               automation={automation}
               onChange={(changes) => {

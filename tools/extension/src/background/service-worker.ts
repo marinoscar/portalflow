@@ -186,9 +186,69 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
           const result = await llmService.complete({
             system: PROMPTS.polishMetadata.system,
             user: `Steps:\n${stepSummary}`,
-            maxTokens: 512,
           });
           const parsed = tryParseJson(result.text);
+          sendResponse({ type: 'LLM_RESULT', ok: true, data: parsed });
+        } catch (err) {
+          sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });
+        }
+        return;
+      }
+      case 'LLM_IMPROVE_STEPS': {
+        try {
+          const a = msg.automation;
+
+          const inputsSummary = (a.inputs ?? [])
+            .map(
+              (i) =>
+                `- ${i.name} (type: ${i.type}, source: ${i.source ?? 'literal'}${
+                  i.description ? `, description: ${i.description}` : ''
+                })`,
+            )
+            .join('\n') || '(none)';
+
+          const toolsSummary = (a.tools ?? []).map((t) => `- ${t.name}`).join('\n') || '(none)';
+
+          const outputsSummary = (a.outputs ?? [])
+            .map((o) => `- ${o.name} (${o.type})`)
+            .join('\n') || '(none)';
+
+          const stepsJson = JSON.stringify(a.steps, null, 2);
+
+          const userPrompt =
+            `# Automation to improve\n\n` +
+            `Name: ${a.name}\n` +
+            `Version: ${a.version}\n` +
+            `Goal: ${a.goal}\n` +
+            `Description: ${a.description}\n\n` +
+            `## Inputs (you must not rename these; type steps may reference them via inputRef)\n` +
+            `${inputsSummary}\n\n` +
+            `## Tools configured\n` +
+            `${toolsSummary}\n\n` +
+            `## Outputs declared\n` +
+            `${outputsSummary}\n\n` +
+            `## Current steps (${a.steps.length} total, as JSON)\n\n` +
+            '```json\n' +
+            `${stepsJson}\n` +
+            '```\n\n' +
+            `Now produce the improved steps array and the changes list. Take your time and be thorough.`;
+
+          const result = await llmService.complete({
+            system: PROMPTS.improveSteps.system,
+            user: userPrompt,
+            maxTokens: 8192,
+          });
+
+          const parsed = tryParseJson(result.text);
+          if (
+            !parsed ||
+            typeof parsed !== 'object' ||
+            !('steps' in parsed) ||
+            !Array.isArray((parsed as { steps: unknown }).steps)
+          ) {
+            throw new Error('LLM did not return a valid { steps: [...] } object');
+          }
+
           sendResponse({ type: 'LLM_RESULT', ok: true, data: parsed });
         } catch (err) {
           sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });

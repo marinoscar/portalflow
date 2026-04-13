@@ -1,3 +1,4 @@
+import type { Automation } from '@portalflow/schema';
 import type { RawEvent, RecordingSession } from './types';
 
 /** All message types flowing between content script, service worker, and UI. */
@@ -14,6 +15,7 @@ export type Message =
   | { type: 'LLM_IMPROVE_SELECTOR'; stepDescription: string; currentSelector: string }
   | { type: 'LLM_GENERATE_GUIDANCE'; stepDescription: string }
   | { type: 'LLM_POLISH_METADATA'; steps: Array<{ name: string; type: string; description?: string }> }
+  | { type: 'LLM_IMPROVE_STEPS'; automation: Automation }
   | { type: 'LLM_RESULT'; ok: true; data: unknown }
   | { type: 'LLM_ERROR'; ok: false; error: string };
 

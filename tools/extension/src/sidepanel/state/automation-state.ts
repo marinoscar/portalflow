@@ -15,7 +15,8 @@ export type AutomationAction =
   | { type: 'MOVE_STEP'; from: number; to: number }
   | { type: 'REMOVE_STEP'; index: number }
   | { type: 'ADD_STEP'; step: Step }
-  | { type: 'INSERT_STEP'; index: number; step: Step };
+  | { type: 'INSERT_STEP'; index: number; step: Step }
+  | { type: 'REPLACE_STEPS'; steps: Step[] };
 
 export function automationReducer(
   state: AutomationState,
@@ -91,6 +92,12 @@ export function automationReducer(
       steps.forEach((s, idx) => {
         s.id = `step-${idx + 1}`;
       });
+      return { automation: { ...a, steps } };
+    }
+    case 'REPLACE_STEPS': {
+      if (!a) return state;
+      // Renumber step IDs sequentially to keep them clean
+      const steps = action.steps.map((s, idx) => ({ ...s, id: `step-${idx + 1}` }));
       return { automation: { ...a, steps } };
     }
   }
