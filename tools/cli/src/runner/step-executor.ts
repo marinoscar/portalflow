@@ -7,7 +7,7 @@ import type {
   Step,
   ToolCallAction,
   WaitAction,
-} from '../schema/types.js';
+} from '@portalflow/schema';
 import type { PageService } from '../browser/page.service.js';
 import type { ElementResolver } from '../browser/element-resolver.js';
 import type { Tool } from '../tools/tool.interface.js';

@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import { readFile } from 'fs/promises';
 import pino from 'pino';
-import { AutomationSchema } from './schema/automation.schema.js';
+import { AutomationSchema } from '@portalflow/schema';
 import { ConfigService, type PathsConfig, type VideoConfig } from './config/config.service.js';
 import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
 import { resolvePaths, resolveVideo } from './runner/paths.js';

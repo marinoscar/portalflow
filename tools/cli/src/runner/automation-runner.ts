@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { AutomationSchema } from '../schema/automation.schema.js';
-import type { Automation, Step } from '../schema/types.js';
+import { AutomationSchema } from '@portalflow/schema';
+import type { Automation, Step } from '@portalflow/schema';
 import { BrowserService } from '../browser/browser.service.js';
 import { PageService } from '../browser/page.service.js';
 import { PageContextCapture } from '../browser/context.js';
