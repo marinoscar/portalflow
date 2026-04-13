@@ -40,14 +40,34 @@ export class RunContext {
   }
 
   /**
-   * Replaces all {{varName}} placeholders in the template string with
-   * the corresponding variable value from the context. Placeholders that
-   * have no matching variable are left as-is.
+   * Replaces all {{varName}} placeholders in the template string with the
+   * corresponding variable value from the context.
+   *
+   * Supports an inline default via colon syntax: {{varName:defaultValue}}.
+   * The split is on the FIRST colon only, so the default may itself contain
+   * colons (e.g., a URL like "http://localhost:3000/api").
+   *
+   * - If the variable is set, its value is used regardless of any default.
+   * - If the variable is unset and a default is provided (even empty string),
+   *   the default is used.
+   * - If the variable is unset and there is no colon in the expression, the
+   *   placeholder is left as-is (legacy behaviour).
    */
   resolveTemplate(template: string): string {
-    return template.replace(/\{\{([^}]+)\}\}/g, (_match, key: string) => {
-      const trimmed = key.trim();
-      return this.variables.get(trimmed) ?? `{{${trimmed}}}`;
+    return template.replace(/\{\{([^}]+)\}\}/g, (_match, expr: string) => {
+      const trimmed = expr.trim();
+      const colonIdx = trimmed.indexOf(':');
+      if (colonIdx >= 0) {
+        const varName = trimmed.slice(0, colonIdx).trim();
+        // Locate the colon in the original (un-trimmed) expr so that
+        // whitespace after the colon is preserved exactly as written.
+        const colonIdxInExpr = expr.indexOf(':');
+        const defaultValue = expr.slice(colonIdxInExpr + 1);
+        const value = this.variables.get(varName);
+        return value !== undefined ? value : defaultValue;
+      }
+      const value = this.variables.get(trimmed);
+      return value ?? `{{${trimmed}}}`;
     });
   }
 
