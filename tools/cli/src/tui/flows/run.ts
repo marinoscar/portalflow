@@ -3,6 +3,7 @@ import pc from 'picocolors';
 import { readFile } from 'node:fs/promises';
 import { pickAutomationFile } from '../file-picker.js';
 import { AutomationSchema } from '@portalflow/schema';
+import type { Automation } from '@portalflow/schema';
 import { ConfigService } from '../../config/config.service.js';
 import { resolvePaths, resolveVideo } from '../../runner/paths.js';
 
@@ -80,6 +81,73 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
   previewLines.push(`${pc.dim('Downloads:')}   ${effectivePaths.downloads}`);
   p.note(previewLines.join('\n'), pc.green('Automation Preview'));
 
+  // 4.5. Collect missing / overrideable inputs
+  const collectedInputs = new Map<string, string>();
+  const inputsToPrompt = buildInputsToPrompt(automation);
+
+  if (inputsToPrompt.length > 0) {
+    p.log.info(
+      pc.dim(
+        `This automation has ${inputsToPrompt.length} input(s) to configure before running.`,
+      ),
+    );
+
+    for (const input of inputsToPrompt) {
+      const label = input.description
+        ? `${input.name} — ${input.description}`
+        : input.name;
+
+      let raw: string | boolean | symbol;
+
+      if (input.type === 'boolean') {
+        const initialValue =
+          input.value === 'true' ? true : input.value === 'false' ? false : false;
+        raw = await p.confirm({
+          message: label,
+          initialValue,
+        });
+      } else if (input.type === 'secret') {
+        raw = await p.password({
+          message: label,
+          validate: input.required
+            ? (v) => (v.trim() === '' ? 'This input is required' : undefined)
+            : undefined,
+        });
+      } else if (input.type === 'number') {
+        raw = await p.text({
+          message: label,
+          initialValue: input.source === 'cli_arg' ? (input.value ?? '') : '',
+          validate: (v) => {
+            if (input.required && v.trim() === '') return 'This input is required';
+            if (v.trim() !== '' && isNaN(parseFloat(v))) return 'Must be a number';
+            return undefined;
+          },
+        });
+      } else {
+        // string (default)
+        raw = await p.text({
+          message: label,
+          initialValue: input.source === 'cli_arg' ? (input.value ?? '') : '',
+          validate: input.required
+            ? (v) => (v.trim() === '' ? 'This input is required' : undefined)
+            : undefined,
+        });
+      }
+
+      if (p.isCancel(raw)) {
+        p.log.info('Run cancelled.');
+        if (!options.nested) p.outro('');
+        return;
+      }
+
+      const stringValue =
+        typeof raw === 'boolean' ? String(raw) : (raw as string);
+      if (stringValue !== '') {
+        collectedInputs.set(input.name, stringValue);
+      }
+    }
+  }
+
   // 5. Ask about headless mode
   const headlessDefault = automation.settings?.headless ?? false;
   const headless = await p.confirm({
@@ -124,6 +192,7 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
     const result = await runner.run(picked.path, {
       headless: headless as boolean,
       video: videoForRun as boolean,
+      inputs: collectedInputs.size > 0 ? collectedInputs : undefined,
     });
 
     console.log(''); // visual break
@@ -158,4 +227,34 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
   if (!options.nested) {
     p.outro(pc.dim('See ./artifacts for screenshots and downloads.'));
   }
+}
+
+/**
+ * Determines which inputs need to be collected interactively.
+ *
+ * Rules:
+ * - literal source with a non-empty value → resolvable, skip
+ * - env source with the env var set      → resolvable, skip
+ * - vaultcli source                       → resolvable at runtime, skip
+ * - cli_arg with a default (value field)  → optional prompt (user may override)
+ * - cli_arg with no default               → mandatory prompt
+ */
+function buildInputsToPrompt(automation: Automation): Automation['inputs'] {
+  return automation.inputs.filter((input) => {
+    const source = input.source ?? 'literal';
+    if (source === 'literal' && input.value !== undefined && input.value !== '') {
+      return false; // already has a value
+    }
+    if (source === 'env') {
+      const envKey = input.value ?? input.name;
+      if (process.env[envKey] !== undefined) {
+        return false; // env var is set
+      }
+    }
+    if (source === 'vaultcli') {
+      return false; // resolved at runtime via vaultcli
+    }
+    // cli_arg (with or without default) and unresolvable literal/env → prompt
+    return true;
+  });
 }

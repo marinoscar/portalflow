@@ -59,6 +59,16 @@ program
   .option('--screenshot-dir <dir>', 'Directory to store screenshots')
   .option('--download-dir <dir>', 'Directory to store downloaded files')
   .option('--automations-dir <dir>', 'Directory to look for automation files')
+  .option(
+    '--input <kv>',
+    'Pass an input value as key=value (repeatable)',
+    (val: string, prev: string[] = []) => [...prev, val],
+    [] as string[],
+  )
+  .option(
+    '--inputs-json <json>',
+    'Pass multiple input values as a JSON object',
+  )
   .addHelpText('after', helpText.runHelpText())
   .action(async (
     file: string | undefined,
@@ -69,6 +79,8 @@ program
       screenshotDir?: string;
       downloadDir?: string;
       automationsDir?: string;
+      input?: string[];
+      inputsJson?: string;
     },
   ) => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
@@ -83,6 +95,32 @@ program
         'First-run setup: created default directories and seeded example automations',
       );
     }
+    // Build inputOverrides map: --inputs-json first (lower priority),
+    // then --input pairs (higher priority — more explicit per-value flag).
+    const inputOverrides = new Map<string, string>();
+    if (options.inputsJson) {
+      try {
+        const parsed = JSON.parse(options.inputsJson);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error('--inputs-json must be a JSON object');
+        }
+        for (const [k, v] of Object.entries(parsed)) {
+          inputOverrides.set(k, String(v));
+        }
+      } catch (err) {
+        logger.error({ err: String(err) }, 'Failed to parse --inputs-json');
+        process.exit(1);
+      }
+    }
+    for (const pair of options.input ?? []) {
+      const idx = pair.indexOf('=');
+      if (idx < 0) {
+        logger.error({ pair }, 'Invalid --input value, expected key=value');
+        process.exit(1);
+      }
+      inputOverrides.set(pair.slice(0, idx), pair.slice(idx + 1));
+    }
+
     if (!file) {
       const { runRunFlow } = await import('./tui/flows/run.js');
       await runRunFlow();
@@ -98,6 +136,7 @@ program
         screenshotDir: options.screenshotDir,
         downloadDir: options.downloadDir,
         automationsDir: options.automationsDir,
+        inputs: inputOverrides.size > 0 ? inputOverrides : undefined,
       });
 
       // Print summary to stdout
