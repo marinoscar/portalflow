@@ -4,6 +4,8 @@ import { OpenAiProvider } from './openai.provider.js';
 import { inferKind } from './provider-kinds.js';
 import type {
   ActionDecision,
+  ConditionEvaluation,
+  ConditionQuery,
   ElementQuery,
   ElementResult,
   ItemsQuery,
@@ -99,6 +101,10 @@ export class LlmService {
 
   async findItems(query: ItemsQuery): Promise<ItemsResult> {
     return this.getProvider().findItems(query);
+  }
+
+  async evaluateCondition(query: ConditionQuery): Promise<ConditionEvaluation> {
+    return this.getProvider().evaluateCondition(query);
   }
 
   async decideAction(

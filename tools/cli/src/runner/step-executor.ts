@@ -552,60 +552,110 @@ export class StepExecutor {
 
   private async executeCondition(step: Step): Promise<void> {
     const action = step.action as ConditionAction;
-    const condValue = this.context.resolveTemplate(action.value);
-    let result = false;
 
-    switch (action.check) {
-      case 'element_exists': {
-        result = await this.pageService.elementExists(condValue);
-        break;
-      }
-
-      case 'url_matches': {
-        const currentUrl = await this.pageService.getUrl();
-        result = currentUrl.includes(condValue);
-        break;
-      }
-
-      case 'text_contains': {
-        // Check full page text for the value
-        const html = await this.pageService.getHtml();
-        result = html.includes(condValue);
-        break;
-      }
-
-      case 'variable_equals': {
-        // action.value format: "varName=expectedValue"
-        const eqIdx = condValue.indexOf('=');
-        if (eqIdx === -1) {
-          this.context.logger.warn(
-            { stepId: step.id },
-            'condition "variable_equals" value must be in format "varName=expectedValue"',
-          );
-          break;
-        }
-        const varName = condValue.slice(0, eqIdx);
-        const expected = condValue.slice(eqIdx + 1);
-        result = this.context.getVariable(varName) === expected;
-        break;
-      }
-
-      default: {
-        const exhaustive: never = action.check;
-        throw new Error(`Unknown condition check: ${String(exhaustive)}`);
-      }
+    // Runtime re-validation in case a malformed JSON slipped past schema validation
+    // (e.g., if someone constructed a Step programmatically). Schema refinement
+    // already enforces this at parse time for files loaded via AutomationSchema.
+    const hasAi = action.ai !== undefined && action.ai.trim().length > 0;
+    const hasCheck = action.check !== undefined;
+    if (hasAi && hasCheck) {
+      throw new Error(
+        `Step "${step.id}": condition must use either "check" (deterministic) or "ai" (plain-English), not both.`,
+      );
+    }
+    if (!hasAi && !hasCheck) {
+      throw new Error(
+        `Step "${step.id}": condition requires one of "check" or "ai".`,
+      );
     }
 
-    this.context.logger.info(
-      {
-        stepId: step.id,
-        check: action.check,
-        result,
-        thenStep: action.thenStep ?? null,
-        elseStep: action.elseStep ?? null,
-      },
-      `Condition evaluated to ${result} (step jumping is not yet implemented)`,
-    );
+    let result = false;
+    let reasoning: string | undefined;
+
+    if (hasAi) {
+      const question = this.context.resolveTemplate(action.ai!);
+      const pageContext = await this.contextCapture.capture();
+      const evaluation = await this.llmService.evaluateCondition({
+        question,
+        pageContext,
+      });
+      result = evaluation.result;
+      reasoning = evaluation.reasoning;
+      this.context.logger.info(
+        {
+          stepId: step.id,
+          question,
+          result,
+          confidence: evaluation.confidence,
+          reasoning,
+        },
+        `AI condition evaluated to ${result}`,
+      );
+    } else {
+      if (action.value === undefined) {
+        throw new Error(
+          `Step "${step.id}": condition with "check" requires a "value".`,
+        );
+      }
+      const condValue = this.context.resolveTemplate(action.value);
+
+      switch (action.check) {
+        case 'element_exists': {
+          result = await this.pageService.elementExists(condValue);
+          break;
+        }
+
+        case 'url_matches': {
+          const currentUrl = await this.pageService.getUrl();
+          result = currentUrl.includes(condValue);
+          break;
+        }
+
+        case 'text_contains': {
+          const html = await this.pageService.getHtml();
+          result = html.includes(condValue);
+          break;
+        }
+
+        case 'variable_equals': {
+          // condValue format: "varName=expectedValue"
+          const eqIdx = condValue.indexOf('=');
+          if (eqIdx === -1) {
+            this.context.logger.warn(
+              { stepId: step.id },
+              'condition "variable_equals" value must be in format "varName=expectedValue"',
+            );
+            break;
+          }
+          const varName = condValue.slice(0, eqIdx);
+          const expected = condValue.slice(eqIdx + 1);
+          result = this.context.getVariable(varName) === expected;
+          break;
+        }
+
+        default: {
+          throw new Error(`Unknown condition check: ${String(action.check)}`);
+        }
+      }
+
+      this.context.logger.info(
+        {
+          stepId: step.id,
+          check: action.check,
+          result,
+          thenStep: action.thenStep ?? null,
+          elseStep: action.elseStep ?? null,
+        },
+        `Condition evaluated to ${result} (step jumping is not yet implemented)`,
+      );
+    }
+
+    // Expose the condition result as a context variable so later steps can
+    // reference it via templates, e.g. {{<stepId>_result}}.
+    this.context.setVariable(`${step.id}_result`, String(result));
+    if (reasoning !== undefined) {
+      this.context.setVariable(`${step.id}_reasoning`, reasoning);
+    }
   }
 
   // ---------------------------------------------------------------------------
