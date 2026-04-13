@@ -668,19 +668,29 @@ the next step can type the OTP with `"action": { "interaction": "type", "inputRe
 
 ### 6.6 condition
 
-**Purpose:** Evaluate a page or context condition and record the result. Optionally declares
-which step to jump to based on the outcome.
+**Purpose:** Evaluate a page or context condition and record the result. The condition step
+supports two mutually exclusive modes:
+
+1. **Deterministic check** (`check`) — a rule-based evaluation against the page, URL, or a
+   context variable. Fast, offline, and cheap.
+2. **AI check** (`ai`) — a plain-English question about the current page. The full DOM is
+   sent to the configured LLM provider, which answers true or false based on the evidence
+   it sees.
+
+Exactly one of `check` or `ai` must be provided. Supplying both, or neither, is a schema error
+rejected by `portalflow validate` before the automation runs.
 
 **Action shape:**
 
-| Field      | Type             | Required  | Description |
-|------------|------------------|-----------|-------------|
-| `check`    | `ConditionCheck` | Required  | The type of check to perform. |
-| `value`    | `string`         | Required  | The value to check against. Supports template syntax. |
-| `thenStep` | `string`         | Optional  | Step ID to jump to when the condition is true. |
-| `elseStep` | `string`         | Optional  | Step ID to jump to when the condition is false. |
+| Field      | Type             | Required     | Description |
+|------------|------------------|--------------|-------------|
+| `check`    | `ConditionCheck` | Conditional  | Deterministic check type. Required when `ai` is not set. |
+| `value`    | `string`         | Conditional  | Value the `check` evaluates against. Required whenever `check` is set. Supports template syntax. |
+| `ai`       | `string`         | Conditional  | Plain-English question about the page. Required when `check` is not set. Must be non-empty. Supports template syntax. |
+| `thenStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to true. |
+| `elseStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to false. |
 
-**Check types:**
+**Deterministic check types:**
 
 | Value             | Description |
 |-------------------|-------------|
@@ -689,20 +699,31 @@ which step to jump to based on the outcome.
 | `text_contains`   | True if `value` appears anywhere in the page's HTML content. |
 | `variable_equals` | True if the variable named to the left of `=` in `value` equals the string to the right. Format: `"varName=expected"`. |
 
-**Known limitation:** The schema has `thenStep` and `elseStep` fields but step jumping is not yet
-implemented in the runner. As of this writing, the condition is evaluated and the result is
-logged, but execution always continues to the next step in sequence regardless of the outcome.
-Do not rely on branching behavior in production automations. This is documented in the source:
+**How the AI check works:**
 
-```
-// MVP: evaluate and log; step jumping is future work
-```
+1. The runner captures the current page context (URL, title, simplified HTML).
+2. The question in `ai` (after template substitution) is sent to the active LLM provider using the
+   `conditionEvaluator` system prompt.
+3. The provider returns a JSON object `{ result: boolean, confidence: number, reasoning: string }`.
+4. The boolean is stored as a context variable named `<stepId>_result` (`"true"` / `"false"`).
+5. The AI's reasoning is stored as `<stepId>_reasoning` and can be referenced in later steps via
+   template syntax (e.g. `{{step-cond_reasoning}}`) for logging or user-visible messages.
 
-**Minimal example:**
+The AI is instructed to base its answer only on evidence visible in the provided HTML, to ignore
+hidden/off-screen elements unless the question asks about them, and to keep reasoning short while
+citing specific evidence from the page.
+
+**Known limitation (branching):** The schema has `thenStep` and `elseStep` fields but step jumping
+is not yet implemented in the runner for either deterministic or AI conditions. The condition is
+evaluated and the result is logged, but execution always continues to the next step in sequence.
+Do not rely on branching behavior in production automations. Use the `<stepId>_result` variable
+from a later step if you need to act on the outcome.
+
+**Deterministic example:**
 
 ```json
 {
-  "id": "step-cond",
+  "id": "step-cond-mfa",
   "name": "Check if MFA screen appeared",
   "type": "condition",
   "action": {
@@ -715,11 +736,56 @@ Do not rely on branching behavior in production automations. This is documented 
 }
 ```
 
+**AI example:**
+
+```json
+{
+  "id": "step-cond-loggedin",
+  "name": "Confirm user is logged in",
+  "type": "condition",
+  "action": {
+    "ai": "Is the user currently logged in and viewing an authenticated account page (not a login or error screen)?"
+  },
+  "onFailure": "skip",
+  "maxRetries": 0,
+  "timeout": 30000
+}
+```
+
+**AI example with branching hints (not yet enforced):**
+
+```json
+{
+  "id": "step-cond-captcha",
+  "name": "Detect CAPTCHA challenge",
+  "type": "condition",
+  "action": {
+    "ai": "Does the page display a CAPTCHA or bot-detection challenge that would block automated interaction?",
+    "thenStep": "step-handle-captcha",
+    "elseStep": "step-continue"
+  },
+  "onFailure": "skip",
+  "maxRetries": 0,
+  "timeout": 30000
+}
+```
+
+**Validation errors you may see:**
+
+- `condition action must have exactly one of "check" (deterministic) or "ai" (plain-English question), not both`
+- `condition action with a deterministic "check" requires a "value"`
+
 **Gotchas:**
 - For `variable_equals`, the `value` format must be `"varName=expectedValue"` with no spaces
   around the `=`. Example: `"value": "loginStatus=success"`.
+- AI conditions send the full simplified HTML to your LLM provider. Use them when a deterministic
+  check cannot express the question (e.g. "is the page showing a friendly welcome banner?"), not
+  as a replacement for cheap selector checks.
+- Set a generous `timeout` (30000+) on AI conditions because the LLM round-trip can take several
+  seconds. Deterministic checks can use the default timeout.
+- An empty or whitespace-only `ai` string is rejected at validation time.
 - Even though `thenStep` and `elseStep` are in the schema and parse without error, they have no
-  runtime effect today.
+  runtime effect today for either deterministic or AI conditions.
 
 ---
 
@@ -2663,14 +2729,22 @@ type ToolName = 'smscli' | 'vaultcli';
 
 ```typescript
 interface ConditionAction {
-  check: ConditionCheck;
-  value: string;
-  thenStep?: string;    // step ID — not yet implemented in the runner
-  elseStep?: string;    // step ID — not yet implemented in the runner
+  // Exactly one of `check` or `ai` must be provided.
+  check?: ConditionCheck;   // deterministic check type
+  value?: string;           // required when `check` is set; supports templates
+  ai?: string;              // plain-English question sent to the LLM; supports templates
+  thenStep?: string;        // step ID — not yet implemented in the runner
+  elseStep?: string;        // step ID — not yet implemented in the runner
 }
 
 type ConditionCheck = 'element_exists' | 'url_matches' | 'text_contains' | 'variable_equals';
 ```
+
+Schema refinements enforce:
+
+1. Exactly one of `check` or `ai` is set (neither-both nor neither-none is valid).
+2. When `check` is set, `value` must also be set.
+3. `ai`, when set, must be a non-empty, non-whitespace string.
 
 ### `DownloadAction`
 
