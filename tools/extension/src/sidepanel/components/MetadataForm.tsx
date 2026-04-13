@@ -1,5 +1,4 @@
 import type { Automation } from '@portalflow/schema';
-import { useHasActiveProvider, useLlmCall } from '../hooks/useLlm';
 
 interface Props {
   automation: Automation;
@@ -7,48 +6,11 @@ interface Props {
 }
 
 export function MetadataForm({ automation, onChange }: Props) {
-  const hasProvider = useHasActiveProvider();
-  const { call, loading, error } = useLlmCall();
-
-  const handleAutoFill = async () => {
-    const steps = automation.steps.map((s) => ({
-      name: s.name,
-      type: s.type,
-      description: s.description,
-    }));
-    const result = await call<{ name?: string; goal?: string; description?: string }>({
-      type: 'LLM_POLISH_METADATA',
-      steps,
-    });
-    if (result) {
-      onChange({
-        name: result.name ?? automation.name,
-        goal: result.goal ?? automation.goal,
-        description: result.description ?? automation.description,
-      });
-    }
-  };
-
   return (
     <section className="card">
       <div className="card-header">
         <h2 className="card-title">Automation details</h2>
-        <button
-          className="btn-small"
-          onClick={handleAutoFill}
-          disabled={!hasProvider || loading || automation.steps.length === 0}
-          title={
-            !hasProvider
-              ? 'Configure an LLM provider in settings'
-              : automation.steps.length === 0
-                ? 'Record some steps first'
-                : 'Auto-fill name, goal, and description with LLM'
-          }
-        >
-          {loading ? 'Generating...' : 'Auto-fill with LLM'}
-        </button>
       </div>
-      {error && <div className="error-inline">{error}</div>}
       <label className="field">
         <span>Name</span>
         <input
