@@ -12,9 +12,24 @@ export interface ProviderConfig {
   [key: string]: string | undefined;
 }
 
+export interface PathsConfig {
+  automations?: string;
+  screenshots?: string;
+  videos?: string;
+  downloads?: string;
+}
+
+export interface VideoConfig {
+  enabled?: boolean;
+  width?: number;
+  height?: number;
+}
+
 export interface CliConfig {
   activeProvider?: string;
   providers?: Record<string, ProviderConfig>;
+  paths?: PathsConfig;
+  video?: VideoConfig;
 }
 
 export class ConfigService {
@@ -70,5 +85,27 @@ export class ConfigService {
     if (existsSync(this.configFile)) {
       await unlink(this.configFile);
     }
+  }
+
+  async getPaths(): Promise<PathsConfig> {
+    const config = await this.load();
+    return config.paths ?? {};
+  }
+
+  async setPaths(paths: Partial<PathsConfig>): Promise<void> {
+    const config = await this.load();
+    config.paths = { ...(config.paths ?? {}), ...paths };
+    await this.save(config);
+  }
+
+  async getVideo(): Promise<VideoConfig> {
+    const config = await this.load();
+    return config.video ?? {};
+  }
+
+  async setVideo(video: Partial<VideoConfig>): Promise<void> {
+    const config = await this.load();
+    config.video = { ...(config.video ?? {}), ...video };
+    await this.save(config);
   }
 }

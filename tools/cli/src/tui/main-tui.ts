@@ -3,7 +3,7 @@ import pc from 'picocolors';
 import { ConfigService } from '../config/config.service.js';
 import { providerDisplayName } from './helpers.js';
 
-type MainAction = 'run' | 'validate' | 'provider' | 'exit';
+type MainAction = 'run' | 'validate' | 'provider' | 'settings' | 'exit';
 
 export async function runMainTui(): Promise<void> {
   p.intro(pc.bgCyan(pc.black(' PortalFlow ')));
@@ -30,6 +30,7 @@ export async function runMainTui(): Promise<void> {
         { value: 'run' as MainAction, label: 'Run an automation', hint: 'execute a JSON workflow in a browser' },
         { value: 'validate' as MainAction, label: 'Validate an automation', hint: 'check JSON against the schema' },
         { value: 'provider' as MainAction, label: 'Manage LLM providers', hint: 'Anthropic, OpenAI, Kimi, DeepSeek, Groq, etc.' },
+        { value: 'settings' as MainAction, label: 'Settings', hint: 'storage paths, video recording' },
         { value: 'exit' as MainAction, label: 'Exit' },
       ],
     });
@@ -53,6 +54,11 @@ export async function runMainTui(): Promise<void> {
       case 'provider': {
         const { runProviderTui } = await import('./provider-tui.js');
         await runProviderTui({ nested: true });
+        break;
+      }
+      case 'settings': {
+        const { runSettingsTui } = await import('./settings-tui.js');
+        await runSettingsTui({ nested: true });
         break;
       }
       case 'exit':

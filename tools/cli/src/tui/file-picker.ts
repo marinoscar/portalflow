@@ -2,6 +2,8 @@ import * as p from '@clack/prompts';
 import { readdir } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
+import { ConfigService } from '../config/config.service.js';
+import { resolvePaths } from '../runner/paths.js';
 
 export interface PickedFile {
   path: string;      // absolute path
@@ -9,14 +11,36 @@ export interface PickedFile {
 }
 
 export async function pickAutomationFile(message: string = 'Select an automation file'): Promise<PickedFile> {
-  // Discover .json files in common search locations relative to cwd
   const cwd = process.cwd();
-  const searchDirs = [
+
+  // Resolve the configured automations directory (user config > default)
+  let configuredAutomationsDir: string | undefined;
+  try {
+    const configService = new ConfigService();
+    const cfg = await configService.load();
+    const paths = resolvePaths(cfg);
+    configuredAutomationsDir = isAbsolute(paths.automations)
+      ? paths.automations
+      : resolve(cwd, paths.automations);
+  } catch {
+    // Config read failure is non-fatal — fall back to hardcoded defaults
+  }
+
+  // Build search list: configured dir first, then hardcoded fallbacks
+  const searchDirs: string[] = [];
+  if (configuredAutomationsDir) {
+    searchDirs.push(configuredAutomationsDir);
+  }
+  for (const fallback of [
     cwd,
     join(cwd, 'examples'),
     join(cwd, 'automations'),
     join(cwd, 'tools', 'cli', 'examples'),
-  ];
+  ]) {
+    if (!searchDirs.includes(fallback)) {
+      searchDirs.push(fallback);
+    }
+  }
 
   interface Found { path: string; mtime: number; }
   const found: Found[] = [];

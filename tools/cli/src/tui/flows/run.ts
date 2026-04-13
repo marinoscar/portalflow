@@ -3,6 +3,8 @@ import pc from 'picocolors';
 import { readFile } from 'node:fs/promises';
 import { pickAutomationFile } from '../file-picker.js';
 import { AutomationSchema } from '../../schema/automation.schema.js';
+import { ConfigService } from '../../config/config.service.js';
+import { resolvePaths, resolveVideo } from '../../runner/paths.js';
 
 export interface RunFlowOptions {
   nested?: boolean;
@@ -47,7 +49,19 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
     return;
   }
 
-  // 3. Show preview
+  // 3. Resolve effective paths and video config for preview
+  let effectivePaths = { screenshots: './artifacts/screenshots', videos: './artifacts/videos', downloads: './artifacts/downloads', automations: './automations' };
+  let effectiveVideo = { enabled: false, width: 1280, height: 720 };
+  try {
+    const configService = new ConfigService();
+    const userConfig = await configService.load();
+    effectivePaths = resolvePaths(userConfig, automation.settings);
+    effectiveVideo = resolveVideo(userConfig, automation.settings);
+  } catch {
+    // Non-fatal — use defaults in preview
+  }
+
+  // 4. Show preview
   const previewLines = [
     `${pc.dim('Name:')}    ${pc.cyan(automation.name)}`,
     `${pc.dim('Goal:')}    ${automation.goal}`,
@@ -60,9 +74,13 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
   if (automation.outputs && automation.outputs.length > 0) {
     previewLines.push(`${pc.dim('Outputs:')} ${automation.outputs.map((o) => o.name).join(', ')}`);
   }
+  previewLines.push('');
+  previewLines.push(`${pc.dim('Screenshots:')} ${effectivePaths.screenshots}`);
+  previewLines.push(`${pc.dim('Videos:')}      ${effectivePaths.videos} ${effectiveVideo.enabled ? pc.green('(recording)') : pc.dim('(off)')}`);
+  previewLines.push(`${pc.dim('Downloads:')}   ${effectivePaths.downloads}`);
   p.note(previewLines.join('\n'), pc.green('Automation Preview'));
 
-  // 4. Ask about headless mode
+  // 5. Ask about headless mode
   const headlessDefault = automation.settings?.headless ?? false;
   const headless = await p.confirm({
     message: 'Run in headless mode?',
@@ -74,7 +92,18 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
     return;
   }
 
-  // 5. Final confirmation
+  // 6. Ask about video recording
+  const videoForRun = await p.confirm({
+    message: 'Enable video recording for this run?',
+    initialValue: effectiveVideo.enabled,
+  });
+  if (p.isCancel(videoForRun)) {
+    p.log.info('Run cancelled.');
+    if (!options.nested) p.outro('');
+    return;
+  }
+
+  // 7. Final confirmation
   const start = await p.confirm({
     message: `Start running ${pc.cyan(automation.name)}?`,
     initialValue: true,
@@ -85,14 +114,17 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
     return;
   }
 
-  // 6. Execute — dynamic import so we don't pay playwright startup cost for non-run flows
+  // 8. Execute — dynamic import so we don't pay playwright startup cost for non-run flows
   p.log.info(pc.dim('Launching automation... (browser output will follow)'));
   console.log(''); // visual break
 
   try {
     const { AutomationRunner } = await import('../../runner/automation-runner.js');
     const runner = new AutomationRunner();
-    const result = await runner.run(picked.path, { headless: headless as boolean });
+    const result = await runner.run(picked.path, {
+      headless: headless as boolean,
+      video: videoForRun as boolean,
+    });
 
     console.log(''); // visual break
     const durationMs = result.completedAt.getTime() - result.startedAt.getTime();

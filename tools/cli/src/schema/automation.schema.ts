@@ -129,7 +129,16 @@ export const SettingsSchema = z.object({
   userAgent: z.string().optional(),
   defaultTimeout: z.number().default(30000),
   screenshotOnFailure: z.boolean().default(true),
+  // Legacy — kept for backward compat; screenshotDir takes precedence
   artifactDir: z.string().default('./artifacts'),
+  // Per-automation storage path overrides
+  screenshotDir: z.string().optional(),
+  videoDir: z.string().optional(),
+  downloadDir: z.string().optional(),
+  automationsDir: z.string().optional(),
+  // Video recording
+  recordVideo: z.boolean().optional(),
+  videoSize: z.object({ width: z.number(), height: z.number() }).optional(),
 });
 
 // ---------------------------------------------------------------------------

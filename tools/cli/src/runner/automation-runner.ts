@@ -13,9 +13,16 @@ import type { Tool } from '../tools/tool.interface.js';
 import { RunContext, type RunResult } from './run-context.js';
 import { StepExecutor } from './step-executor.js';
 import { createRunLogger } from './logger.js';
+import { ConfigService } from '../config/config.service.js';
+import { resolvePaths, resolveVideo } from './paths.js';
 
 export interface RunOptions {
   headless?: boolean;
+  video?: boolean;
+  videoDir?: string;
+  screenshotDir?: string;
+  downloadDir?: string;
+  automationsDir?: string;
 }
 
 const RETRY_BASE_DELAY_MS = 1_000;
@@ -138,9 +145,35 @@ export class AutomationRunner {
     }
 
     // ------------------------------------------------------------------
-    // 7. Launch BrowserService
+    // 7. Resolve effective paths and video config
     // ------------------------------------------------------------------
     const settings = automation.settings;
+    const configService = new ConfigService();
+    const userConfig = await configService.load();
+
+    const effectivePaths = resolvePaths(userConfig, settings, {
+      automations: options?.automationsDir,
+      screenshots: options?.screenshotDir,
+      videos: options?.videoDir,
+      downloads: options?.downloadDir,
+    });
+    const effectiveVideo = resolveVideo(userConfig, settings, {
+      enabled: options?.video,
+    });
+
+    logger.info(
+      {
+        screenshots: effectivePaths.screenshots,
+        videos: effectivePaths.videos,
+        downloads: effectivePaths.downloads,
+        videoEnabled: effectiveVideo.enabled,
+      },
+      'Resolved artifact paths',
+    );
+
+    // ------------------------------------------------------------------
+    // 8. Launch BrowserService
+    // ------------------------------------------------------------------
     const browserService = new BrowserService();
 
     const headless = options?.headless ?? settings?.headless ?? false;
@@ -149,16 +182,20 @@ export class AutomationRunner {
       headless,
       viewport: settings?.viewport,
       userAgent: settings?.userAgent,
-      artifactDir: settings?.artifactDir ?? './artifacts',
+      screenshotDir: effectivePaths.screenshots,
+      videoDir: effectivePaths.videos,
+      downloadDir: effectivePaths.downloads,
+      recordVideo: effectiveVideo.enabled,
+      videoSize: { width: effectiveVideo.width, height: effectiveVideo.height },
     });
 
     logger.info({ headless }, 'Browser launched');
 
     // ------------------------------------------------------------------
-    // 8. Create services and tools
+    // 9. Create services and tools
     // ------------------------------------------------------------------
     const getPage = () => browserService.getPage();
-    const pageService = new PageService(getPage);
+    const pageService = new PageService(getPage, () => browserService.getDownloadDir());
     const contextCapture = new PageContextCapture(getPage);
     const elementResolver = new ElementResolver(getPage, llmService, contextCapture);
 
@@ -170,14 +207,14 @@ export class AutomationRunner {
     ]);
 
     // ------------------------------------------------------------------
-    // 9. Create StepExecutor
+    // 10. Create StepExecutor
     // ------------------------------------------------------------------
     const stepExecutor = new StepExecutor(pageService, elementResolver, tools, context);
 
     const screenshotOnFailure = settings?.screenshotOnFailure ?? true;
 
     // ------------------------------------------------------------------
-    // 10. Execute steps
+    // 11. Execute steps
     // ------------------------------------------------------------------
     const steps = automation.steps;
 
@@ -203,17 +240,21 @@ export class AutomationRunner {
     }
 
     // ------------------------------------------------------------------
-    // 11. Close browser
+    // 12. Close browser and collect video paths
     // ------------------------------------------------------------------
     try {
-      await browserService.close();
+      const { videoPaths } = await browserService.close();
+      for (const videoPath of videoPaths) {
+        context.addArtifact(videoPath);
+        logger.info({ videoPath }, 'Video recording saved');
+      }
       logger.info('Browser closed');
     } catch (err) {
       logger.warn({ err: String(err) }, 'Error closing browser (non-fatal)');
     }
 
     // ------------------------------------------------------------------
-    // 12. Log execution summary and return result
+    // 13. Log execution summary and return result
     // ------------------------------------------------------------------
     const result = context.toResult(steps.length);
 

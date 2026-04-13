@@ -11,6 +11,7 @@ PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser aut
 - [Quick Start](#quick-start)
 - [Interactive Modes](#interactive-modes)
 - [Interactive Provider Setup](#interactive-provider-setup)
+- [Storage and Video Settings](#storage-and-video-settings)
 - [Commands](#commands)
 - [Configuration](#configuration)
 - [Environment Variables](#environment-variables)
@@ -161,14 +162,15 @@ Every PortalFlow command has a guided TUI mode. Run the command without its requ
 
 | Command | TUI trigger | What it does |
 |---|---|---|
-| `portalflow` | bare (no args) | Top-level menu: run / validate / manage providers / exit |
-| `portalflow run` | no file argument | File picker (discovers `./*.json`, `./examples/*.json`, `./automations/*.json`), validates before running, shows an automation preview, asks about headless mode, and confirms before launching |
+| `portalflow` | bare (no args) | Top-level menu: run / validate / manage providers / settings / exit |
+| `portalflow run` | no file argument | File picker, validates, shows automation preview with resolved artifact paths, asks about headless mode and video recording, then confirms before launching |
 | `portalflow validate` | no file argument | File picker, then full schema validation with a formatted summary on success or error details on failure |
 | `portalflow provider` | no subcommand | Provider management menu (documented below) |
+| `portalflow settings` | no subcommand | Settings menu: view current paths and video config, configure storage paths, configure video recording, or reset to defaults |
 
 You can always supply the required argument to skip the TUI and run non-interactively — scripts and CI pipelines are unaffected.
 
-The file picker automatically discovers `.json` files in `./`, `./examples/`, `./automations/`, and `./tools/cli/examples/`, sorted by most recently modified. A "Enter path manually..." option is always available if your file lives elsewhere.
+The file picker automatically discovers `.json` files in the configured automations directory first (default: `./automations`), then falls back to `./`, `./examples/`, and `./tools/cli/examples/`, sorted by most recently modified. A "Enter path manually..." option is always available if your file lives elsewhere.
 
 ---
 
@@ -197,6 +199,99 @@ All non-interactive subcommands (`provider list`, `provider set`, `provider conf
 
 ---
 
+## Storage and Video Settings
+
+PortalFlow writes four kinds of files during a run: automation definitions (input), screenshots, videos, and downloads. Each has its own configurable directory and can be set globally, per-automation, or per-run.
+
+### Built-in defaults
+
+| Purpose | Default location |
+|---|---|
+| Automation files (file picker) | `./automations` |
+| Screenshots | `./artifacts/screenshots` |
+| Videos | `./artifacts/videos` |
+| Downloads | `./artifacts/downloads` |
+
+Video recording is disabled by default.
+
+### Precedence
+
+When resolving the effective path or video config, the CLI checks these sources in order (highest wins):
+
+1. **CLI flag** on `portalflow run` (`--screenshot-dir`, `--video-dir`, `--download-dir`, `--automations-dir`, `--video` / `--no-video`)
+2. **Automation JSON `settings`** (per-automation)
+3. **User config** `~/.portalflow/config.json` (`paths.*`, `video.*`)
+4. **Built-in defaults**
+
+### Configuring globally
+
+Use the interactive settings menu:
+
+```bash
+portalflow settings
+```
+
+Or the non-interactive subcommands:
+
+```bash
+# Show current settings
+portalflow settings list
+
+# Update paths (any subset of flags)
+portalflow settings paths --automations ~/my-automations --videos ~/recordings
+
+# Enable video and set resolution
+portalflow settings video --enable --width 1920 --height 1080
+
+# Disable video
+portalflow settings video --disable
+```
+
+### Configuring per run
+
+```bash
+portalflow run automation.json --video --video-dir ./one-off-recordings
+portalflow run automation.json --screenshot-dir /tmp/shots --no-video
+```
+
+### Configuring per automation
+
+In the automation JSON's `settings` object:
+
+```json
+{
+  "settings": {
+    "recordVideo": true,
+    "videoSize": { "width": 1920, "height": 1080 },
+    "videoDir": "./my-automation-videos",
+    "screenshotDir": "./my-automation-screenshots",
+    "downloadDir": "./my-automation-downloads"
+  }
+}
+```
+
+### Config file example
+
+```json
+{
+  "activeProvider": "anthropic",
+  "providers": { },
+  "paths": {
+    "automations": "/home/user/portalflow-runs/automations",
+    "screenshots": "/home/user/portalflow-runs/screenshots",
+    "videos": "/home/user/portalflow-runs/videos",
+    "downloads": "/home/user/portalflow-runs/downloads"
+  },
+  "video": {
+    "enabled": true,
+    "width": 1920,
+    "height": 1080
+  }
+}
+```
+
+---
+
 ## Commands
 
 ### `portalflow run [file]`
@@ -206,12 +301,21 @@ Execute an automation from a JSON file. If `file` is omitted, launches the inter
 ```bash
 portalflow run automation.json
 portalflow run automation.json --headless
+portalflow run automation.json --video --video-dir ./recordings
 portalflow run   # interactive mode
 ```
 
 | Option | Description |
 |---|---|
 | `--headless` | Run Chrome in headless mode (default: headed) |
+| `--video` | Enable video recording of the browser session |
+| `--no-video` | Disable video recording even if enabled in config |
+| `--video-dir <dir>` | Directory to store recorded videos |
+| `--screenshot-dir <dir>` | Directory to store screenshots |
+| `--download-dir <dir>` | Directory to store downloaded files |
+| `--automations-dir <dir>` | Directory to look for automation files (used by the file picker) |
+
+See [Storage and Video Settings](#storage-and-video-settings) for the full precedence rules.
 
 ### `portalflow validate [file]`
 
@@ -282,6 +386,56 @@ portalflow provider reset --yes
 
 For an interactive reset with a safer two-step confirmation, run `portalflow provider` and pick "Reset all configurations" from the menu instead.
 
+### `portalflow settings`
+
+With no subcommand, launches the interactive settings TUI for managing storage paths and video recording. See [Storage and Video Settings](#storage-and-video-settings).
+
+```bash
+portalflow settings
+```
+
+### `portalflow settings list`
+
+Show the effective storage paths and video recording settings (merging config file with built-in defaults).
+
+```bash
+portalflow settings list
+```
+
+### `portalflow settings paths`
+
+Set one or more storage path directories. Omit all flags to display the current effective paths.
+
+```bash
+portalflow settings paths --automations ~/automations --screenshots ~/screenshots
+portalflow settings paths --videos ~/videos --downloads ~/downloads
+portalflow settings paths   # show current paths
+```
+
+| Option | Description |
+|---|---|
+| `--automations <dir>` | Directory for the file picker to search |
+| `--screenshots <dir>` | Directory to store screenshots |
+| `--videos <dir>` | Directory to store recorded videos |
+| `--downloads <dir>` | Directory to store downloaded files |
+
+### `portalflow settings video`
+
+Configure video recording defaults. Omit all flags to display the current effective video config.
+
+```bash
+portalflow settings video --enable --width 1920 --height 1080
+portalflow settings video --disable
+portalflow settings video   # show current video config
+```
+
+| Option | Description |
+|---|---|
+| `--enable` | Enable video recording by default for all runs |
+| `--disable` | Disable video recording by default |
+| `--width <n>` | Video width in pixels |
+| `--height <n>` | Video height in pixels |
+
 ### Custom OpenAI-compatible providers
 
 Any OpenAI-compatible endpoint is supported. The built-in presets provide pre-filled base URLs and default models. You can also add a fully custom endpoint.
@@ -335,7 +489,7 @@ portalflow provider set ollama
 
 ## Configuration
 
-Provider configuration is stored at `~/.portalflow/config.json`:
+All configuration is stored at `~/.portalflow/config.json`:
 
 ```json
 {
@@ -358,11 +512,24 @@ Provider configuration is stored at `~/.portalflow/config.json`:
       "model": "moonshot-v1-32k",
       "baseUrl": "https://api.moonshot.cn/v1"
     }
+  },
+  "paths": {
+    "automations": "/home/user/automations",
+    "screenshots": "/home/user/artifacts/screenshots",
+    "videos": "/home/user/artifacts/videos",
+    "downloads": "/home/user/artifacts/downloads"
+  },
+  "video": {
+    "enabled": false,
+    "width": 1280,
+    "height": 720
   }
 }
 ```
 
 The `kind` field controls which API client is used: `anthropic` uses the native Anthropic Messages API; `openai-compatible` uses the OpenAI client with a custom `baseUrl`. Existing configs without a `kind` field are automatically upgraded on first use: `anthropic` maps to kind `anthropic`, everything else maps to `openai-compatible`.
+
+The `paths` and `video` sections are optional; built-in defaults apply for any omitted values. See [Storage and Video Settings](#storage-and-video-settings).
 
 ---
 
@@ -473,12 +640,33 @@ All step types share these fields:
     "viewport": { "width": 1280, "height": 800 },
     "defaultTimeout": 30000,
     "screenshotOnFailure": true,
-    "artifactDir": "./artifacts"
+    "artifactDir": "./artifacts",
+    "screenshotDir": "./my-screenshots",
+    "videoDir": "./my-videos",
+    "downloadDir": "./my-downloads",
+    "automationsDir": "./my-automations",
+    "recordVideo": true,
+    "videoSize": { "width": 1920, "height": 1080 }
   }
 }
 ```
 
-The `--headless` CLI flag overrides `settings.headless` in the JSON.
+| Field | Default | Description |
+|---|---|---|
+| `headless` | `false` | Run browser headless |
+| `viewport` | — | Browser viewport dimensions |
+| `userAgent` | — | Custom user-agent string |
+| `defaultTimeout` | `30000` | Default step timeout in ms |
+| `screenshotOnFailure` | `true` | Capture a screenshot when a step aborts |
+| `artifactDir` | `./artifacts` | Legacy fallback directory for screenshots |
+| `screenshotDir` | — | Per-automation screenshot directory (overrides config and defaults) |
+| `videoDir` | — | Per-automation video directory |
+| `downloadDir` | — | Per-automation downloads directory |
+| `automationsDir` | — | Per-automation automations directory (affects file picker) |
+| `recordVideo` | — | Per-automation video recording toggle |
+| `videoSize` | — | Per-automation video resolution `{ width, height }` |
+
+The `--headless` CLI flag overrides `settings.headless` in the JSON. See [Storage and Video Settings](#storage-and-video-settings) for the full precedence rules for storage paths and video recording.
 
 ### Minimal Example
 
