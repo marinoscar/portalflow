@@ -2,7 +2,7 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { readFile } from 'node:fs/promises';
 import { pickAutomationFile } from '../file-picker.js';
-import { AutomationSchema } from '../../schema/automation.schema.js';
+import { AutomationSchema } from '@portalflow/schema';
 import { ConfigService } from '../../config/config.service.js';
 import { resolvePaths, resolveVideo } from '../../runner/paths.js';
 

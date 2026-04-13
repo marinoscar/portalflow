@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CliConfig, PathsConfig, VideoConfig } from '../config/config.service.js';
-import type { Automation } from '../schema/types.js';
+import type { Automation } from '@portalflow/schema';
 
 export const PORTALFLOW_HOME = join(homedir(), '.portalflow');
 
