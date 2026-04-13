@@ -273,16 +273,62 @@ export const SettingsSchema = z.object({
 // Top-level Automation
 // ---------------------------------------------------------------------------
 
-export const AutomationSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string().min(1),
-  version: z.string().default('1.0.0'),
-  description: z.string(),
-  goal: z.string(),
-  inputs: z.array(InputSchema),
-  steps: z.array(StepSchema),
-  functions: z.array(FunctionDefinitionSchema).optional(),
-  tools: z.array(ToolRefSchema).optional(),
-  outputs: z.array(OutputSchema).optional(),
-  settings: SettingsSchema.optional(),
-});
+export const AutomationSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string().min(1),
+    version: z.string().default('1.0.0'),
+    description: z.string(),
+    goal: z.string(),
+    inputs: z.array(InputSchema),
+    steps: z.array(StepSchema),
+    functions: z.array(FunctionDefinitionSchema).optional(),
+    tools: z.array(ToolRefSchema).optional(),
+    outputs: z.array(OutputSchema).optional(),
+    settings: SettingsSchema.optional(),
+  })
+  .superRefine((automation, ctx) => {
+    // 1. Function names must be unique across the automation.
+    const definedFunctions = new Set<string>();
+    (automation.functions ?? []).forEach((fn, i) => {
+      if (definedFunctions.has(fn.name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate function name: "${fn.name}"`,
+          path: ['functions', i, 'name'],
+        });
+      }
+      definedFunctions.add(fn.name);
+    });
+
+    // 2. Every `call` step (anywhere in the tree) must reference a known function.
+    //    Recursively walks automation.steps and each function body, descending into
+    //    substeps. Templated function names (`{{varName}}`) are skipped because
+    //    they only resolve at runtime.
+    const isTemplate = (s: string): boolean => /\{\{[^}]+\}\}/.test(s);
+    const walkSteps = (steps: Step[], basePath: (string | number)[]): void => {
+      steps.forEach((step, idx) => {
+        const stepPath: (string | number)[] = [...basePath, idx];
+
+        if (step.type === 'call') {
+          const action = step.action as { function: string; args?: Record<string, string> };
+          if (!isTemplate(action.function) && !definedFunctions.has(action.function)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `call step "${step.id}" references unknown function "${action.function}"`,
+              path: [...stepPath, 'action', 'function'],
+            });
+          }
+        }
+
+        if (step.substeps && step.substeps.length > 0) {
+          walkSteps(step.substeps, [...stepPath, 'substeps']);
+        }
+      });
+    };
+
+    walkSteps(automation.steps, ['steps']);
+    (automation.functions ?? []).forEach((fn, i) => {
+      walkSteps(fn.steps, ['functions', i, 'steps']);
+    });
+  });
