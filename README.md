@@ -101,6 +101,6 @@ The [`@portalflow/extension`](tools/extension/README.md) package is a Manifest V
 
 ### Automation JSON format reference
 
-The [`docs/AUTOMATION-JSON-SPEC.md`](docs/AUTOMATION-JSON-SPEC.md) file is the authoritative reference for the automation JSON format that both the CLI and the Chrome extension use. It documents every field, every step type, every action shape, selector cascades, template syntax, failure policies, the `loop` step in depth, common patterns, three full worked examples, and a schema reference appendix.
+The [`docs/AUTOMATION-JSON-SPEC.md`](docs/AUTOMATION-JSON-SPEC.md) file is the authoritative reference for the automation JSON format that both the CLI and the Chrome extension use. It documents every field, every step type (including the `loop` step for bounded iteration, the `condition` step for deterministic and AI-based branching, and the `call` step for invoking reusable functions), every action shape, selector cascades, template syntax, failure policies, reusable functions and their parameter model, common patterns, three full worked examples, and a schema reference appendix.
 
 Both the CLI and the extension produce and consume files that conform to this spec via the shared `@portalflow/schema` workspace package.

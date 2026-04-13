@@ -1,0 +1,126 @@
+{
+  "id": "11111111-2222-3333-4444-555555555555",
+  "name": "Functions demo",
+  "version": "1.0.0",
+  "description": "Demonstrates the functions/call feature with a reusable downloadBill function called from inside a loop.",
+  "goal": "Download the last N bills from a mock billing history using a reusable function.",
+  "inputs": [
+    {
+      "name": "billCount",
+      "type": "number",
+      "required": false,
+      "source": "cli_arg",
+      "value": "3",
+      "description": "How many bills to download"
+    }
+  ],
+  "functions": [
+    {
+      "name": "downloadBill",
+      "description": "Expand a single bill row and save its PDF.",
+      "parameters": [
+        {
+          "name": "billRow",
+          "description": "CSS selector for the bill row to download",
+          "required": true
+        },
+        {
+          "name": "billLabel",
+          "description": "Human-readable label for logs",
+          "required": false,
+          "default": "bill"
+        }
+      ],
+      "steps": [
+        {
+          "id": "fn-1",
+          "name": "Expand row for {{billLabel}}",
+          "type": "interact",
+          "action": { "interaction": "click" },
+          "selectors": { "primary": "{{billRow}}" },
+          "aiGuidance": "The collapsed bill row for {{billLabel}}",
+          "onFailure": "skip",
+          "maxRetries": 2,
+          "timeout": 10000
+        },
+        {
+          "id": "fn-2",
+          "name": "Wait for details to render",
+          "type": "wait",
+          "action": { "condition": "network_idle" },
+          "onFailure": "skip",
+          "maxRetries": 0,
+          "timeout": 10000
+        },
+        {
+          "id": "fn-3",
+          "name": "Save PDF for {{billLabel}}",
+          "type": "download",
+          "action": { "trigger": "click", "expectedFilename": "*.pdf" },
+          "selectors": { "primary": "button.download-pdf" },
+          "onFailure": "abort",
+          "maxRetries": 2,
+          "timeout": 30000
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "nav-1",
+      "name": "Open billing history",
+      "type": "navigate",
+      "action": { "url": "https://example.com/billing" },
+      "onFailure": "abort",
+      "maxRetries": 1,
+      "timeout": 30000
+    },
+    {
+      "id": "cond-1",
+      "name": "Check if login is required",
+      "type": "condition",
+      "action": {
+        "ai": "Is the current page a login screen asking for credentials?",
+        "thenCall": "downloadBill"
+      },
+      "onFailure": "skip",
+      "maxRetries": 0,
+      "timeout": 30000
+    },
+    {
+      "id": "loop-bills",
+      "name": "Download last {{billCount}} bills",
+      "type": "loop",
+      "action": {
+        "maxIterations": "{{billCount}}",
+        "items": {
+          "description": "Each bill row in the billing history list; newest bills appear first.",
+          "selectorPattern": "tr.bill-row",
+          "itemVar": "billRow",
+          "order": "newest"
+        },
+        "indexVar": "billIndex"
+      },
+      "onFailure": "skip",
+      "maxRetries": 0,
+      "timeout": 600000,
+      "substeps": [
+        {
+          "id": "call-1",
+          "name": "Call downloadBill for bill {{billIndex}}",
+          "type": "call",
+          "action": {
+            "function": "downloadBill",
+            "args": {
+              "billRow": "{{billRow}}",
+              "billLabel": "bill #{{billIndex}}"
+            }
+          },
+          "onFailure": "skip",
+          "maxRetries": 0,
+          "timeout": 120000
+        }
+      ]
+    }
+  ]
+}

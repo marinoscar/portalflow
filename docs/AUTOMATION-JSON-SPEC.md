@@ -64,6 +64,7 @@ automations are resilient to minor UI changes without requiring manual updates t
 - [2. Table of Contents](#2-table-of-contents)
 - [3. Top-level Structure](#3-top-level-structure)
 - [4. Inputs](#4-inputs)
+- [4.5 Functions](#45-functions)
 - [5. Steps — Common Fields](#5-steps--common-fields)
 - [6. Step Types](#6-step-types)
   - [6.1 navigate](#61-navigate)
@@ -74,6 +75,7 @@ automations are resilient to minor UI changes without requiring manual updates t
   - [6.6 condition](#66-condition)
   - [6.7 download](#67-download)
   - [6.8 loop](#68-loop)
+  - [6.9 call](#69-call)
 - [7. Selectors](#7-selectors)
 - [8. AI Guidance](#8-ai-guidance)
 - [9. Validation Blocks](#9-validation-blocks)
@@ -124,6 +126,7 @@ table below covers every top-level field.
 | `goal`        | `string`              | Required  | —         | The business goal or outcome this automation achieves. More high-level than `description`. |
 | `inputs`      | `Input[]`             | Required  | —         | Array of input parameter declarations. May be empty (`[]`). |
 | `steps`       | `Step[]`              | Required  | —         | Ordered array of steps to execute. May be empty but an empty steps array does nothing. |
+| `functions`   | `FunctionDefinition[]`| Optional  | `[]`      | Reusable named blocks of steps, invoked via the `call` step type. See [section 4.5](#45-functions). |
 | `tools`       | `ToolRef[]`           | Optional  | —         | Declares which external tools (smscli, vaultcli) this automation uses. Required by convention if any step uses `tool_call`. |
 | `outputs`     | `Output[]`            | Optional  | —         | Declares the named outputs this automation is expected to produce. |
 | `settings`    | `Settings`            | Optional  | —         | Browser and runtime configuration overrides. See [section 12](#12-settings). |
@@ -298,6 +301,211 @@ When running the CLI interactively via `portalflow run` (without a file argument
 
 ---
 
+## 4.5 Functions
+
+Functions are named, reusable blocks of steps. They solve the repetition problem that shows up
+in real automations: a "download one bill" sequence runs once during development, then needs to
+run again for each row inside a loop; a "handle CAPTCHA" sequence needs to run whenever a
+condition detects one. Without functions, authors would copy-paste the same steps into multiple
+places and let them drift apart.
+
+A function is declared in the top-level `functions` array and is invoked with the [`call` step
+type](#69-call). Functions may call other functions, including themselves, up to a runtime depth
+limit of **16** calls deep.
+
+### 4.5.1 FunctionDefinition field reference
+
+| Field         | Type                    | Required  | Description |
+|---------------|-------------------------|-----------|-------------|
+| `name`        | `string` (min 1)        | Required  | Unique function name. Must be unique across the whole automation; duplicates are rejected at validation time. Referenced from `call` steps and from `condition.thenCall`/`elseCall`. |
+| `description` | `string`                | Optional  | Human-readable purpose. Shown in logs when the function is invoked. |
+| `parameters`  | `FunctionParameter[]`   | Optional  | Declared inputs to the function. May be empty or omitted for zero-arg functions. |
+| `steps`       | `Step[]`                | Required  | The body of the function. May contain any step type, including nested `call` steps, loops, conditions, etc. |
+
+### 4.5.2 FunctionParameter field reference
+
+| Field         | Type      | Required  | Default | Description |
+|---------------|-----------|-----------|---------|-------------|
+| `name`        | `string` (min 1) | Required | — | Parameter name. Becomes a context variable inside the function body. |
+| `description` | `string`  | Optional  | —       | Documentation. Not used by the runtime. |
+| `default`     | `string`  | Optional  | —       | Value used when the caller does not supply this parameter in `args`. Templates are NOT pre-resolved; the default string is passed through `context.resolveTemplate` at call time. |
+| `required`    | `boolean` | Optional  | `true`  | When true and no `default` is set, the runtime throws if the caller omits this parameter. |
+
+### 4.5.3 How parameters flow into the function body
+
+PortalFlow uses a **shared context** model for function calls. The same `RunContext` variable
+map that holds top-level inputs, extract outputs, and loop iteration variables is visible inside
+function bodies. When the runtime invokes a function:
+
+1. Each `args` value supplied by the caller is resolved through `context.resolveTemplate`
+   (so templates like `{{item}}` from an enclosing loop resolve against the CALLER's variables).
+2. For every parameter declared by the function, the runtime **saves the previous value** of
+   that variable name (if any) and writes the resolved arg value into the context.
+3. The function body executes. Every step in the body sees the shadowed parameter values plus
+   everything else that was already in the context (loop iteration vars, inputs, extract outputs,
+   condition results, etc.) — full shared-context visibility.
+4. When the function returns (either normally or via an error), the saved values are **restored**
+   in a `finally` block. Parameter names that were unset before the call are removed again.
+
+This model has three practical consequences worth knowing:
+
+- **Loop iteration variables pass through automatically.** A loop with `itemVar: "item"` that
+  calls a function can either pass `args: { item: "{{item}}" }` explicitly or rely on the fact
+  that `{{item}}` is already in shared context. The explicit-arg form is clearer and recommended.
+- **Functions can produce "return values" by convention.** A function that sets a variable like
+  `lastDownloadedFile` (via an `extract` step with `outputName`) leaves that variable in shared
+  context after it returns. The caller reads it by name. There is no explicit `return`
+  construct; this pattern is the accepted workaround.
+- **Naming collisions are the author's responsibility.** If two functions both write to a
+  variable called `result`, and you call them in sequence, the second call overwrites the first.
+  Choose distinct, descriptive variable names inside functions the same way you would inside a
+  top-level step list.
+
+### 4.5.4 Recursion and the call depth cap
+
+Functions may call other functions, and a function may call itself. The runtime tracks the
+current call depth on the executor instance. When a call would exceed **`MAX_CALL_DEPTH = 16`**,
+the runtime throws:
+
+```
+Function call depth limit (16) exceeded while calling "<name>" from step "<callerStepId>"
+```
+
+This is a hard safety cap, not a configurable limit. It exists to catch accidental infinite
+recursion (a function that calls itself without a base case) before it consumes the process's
+call stack. If you have a legitimate use case that needs more than 16 levels of nesting,
+restructure the automation to reduce nesting.
+
+### 4.5.5 Complete worked example
+
+This automation declares a `downloadBill` function with two parameters and calls it from both
+the top level (once, for the current bill) and from inside a loop (three times, for the last
+three bills).
+
+```json
+{
+  "id": "22222222-3333-4444-5555-666666666666",
+  "name": "Functions worked example",
+  "version": "1.0.0",
+  "description": "Reusable downloadBill function called from top-level and from a loop",
+  "goal": "Download bills without duplicating step blocks",
+  "inputs": [
+    { "name": "billCount", "type": "number", "required": false, "source": "cli_arg", "value": "3" }
+  ],
+  "functions": [
+    {
+      "name": "downloadBill",
+      "description": "Expand one bill row and save its PDF",
+      "parameters": [
+        { "name": "billRow",  "description": "CSS selector for the row",  "required": true },
+        { "name": "billLabel","description": "Label for logs",            "required": false, "default": "bill" }
+      ],
+      "steps": [
+        {
+          "id": "fn-1",
+          "name": "Expand row for {{billLabel}}",
+          "type": "interact",
+          "action": { "interaction": "click" },
+          "selectors": { "primary": "{{billRow}}" },
+          "aiGuidance": "The collapsed bill row for {{billLabel}}",
+          "onFailure": "skip",
+          "maxRetries": 2,
+          "timeout": 10000
+        },
+        {
+          "id": "fn-2",
+          "name": "Save PDF for {{billLabel}}",
+          "type": "download",
+          "action": { "trigger": "click", "expectedFilename": "*.pdf" },
+          "selectors": { "primary": "button.download-pdf" },
+          "onFailure": "abort",
+          "maxRetries": 2,
+          "timeout": 30000
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "call-current",
+      "name": "Download the current bill (top-level call)",
+      "type": "call",
+      "action": {
+        "function": "downloadBill",
+        "args": {
+          "billRow": "tr.bill-row.current",
+          "billLabel": "current bill"
+        }
+      },
+      "onFailure": "skip",
+      "maxRetries": 0,
+      "timeout": 120000
+    },
+    {
+      "id": "loop-bills",
+      "name": "Download last {{billCount}} bills",
+      "type": "loop",
+      "action": {
+        "maxIterations": "{{billCount}}",
+        "items": {
+          "description": "Each bill row in billing history; newest first",
+          "selectorPattern": "tr.bill-row",
+          "itemVar": "billRow",
+          "order": "newest"
+        },
+        "indexVar": "billIndex"
+      },
+      "onFailure": "skip",
+      "maxRetries": 0,
+      "timeout": 600000,
+      "substeps": [
+        {
+          "id": "call-loop",
+          "name": "Download bill #{{billIndex}} (from loop)",
+          "type": "call",
+          "action": {
+            "function": "downloadBill",
+            "args": {
+              "billRow": "{{billRow}}",
+              "billLabel": "bill #{{billIndex}}"
+            }
+          },
+          "onFailure": "skip",
+          "maxRetries": 0,
+          "timeout": 120000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Notice how `{{billRow}}` inside the loop resolves first from the loop's `itemVar` (because the
+loop sets it in shared context before each iteration) and is then passed as the `billRow` arg
+into the function. Inside the function, `{{billRow}}` resolves to the parameter value — the same
+string — so the function's selector works correctly. The `billLabel` parameter uses the default
+`"bill"` only if the caller omits it; both call sites supply an explicit value.
+
+### 4.5.6 Validation errors
+
+The schema refines `AutomationSchema` with two parse-time checks that run as a single
+`superRefine`:
+
+| Error message | Trigger |
+|---|---|
+| `Duplicate function name: "<name>"` | Two functions in `functions[]` share the same `name`. |
+| `call step "<id>" references unknown function "<name>"` | A `call` step (top-level, in substeps, or inside a function body) targets a name that is not declared in `functions[]`. Templated names (`"{{fn}}"`) are skipped because they only resolve at runtime. |
+| `condition step "<id>" thenCall references unknown function "<name>"` | A `condition.thenCall` field targets an undefined function. Same rule for `elseCall`. |
+
+Missing-required-argument errors are NOT caught at parse time because argument values can be
+templates that only resolve at runtime. They surface as runtime errors during execution:
+
+```
+Function "downloadBill" missing required parameter "billRow" (called from "call-loop")
+```
+
+---
+
 ## 5. Steps — Common Fields
 
 Every step, regardless of type, shares these fields. The `action` field's shape depends on `type`
@@ -308,7 +516,7 @@ and is covered in [section 6](#6-step-types).
 | `id`         | `string`      | Required  | —         | Unique identifier within this automation. Used in error messages, logs, and failure screenshots. No format enforced, but `step-N` and `step-N.M` are conventional. |
 | `name`       | `string`      | Required  | —         | Human-readable name. Shown in CLI progress output and log lines. |
 | `description`| `string`      | Optional  | —         | Longer explanation. Shown in logs and used as a fallback for AI element resolution when `aiGuidance` is absent. |
-| `type`       | `StepType`    | Required  | —         | One of the eight step types. See [section 6](#6-step-types). |
+| `type`       | `StepType`    | Required  | —         | One of the nine step types. See [section 6](#6-step-types). |
 | `action`     | action object | Required  | —         | The action to perform. Shape is determined by `type`. |
 | `aiGuidance` | `string`      | Optional  | —         | Natural-language description for LLM element resolution. See [section 8](#8-ai-guidance). |
 | `selectors`  | `Selectors`   | Optional  | —         | `{ primary, fallbacks? }` for element resolution. See [section 7](#7-selectors). |
@@ -336,7 +544,7 @@ all non-loop steps, any `substeps` value is present in the parsed object but nev
 
 ## 6. Step Types
 
-PortalFlow supports eight step types, each keyed by the `type` field:
+PortalFlow supports nine step types, each keyed by the `type` field:
 
 | Type         | Purpose |
 |--------------|---------|
@@ -345,9 +553,10 @@ PortalFlow supports eight step types, each keyed by the `type` field:
 | `wait`       | Pause until a condition is met |
 | `extract`    | Read data from the page into a context variable |
 | `tool_call`  | Invoke an external tool (smscli or vaultcli) |
-| `condition`  | Evaluate a condition and optionally branch |
+| `condition`  | Evaluate a deterministic or AI-based condition, optionally branching into a named function |
 | `download`   | Capture a file download |
 | `loop`       | Iterate over a set of items or repeat with an exit condition |
+| `call`       | Invoke a named function declared in the top-level `functions` section |
 
 ### 6.1 navigate
 
@@ -687,8 +896,10 @@ rejected by `portalflow validate` before the automation runs.
 | `check`    | `ConditionCheck` | Conditional  | Deterministic check type. Required when `ai` is not set. |
 | `value`    | `string`         | Conditional  | Value the `check` evaluates against. Required whenever `check` is set. Supports template syntax. |
 | `ai`       | `string`         | Conditional  | Plain-English question about the page. Required when `check` is not set. Must be non-empty. Supports template syntax. |
-| `thenStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to true. |
-| `elseStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to false. |
+| `thenStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to true. **Not yet implemented** — see the branching limitation below. |
+| `elseStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to false. **Not yet implemented**. |
+| `thenCall` | `string`         | Optional     | Name of a function to invoke when the condition evaluates to true. The function must be declared in the top-level `functions` array. Takes no args — the function reads shared context. **Implemented.** |
+| `elseCall` | `string`         | Optional     | Name of a function to invoke when the condition evaluates to false. Same rules as `thenCall`. **Implemented.** |
 
 **Deterministic check types:**
 
@@ -713,11 +924,25 @@ The AI is instructed to base its answer only on evidence visible in the provided
 hidden/off-screen elements unless the question asks about them, and to keep reasoning short while
 citing specific evidence from the page.
 
-**Known limitation (branching):** The schema has `thenStep` and `elseStep` fields but step jumping
-is not yet implemented in the runner for either deterministic or AI conditions. The condition is
-evaluated and the result is logged, but execution always continues to the next step in sequence.
-Do not rely on branching behavior in production automations. Use the `<stepId>_result` variable
-from a later step if you need to act on the outcome.
+**Branching via function calls (supported):** The condition step supports branching into a
+named function declared in the top-level `functions` section. After the boolean is computed
+and written to `<stepId>_result`:
+
+- If the result is `true` and `thenCall` is set, the runtime invokes that function via the
+  shared `invokeFunction` pathway (same depth tracking and shared-context semantics as a
+  regular `call` step). No args are passed; the function reads shared context.
+- If the result is `false` and `elseCall` is set, the runtime invokes that function instead.
+- If neither branch is set, execution continues to the next step as before.
+
+Because `thenCall` / `elseCall` take no args, they are ideal for "handle this situation" style
+branches where the function doesn't need parameters — for example, a `handleCaptcha` function,
+a `logoutAndRetry` function, or a `skipToCheckout` function. For parametrized branching, put a
+regular `call` step after the condition and read `<stepId>_result` from its templates to decide
+what to do.
+
+**Known limitation (step jumping):** The schema also has `thenStep` and `elseStep` fields that
+name step IDs to jump to, but step jumping is not yet implemented in the runner. They parse
+cleanly but have no runtime effect today. Prefer `thenCall` / `elseCall` for branching.
 
 **Deterministic example:**
 
@@ -752,7 +977,7 @@ from a later step if you need to act on the outcome.
 }
 ```
 
-**AI example with branching hints (not yet enforced):**
+**AI example with function-call branching (supported):**
 
 ```json
 {
@@ -761,8 +986,8 @@ from a later step if you need to act on the outcome.
   "type": "condition",
   "action": {
     "ai": "Does the page display a CAPTCHA or bot-detection challenge that would block automated interaction?",
-    "thenStep": "step-handle-captcha",
-    "elseStep": "step-continue"
+    "thenCall": "handleCaptcha",
+    "elseCall": "continueFlow"
   },
   "onFailure": "skip",
   "maxRetries": 0,
@@ -770,10 +995,17 @@ from a later step if you need to act on the outcome.
 }
 ```
 
+When this condition evaluates to true, the runtime invokes the `handleCaptcha` function
+(which must be declared in the automation's top-level `functions` array). When false, it
+invokes `continueFlow`. Both functions read shared context — for example, `handleCaptcha`
+can read `{{step-cond-captcha_reasoning}}` to see why the AI decided the page had a CAPTCHA.
+
 **Validation errors you may see:**
 
 - `condition action must have exactly one of "check" (deterministic) or "ai" (plain-English question), not both`
 - `condition action with a deterministic "check" requires a "value"`
+- `condition step "<id>" thenCall references unknown function "<name>"`
+- `condition step "<id>" elseCall references unknown function "<name>"`
 
 **Gotchas:**
 - For `variable_equals`, the `value` format must be `"varName=expectedValue"` with no spaces
@@ -784,8 +1016,9 @@ from a later step if you need to act on the outcome.
 - Set a generous `timeout` (30000+) on AI conditions because the LLM round-trip can take several
   seconds. Deterministic checks can use the default timeout.
 - An empty or whitespace-only `ai` string is rejected at validation time.
-- Even though `thenStep` and `elseStep` are in the schema and parse without error, they have no
-  runtime effect today for either deterministic or AI conditions.
+- `thenCall` / `elseCall` don't accept args. If you need to pass data to the branch, set a
+  shared-context variable before the condition or use a regular `call` step afterwards.
+- `thenStep` / `elseStep` are NOT yet implemented. Use `thenCall` / `elseCall` for branching.
 
 ---
 
@@ -872,6 +1105,112 @@ failure policy.
   "substeps": [ ]
 }
 ```
+
+---
+
+### 6.9 call
+
+**Purpose:** Invoke a reusable function declared in the top-level `functions` section. See
+[section 4.5](#45-functions) for the full function model including parameters, shared context,
+and the call depth cap.
+
+**Action shape:**
+
+| Field      | Type                     | Required  | Description |
+|------------|--------------------------|-----------|-------------|
+| `function` | `string` (min 1 char)    | Required  | The name of the function to invoke. Must match a `name` in the top-level `functions` array. Templates are supported — `"function": "{{dynamicFn}}"` resolves at runtime — but literal names are strongly recommended so parse-time validation can catch typos. |
+| `args`     | `Record<string, string>` | Optional  | A map of parameter name to value. Each value is resolved through template substitution immediately before the function is invoked. Only parameters declared by the target function should appear here; unknown keys are logged as warnings. |
+
+**Template resolution timing:**
+
+1. `function` is resolved against the caller's context BEFORE the function is looked up.
+2. Each `args` value is resolved against the caller's context BEFORE the parameter name is
+   shadowed on the context map. This lets you pass loop iteration variables, extract outputs,
+   or top-level inputs straight into the function body:
+   ```json
+   { "function": "downloadBill", "args": { "billRow": "{{item}}", "label": "{{loop_index}}" } }
+   ```
+
+**Minimal example:**
+
+```json
+{
+  "id": "call-login",
+  "name": "Call login",
+  "type": "call",
+  "action": {
+    "function": "login",
+    "args": {
+      "username": "{{vault_username}}",
+      "password": "{{vault_password}}"
+    }
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 120000
+}
+```
+
+**Call from inside a loop:**
+
+```json
+{
+  "id": "loop-bills",
+  "name": "Download N bills",
+  "type": "loop",
+  "action": {
+    "maxIterations": "{{billCount}}",
+    "items": {
+      "description": "Each bill row",
+      "itemVar": "billRow",
+      "order": "newest"
+    }
+  },
+  "substeps": [
+    {
+      "id": "call-bill",
+      "name": "Download bill {{loop_index}}",
+      "type": "call",
+      "action": {
+        "function": "downloadBill",
+        "args": { "billRow": "{{billRow}}" }
+      }
+    }
+  ]
+}
+```
+
+**Parse-time validation:**
+
+- Unknown function name: `call step "<id>" references unknown function "<name>"`
+- Templated function names (`"{{...}}"`) are skipped by the validator because they only resolve
+  at runtime — use this escape hatch sparingly.
+
+**Runtime errors:**
+
+| Error | Cause |
+|---|---|
+| `Unknown function "<name>" invoked from step "<id>"` | `function` resolved to a name not in the functions map (usually a templated name that resolved to an unexpected value). |
+| `Function "<name>" missing required parameter "<param>" (called from "<id>")` | Caller omitted a required parameter and the function did not declare a `default` for it. |
+| `Function call depth limit (16) exceeded while calling "<name>" from step "<id>"` | Recursive or deeply nested calls reached the hard safety cap. |
+| `Function "<name>" aborted at step "<innerId>"` | A step inside the function body's `onFailure: "abort"` triggered and exhausted retries. |
+
+**`onFailure` semantics:** The call step has its own `onFailure` policy. If the inner function
+body aborts (one of its steps fails with `abort` and retries are exhausted), the function
+throws, which bubbles up to the call step's `executeWithPolicy` loop. From there, the call
+step's own `onFailure` decides what happens: `"retry"` will re-invoke the entire function from
+scratch (no state is preserved between attempts), `"skip"` will record an error and continue,
+and `"abort"` will halt the automation.
+
+**Gotchas:**
+
+- Call steps don't need `selectors` or `aiGuidance` — they don't touch the browser directly.
+  Leave those fields off.
+- Call steps don't need `validation` either — if you need to assert post-conditions, put the
+  assertion inside the function body.
+- Warning-only behavior for unknown args: if you pass an arg whose name doesn't match any
+  declared parameter, the runtime logs a warning but proceeds. This is deliberate, but watch
+  for these warnings in your run logs when debugging.
 
 ---
 
@@ -1294,6 +1633,13 @@ Based on the step-executor implementation, template substitution is applied in t
 - `(condition) action.value` — resolved before condition evaluation.
 - `(download) action.expectedFilename` — resolved before the download handler is set up (if used).
 - `(loop) action.maxIterations` — when passed as a string, resolved then parsed as an integer.
+- `(call) action.function` — resolved before the function is looked up. Usually a literal
+  function name; templated names exist as an escape hatch but skip parse-time validation.
+- `(call) action.args[*]` — every arg value is resolved against the CALLER's context
+  immediately before the parameter name is shadowed on the shared context map. This is how
+  loop iteration variables, extract outputs, and top-level inputs flow into function bodies.
+- `(condition) action.thenCall` and `action.elseCall` — function names resolved before
+  invocation, same rules as `call.function`.
 
 **`inputRef` is not a template.** It is a direct variable lookup by name — the string is not
 processed as a template. `"inputRef": "{{password}}"` would look for a variable literally named
@@ -1311,6 +1657,9 @@ processed as a template. `"inputRef": "{{password}}"` would look for a variable 
 | `tool_call` step `outputName` | When step completes | Stored unconditionally |
 | `loop` `items.itemVar` | Per iteration | Set to the current iteration's selector string |
 | `loop` `indexVar` | Per iteration | Set to the zero-indexed iteration number as a string |
+| Function parameter shadow | For the duration of a function call | When a `call` step invokes a function, each declared parameter is set on the shared context from the caller's resolved arg value. The previous value (if any) is restored on return. |
+| `condition` `<stepId>_result` | After a condition step completes | String `"true"` or `"false"`. |
+| `condition` `<stepId>_reasoning` | After an AI condition completes | The LLM's short reasoning string. |
 
 ### Example — login step referencing inputs
 
@@ -2135,6 +2484,253 @@ Loop with no `items`, using `exitWhen` to detect when pagination ends.
 }
 ```
 
+### 16.9 Reusable Login Function
+
+Declare a `login` function with credential parameters and call it from the top-level steps.
+This is the canonical "function as a named procedure" pattern.
+
+```json
+{
+  "id": "33333333-4444-5555-6666-777777777777",
+  "name": "Reusable login",
+  "version": "1.0.0",
+  "description": "Login once via a reusable function",
+  "goal": "Demonstrate a zero-duplication login pattern",
+  "inputs": [
+    { "name": "vault_username", "type": "string", "required": true, "source": "vaultcli", "value": "myservice/username" },
+    { "name": "vault_password", "type": "secret", "required": true, "source": "vaultcli", "value": "myservice/password" }
+  ],
+  "functions": [
+    {
+      "name": "login",
+      "description": "Fill the login form and submit",
+      "parameters": [
+        { "name": "username", "required": true },
+        { "name": "password", "required": true }
+      ],
+      "steps": [
+        {
+          "id": "login-1",
+          "name": "Type username",
+          "type": "interact",
+          "action": { "interaction": "type", "value": "{{username}}" },
+          "selectors": { "primary": "#username" },
+          "aiGuidance": "The username/email input field on the login form",
+          "onFailure": "abort",
+          "maxRetries": 2,
+          "timeout": 10000
+        },
+        {
+          "id": "login-2",
+          "name": "Type password",
+          "type": "interact",
+          "action": { "interaction": "type", "value": "{{password}}" },
+          "selectors": { "primary": "#password" },
+          "aiGuidance": "The password input field on the login form",
+          "onFailure": "abort",
+          "maxRetries": 2,
+          "timeout": 10000
+        },
+        {
+          "id": "login-3",
+          "name": "Submit login form",
+          "type": "interact",
+          "action": { "interaction": "click" },
+          "selectors": { "primary": "button[type='submit']" },
+          "aiGuidance": "The submit/sign-in button on the login form",
+          "onFailure": "abort",
+          "maxRetries": 2,
+          "timeout": 10000
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "nav-1",
+      "name": "Open login page",
+      "type": "navigate",
+      "action": { "url": "https://portal.example.com/login" },
+      "onFailure": "abort",
+      "maxRetries": 1,
+      "timeout": 30000
+    },
+    {
+      "id": "call-login",
+      "name": "Log in",
+      "type": "call",
+      "action": {
+        "function": "login",
+        "args": {
+          "username": "{{vault_username}}",
+          "password": "{{vault_password}}"
+        }
+      },
+      "onFailure": "abort",
+      "maxRetries": 0,
+      "timeout": 120000
+    }
+  ]
+}
+```
+
+The same `login` function can be reused from any step position — useful if an automation needs
+to log out and log back in mid-flow, or if multiple top-level steps each need their own fresh
+session.
+
+### 16.10 Loop Calling a Function
+
+Iterate over discovered items and invoke a reusable worker function on each one. The loop
+handles discovery and iteration; the function handles the per-item work. This is the pattern
+that makes modular automations possible.
+
+```json
+{
+  "id": "44444444-5555-6666-7777-888888888888",
+  "name": "Loop into function",
+  "version": "1.0.0",
+  "description": "Per-row worker function called from a loop",
+  "goal": "Apply the same processing to every row without duplicating steps",
+  "inputs": [],
+  "functions": [
+    {
+      "name": "processRow",
+      "description": "Click a row and extract its text",
+      "parameters": [
+        { "name": "rowSelector", "required": true },
+        { "name": "rowLabel",    "required": false, "default": "row" }
+      ],
+      "steps": [
+        {
+          "id": "proc-1",
+          "name": "Click {{rowLabel}}",
+          "type": "interact",
+          "action": { "interaction": "click" },
+          "selectors": { "primary": "{{rowSelector}}" },
+          "onFailure": "skip",
+          "maxRetries": 2,
+          "timeout": 5000
+        },
+        {
+          "id": "proc-2",
+          "name": "Extract row text",
+          "type": "extract",
+          "action": { "target": "text", "outputName": "lastRowText" },
+          "selectors": { "primary": "{{rowSelector}}" },
+          "onFailure": "skip",
+          "maxRetries": 0,
+          "timeout": 5000
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "nav",
+      "name": "Open list",
+      "type": "navigate",
+      "action": { "url": "https://example.com/list" },
+      "onFailure": "abort",
+      "maxRetries": 1,
+      "timeout": 15000
+    },
+    {
+      "id": "loop-rows",
+      "name": "Process first 5 rows",
+      "type": "loop",
+      "action": {
+        "maxIterations": 5,
+        "items": {
+          "description": "Each table row to process",
+          "selectorPattern": "table.data tr",
+          "itemVar": "row",
+          "order": "first"
+        },
+        "indexVar": "rowIdx"
+      },
+      "onFailure": "skip",
+      "maxRetries": 0,
+      "timeout": 60000,
+      "substeps": [
+        {
+          "id": "call-process",
+          "name": "Process row #{{rowIdx}}",
+          "type": "call",
+          "action": {
+            "function": "processRow",
+            "args": {
+              "rowSelector": "{{row}}",
+              "rowLabel": "row #{{rowIdx}}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 16.11 Condition Branching into a Function
+
+Use a condition with `thenCall` to dispatch a specialized handler function when a particular
+page state is detected. This replaces sprawling "if X then do these 5 steps, else do these
+other 3 steps" inline branches with named, testable units.
+
+```json
+{
+  "id": "55555555-6666-7777-8888-999999999999",
+  "name": "Condition into function",
+  "version": "1.0.0",
+  "description": "Branch into handleCaptcha when a CAPTCHA is detected",
+  "goal": "Use AI detection to dispatch into the right handler",
+  "inputs": [],
+  "functions": [
+    {
+      "name": "handleCaptcha",
+      "description": "Pause and wait for manual CAPTCHA resolution",
+      "steps": [
+        {
+          "id": "captcha-1",
+          "name": "Wait for user to solve CAPTCHA",
+          "type": "wait",
+          "action": { "condition": "delay", "value": "60000" },
+          "onFailure": "skip",
+          "maxRetries": 0,
+          "timeout": 70000
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "nav",
+      "name": "Open target page",
+      "type": "navigate",
+      "action": { "url": "https://example.com/protected" },
+      "onFailure": "abort",
+      "maxRetries": 1,
+      "timeout": 30000
+    },
+    {
+      "id": "check-captcha",
+      "name": "Detect CAPTCHA",
+      "type": "condition",
+      "action": {
+        "ai": "Does the page display a CAPTCHA or bot-detection challenge that would block automated interaction?",
+        "thenCall": "handleCaptcha"
+      },
+      "onFailure": "skip",
+      "maxRetries": 0,
+      "timeout": 30000
+    }
+  ]
+}
+```
+
+When the AI answers true, `handleCaptcha` runs. When it answers false, execution continues to
+the next step. The function reads shared context, so it could also reference
+`{{check-captcha_reasoning}}` if it wanted to log what the AI saw.
+
 ---
 
 ## 17. Full Worked Examples
@@ -2613,13 +3209,14 @@ directly from `tools/schema/src/automation.schema.ts` and `tools/schema/src/type
 
 ```typescript
 interface Automation {
-  id: string;           // UUID v4
-  name: string;         // min 1 character
-  version: string;      // default: "1.0.0"
+  id: string;                        // UUID v4
+  name: string;                      // min 1 character
+  version: string;                   // default: "1.0.0"
   description: string;
   goal: string;
   inputs: Input[];
   steps: Step[];
+  functions?: FunctionDefinition[];  // reusable named step blocks
   tools?: ToolRef[];
   outputs?: Output[];
   settings?: Settings;
@@ -2652,7 +3249,8 @@ interface Step {
   description?: string;
   type: StepType;
   action: NavigateAction | InteractAction | WaitAction | ExtractAction
-        | ToolCallAction | ConditionAction | DownloadAction | LoopAction;
+        | ToolCallAction | ConditionAction | DownloadAction | LoopAction
+        | CallAction;
   aiGuidance?: string;
   selectors?: Selectors;
   validation?: Validation;
@@ -2663,7 +3261,7 @@ interface Step {
 }
 
 type StepType = 'navigate' | 'interact' | 'wait' | 'extract'
-              | 'tool_call' | 'condition' | 'download' | 'loop';
+              | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
 
 type OnFailure = 'retry' | 'skip' | 'abort';
 ```
@@ -2735,6 +3333,8 @@ interface ConditionAction {
   ai?: string;              // plain-English question sent to the LLM; supports templates
   thenStep?: string;        // step ID — not yet implemented in the runner
   elseStep?: string;        // step ID — not yet implemented in the runner
+  thenCall?: string;        // name of a function to invoke when result is true
+  elseCall?: string;        // name of a function to invoke when result is false
 }
 
 type ConditionCheck = 'element_exists' | 'url_matches' | 'text_contains' | 'variable_equals';
@@ -2745,6 +3345,8 @@ Schema refinements enforce:
 1. Exactly one of `check` or `ai` is set (neither-both nor neither-none is valid).
 2. When `check` is set, `value` must also be set.
 3. `ai`, when set, must be a non-empty, non-whitespace string.
+4. When set, `thenCall` and `elseCall` must reference a function name declared in the
+   top-level `functions` array. Templated values (`"{{...}}"`) are skipped.
 
 ### `DownloadAction`
 
@@ -2791,6 +3393,44 @@ interface LoopExitWhen {
 
 Note: `LoopExitWhen.check` includes `'element_missing'` which is not present in
 `ConditionAction.check`. The two check enums are distinct.
+
+### `CallAction`
+
+```typescript
+interface CallAction {
+  function: string;                   // name of the function to invoke; min 1 char
+  args?: Record<string, string>;      // parameter name -> value; values support templates
+}
+```
+
+Schema refinements enforce (via `AutomationSchema.superRefine`):
+
+1. `function` must reference a name declared in the top-level `functions` array, UNLESS the
+   value is a template (contains `{{...}}`), in which case validation is deferred to runtime.
+2. At runtime, unknown function names produce `Unknown function "<name>" invoked from step "<id>"`.
+3. At runtime, depth beyond 16 produces `Function call depth limit (16) exceeded ...`.
+
+### `FunctionDefinition`
+
+```typescript
+interface FunctionDefinition {
+  name: string;                       // min 1 char; unique across the automation
+  description?: string;
+  parameters?: FunctionParameter[];
+  steps: Step[];                      // recursive — can contain nested call steps, loops, etc.
+}
+```
+
+### `FunctionParameter`
+
+```typescript
+interface FunctionParameter {
+  name: string;                       // min 1 char
+  description?: string;
+  default?: string;                   // used when caller omits this arg
+  required: boolean;                  // default: true
+}
+```
 
 ### `Selectors`
 
@@ -2859,7 +3499,7 @@ interface Settings {
 
 type InputType       = 'string' | 'secret' | 'number' | 'boolean';
 type InputSource     = 'env' | 'vaultcli' | 'cli_arg' | 'literal';
-type StepType        = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop';
+type StepType        = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
 type OnFailure       = 'retry' | 'skip' | 'abort';
 type InteractionType = 'click' | 'type' | 'select' | 'check' | 'uncheck' | 'hover' | 'focus';
 type WaitCondition   = 'selector' | 'navigation' | 'delay' | 'network_idle';

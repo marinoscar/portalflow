@@ -1,7 +1,9 @@
 import type {
+  CallAction,
   ConditionAction,
   DownloadAction,
   ExtractAction,
+  FunctionDefinition,
   InteractAction,
   LoopAction,
   LoopExitWhen,
@@ -20,12 +22,15 @@ import type { Tool } from '../tools/tool.interface.js';
 import { RunContext } from './run-context.js';
 
 const RETRY_BASE_DELAY_MS = 1_000;
+const MAX_CALL_DEPTH = 16;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class StepExecutor {
+  private callDepth = 0;
+
   constructor(
     private readonly pageService: PageService,
     private readonly elementResolver: ElementResolver,
@@ -35,6 +40,7 @@ export class StepExecutor {
     private readonly screenshotOnFailure: boolean,
     private readonly contextCapture: PageContextCapture,
     private readonly llmService: LlmService,
+    private readonly functions: Map<string, FunctionDefinition> = new Map(),
   ) {}
 
   /**
@@ -124,6 +130,9 @@ export class StepExecutor {
         break;
       case 'loop':
         await this.executeLoop(step);
+        break;
+      case 'call':
+        await this.executeCall(step);
         break;
       default: {
         const exhaustive: never = step.type;
@@ -547,6 +556,107 @@ export class StepExecutor {
   }
 
   // ---------------------------------------------------------------------------
+  // Call — invoke a named function from the automation's `functions` section
+  // ---------------------------------------------------------------------------
+
+  private async executeCall(step: Step): Promise<void> {
+    const action = step.action as CallAction;
+    const fnName = this.context.resolveTemplate(action.function);
+    await this.invokeFunction(fnName, action.args ?? {}, step.id);
+  }
+
+  /**
+   * Shared entry point used by executeCall AND by executeCondition's
+   * thenCall/elseCall. Resolves args through templating, shadows the
+   * function's declared parameter names on the shared context, runs each
+   * step in the function body through executeWithPolicy, then restores
+   * the previous variable values — regardless of success or failure.
+   */
+  async invokeFunction(
+    name: string,
+    rawArgs: Record<string, string>,
+    callerStepId: string,
+  ): Promise<void> {
+    if (this.callDepth >= MAX_CALL_DEPTH) {
+      throw new Error(
+        `Function call depth limit (${MAX_CALL_DEPTH}) exceeded while calling "${name}" from step "${callerStepId}"`,
+      );
+    }
+
+    const fn = this.functions.get(name);
+    if (!fn) {
+      throw new Error(
+        `Unknown function "${name}" invoked from step "${callerStepId}"`,
+      );
+    }
+
+    // 1. Resolve & validate args against declared parameters.
+    const resolvedArgs: Record<string, string> = {};
+    for (const param of fn.parameters ?? []) {
+      let raw = rawArgs[param.name];
+      if (raw === undefined) {
+        if (param.default !== undefined) {
+          raw = param.default;
+        } else if (param.required) {
+          throw new Error(
+            `Function "${name}" missing required parameter "${param.name}" (called from "${callerStepId}")`,
+          );
+        }
+      }
+      if (raw !== undefined) {
+        resolvedArgs[param.name] = this.context.resolveTemplate(raw);
+      }
+    }
+
+    // Warn on extra args not declared by the function — usually a typo.
+    const declared = new Set((fn.parameters ?? []).map((p) => p.name));
+    for (const key of Object.keys(rawArgs)) {
+      if (!declared.has(key)) {
+        this.context.logger.warn(
+          { function: name, unknownArg: key },
+          `Function "${name}" received arg "${key}" which is not declared as a parameter`,
+        );
+      }
+    }
+
+    // 2. Save-and-restore previous values for shadowed parameter names.
+    const savedVars = new Map<string, string | undefined>();
+    for (const [k, v] of Object.entries(resolvedArgs)) {
+      savedVars.set(k, this.context.getVariable(k));
+      this.context.setVariable(k, v);
+    }
+
+    this.callDepth += 1;
+    this.context.logger.info(
+      { function: name, depth: this.callDepth, args: resolvedArgs, callerStepId },
+      `Function "${name}" invoked`,
+    );
+
+    try {
+      for (const innerStep of fn.steps) {
+        const ok = await this.executeWithPolicy(innerStep);
+        if (!ok) {
+          throw new Error(`Function "${name}" aborted at step "${innerStep.id}"`);
+        }
+        this.context.incrementCompleted();
+      }
+      this.context.logger.info(
+        { function: name, depth: this.callDepth },
+        `Function "${name}" complete`,
+      );
+    } finally {
+      this.callDepth -= 1;
+      for (const [k, prev] of savedVars) {
+        if (prev === undefined) {
+          this.context.deleteVariable(k);
+        } else {
+          this.context.setVariable(k, prev);
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Condition  (MVP: evaluate and log; step jumping is future work)
   // ---------------------------------------------------------------------------
 
@@ -655,6 +765,25 @@ export class StepExecutor {
     this.context.setVariable(`${step.id}_result`, String(result));
     if (reasoning !== undefined) {
       this.context.setVariable(`${step.id}_reasoning`, reasoning);
+    }
+
+    // Branch into a named function based on the boolean result. No args are
+    // passed — the function reads shared context. Schema refinement has
+    // already validated that the referenced function exists.
+    if (result && action.thenCall) {
+      const fnName = this.context.resolveTemplate(action.thenCall);
+      this.context.logger.info(
+        { stepId: step.id, thenCall: fnName },
+        `Condition true — invoking thenCall function "${fnName}"`,
+      );
+      await this.invokeFunction(fnName, {}, step.id);
+    } else if (!result && action.elseCall) {
+      const fnName = this.context.resolveTemplate(action.elseCall);
+      this.context.logger.info(
+        { stepId: step.id, elseCall: fnName },
+        `Condition false — invoking elseCall function "${fnName}"`,
+      );
+      await this.invokeFunction(fnName, {}, step.id);
     }
   }
 

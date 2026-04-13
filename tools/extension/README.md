@@ -422,6 +422,8 @@ The schema package is a workspace dependency: `@portalflow/schema` is declared i
 
 For the complete schema reference — every field, every step type, every enum value, every worked example — see [`docs/AUTOMATION-JSON-SPEC.md`](../../docs/AUTOMATION-JSON-SPEC.md) in the repo root. The extension produces files that conform to the same spec the CLI consumes; the two share `@portalflow/schema` as the single source of truth.
 
+**Hand-editing note — reusable functions and the `call` step:** The recorder produces a flat list of steps, but the schema also supports a top-level `functions` array of reusable named step blocks invoked via the `call` step type, plus `thenCall`/`elseCall` branching on `condition` steps. These are intended for hand-editing after a recording session when you notice repeated step sequences or want to dispatch into a named handler from a condition. See [`docs/AUTOMATION-JSON-SPEC.md#45-functions`](../../docs/AUTOMATION-JSON-SPEC.md#45-functions) for the full model and worked examples.
+
 ---
 
 ## Known Limitations
