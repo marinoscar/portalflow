@@ -1,9 +1,22 @@
 # PortalFlow CLI
 
-PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser automations. It loads a structured JSON automation definition, drives a real Chrome browser via Playwright, and delegates element-finding and decision-making to an LLM (Anthropic Claude or OpenAI) when CSS selectors fail. The result is reliable, maintainable automation that degrades gracefully when page markup changes.
+PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser automations. It loads a structured JSON automation definition, drives a real Chrome browser via Playwright, and delegates element-finding and decision-making to a configurable LLM when CSS selectors fail. Works with Anthropic Claude natively and any OpenAI-compatible endpoint (OpenAI, Moonshot Kimi, DeepSeek, Groq, Mistral, Together AI, OpenRouter, local Ollama, or a custom proxy). The result is reliable, maintainable automation that degrades gracefully when page markup changes.
+
+## Features
+
+- **Interactive TUI for every command** — run `portalflow` bare to launch a guided menu, or invoke any command without its required argument to get a wizard (file picker, preview, confirmation)
+- **Verbose `--help` output** — every command has examples, precedence rules, exit codes, and "see also" pointers designed for AI agents and new developers
+- **9 built-in LLM presets** plus any OpenAI-compatible endpoint — Anthropic, OpenAI, Kimi, DeepSeek, Groq, Mistral, Together AI, OpenRouter, Ollama, custom proxies
+- **Video recording** via Playwright's native capture, configurable per run, per automation, or globally
+- **Configurable storage paths** for automations, screenshots, videos, and downloads — with 4-level precedence (CLI flag > automation JSON > user config > built-in defaults)
+- **Reusable LLM abstraction** — swap providers without changing automation definitions
+- **External tool integration** — built-in adapters for `smscli` (SMS/OTP retrieval) and `vaultcli` (credential management)
+- **First-run bootstrap** — automatically creates `~/.portalflow/` layout and seeds example automations on first use
+- **100% scriptable** — every interactive feature has a non-interactive equivalent for CI and automation
 
 ## Table of Contents
 
+- [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Update](#update)
@@ -123,6 +136,16 @@ portalflow settings paths --help         # Path configuration examples
 
 The help output is designed to be self-contained — an AI agent or new
 developer should be able to use any command without reading external docs.
+
+### First run
+
+The very first time you run `portalflow` (after install), it bootstraps `~/.portalflow/`:
+
+- Creates `~/.portalflow/automations/`, `~/.portalflow/artifacts/screenshots/`, `~/.portalflow/artifacts/videos/`, and `~/.portalflow/artifacts/downloads/`
+- Copies the bundled example automations (`demo-search.json`, `phone-bill.json`) into `~/.portalflow/automations/` — only if the directory is empty, never overwriting existing files
+- Logs a one-line summary at `info` level showing what was created
+
+The bootstrap is idempotent — subsequent runs are silent and do nothing if the directories already exist. The installer also runs an equivalent shell seeding step so you can run `portalflow run ~/.portalflow/automations/demo-search.json` immediately after install.
 
 ### Interactive mode (easiest)
 
@@ -678,7 +701,7 @@ All step types share these fields:
 | `userAgent` | — | Custom user-agent string |
 | `defaultTimeout` | `30000` | Default step timeout in ms |
 | `screenshotOnFailure` | `true` | Capture a screenshot when a step aborts |
-| `artifactDir` | `./artifacts` | Legacy fallback directory for screenshots |
+| `artifactDir` | `./artifacts` | Legacy fallback. If `screenshotDir` is not set, screenshots fall back to this directory. New automations should prefer `screenshotDir`. |
 | `screenshotDir` | — | Per-automation screenshot directory (overrides config and defaults) |
 | `videoDir` | — | Per-automation video directory |
 | `downloadDir` | — | Per-automation downloads directory |
@@ -766,18 +789,21 @@ See `examples/demo-search.json` for a complete working example, and `examples/ph
 When `portalflow run` is called, the `AutomationRunner`:
 
 1. Parses and validates the JSON against the Zod schema — aborts immediately on schema errors.
-2. Resolves all inputs: reads environment variables, calls `vaultcli` for secrets, applies literals.
-3. Initializes the configured LLM provider (Anthropic or OpenAI).
-4. Launches Chrome via Playwright (headed by default).
-5. Executes each step in order via `StepExecutor`:
+2. Resolves effective storage paths and video config by merging CLI flags, automation JSON `settings`, user config, and built-in defaults.
+3. Bootstraps `~/.portalflow/` directories on first run and seeds example automations if the automations directory is empty.
+4. Resolves all inputs: reads environment variables, calls `vaultcli` for secrets, applies literals.
+5. Initializes the configured LLM provider (Anthropic or any OpenAI-compatible endpoint).
+6. Launches Chrome via Playwright (headed by default). If video recording is enabled, the browser context records a `.webm` file to the configured videos directory.
+7. Executes each step in order via `StepExecutor`:
    - Tries the primary selector, then each fallback in order.
    - If all selectors fail and `aiGuidance` is set, calls the LLM to locate the element from page context.
    - Runs the action.
    - Runs post-step validation if defined.
    - Applies the `onFailure` policy (`abort`, `retry`, or `skip`) on error.
-6. Takes a screenshot on abort when `screenshotOnFailure: true`.
-7. Writes outputs and artifacts to `artifactDir`.
-8. Returns a structured run result.
+8. Captures a failure screenshot to the configured screenshots directory when `screenshotOnFailure: true`.
+9. Routes any files downloaded during steps to the configured downloads directory.
+10. Closes the browser context. Recorded videos are finalized at this point and added to the run artifacts.
+11. Returns a structured run result with stepsCompleted, stepsTotal, errors, and artifact paths.
 
 The design is a hybrid model: the JSON provides deterministic process guidance while the LLM absorbs selector variability. This avoids expensive, repeated website discovery on every run and keeps automations resilient to minor UI changes without modifying the JSON.
 
@@ -836,9 +862,10 @@ See the [vaultcli README](https://github.com/marinoscar/vault/blob/main/tools/va
 ```bash
 cd tools/cli
 npm install
-npm run build    # Compile TypeScript to dist/
-npm run dev      # Run from source via tsx (no build step)
-npm test         # Run Vitest schema tests
+npm run build         # Compile TypeScript to dist/
+npm run dev           # Run from source via tsx (no build step)
+npm test              # Run Vitest schema tests
+npx tsc --noEmit      # Typecheck without emitting files
 ```
 
 ---
@@ -847,23 +874,63 @@ npm test         # Run Vitest schema tests
 
 ```
 tools/cli/
-├── install.sh              # Installer / updater / uninstaller
+├── install.sh                    # Installer / updater / uninstaller
 ├── package.json
 ├── tsconfig.json
 ├── vitest.config.ts
 ├── examples/
-│   ├── demo-search.json    # Working DuckDuckGo search demo
-│   └── phone-bill.json     # Template: portal login + OTP + download
+│   ├── demo-search.json          # Working DuckDuckGo search demo
+│   └── phone-bill.json           # Template: portal login + OTP + download
 ├── src/
-│   ├── index.ts            # CLI entry point (commander)
-│   ├── schema/             # Zod schema for automation JSON
-│   ├── config/             # ~/.portalflow/config.json management
-│   ├── llm/                # Anthropic + OpenAI providers and prompts
-│   ├── browser/            # Playwright lifecycle, page service, element resolver
-│   ├── tools/              # smscli + vaultcli subprocess adapters
-│   └── runner/             # AutomationRunner, StepExecutor, RunContext
+│   ├── index.ts                  # CLI entry point (commander wire-up)
+│   ├── help-text.ts              # Verbose --help text for every command
+│   ├── schema/                   # Zod schema and TypeScript types for automation JSON
+│   │   ├── automation.schema.ts
+│   │   └── types.ts
+│   ├── config/
+│   │   └── config.service.ts     # ~/.portalflow/config.json read/write
+│   ├── llm/
+│   │   ├── provider.interface.ts # Common LLM interface
+│   │   ├── provider-kinds.ts     # 9 built-in presets + kind inference
+│   │   ├── anthropic.provider.ts # Native Anthropic client
+│   │   ├── openai.provider.ts    # OpenAI-compatible client (any baseUrl)
+│   │   ├── llm.service.ts        # Provider selection and routing
+│   │   └── prompts.ts            # System prompts for element finding, decisions, extraction
+│   ├── browser/
+│   │   ├── browser.service.ts    # Playwright lifecycle, video recording, download routing
+│   │   ├── page.service.ts       # Click, type, wait, extract, download helpers
+│   │   ├── context.ts            # Simplified page state capture for LLM
+│   │   └── element-resolver.ts   # Primary > fallback > AI selector cascade
+│   ├── tools/
+│   │   ├── tool.interface.ts     # External tool interface
+│   │   ├── tool-executor.ts      # Generic subprocess runner
+│   │   ├── smscli.adapter.ts     # SMS/OTP retrieval
+│   │   └── vaultcli.adapter.ts   # Vault secret retrieval
+│   ├── runner/
+│   │   ├── automation-runner.ts  # Top-level orchestrator
+│   │   ├── step-executor.ts      # Per-step dispatch and action handlers
+│   │   ├── run-context.ts        # Runtime state (variables, outputs, artifacts)
+│   │   ├── paths.ts              # Effective path resolver (4-level precedence)
+│   │   ├── bootstrap.ts          # First-run directory setup and example seeding
+│   │   └── logger.ts             # pino logger factory
+│   └── tui/
+│       ├── main-tui.ts           # Top-level interactive menu
+│       ├── provider-tui.ts       # Provider management menu
+│       ├── settings-tui.ts       # Settings management menu
+│       ├── file-picker.ts        # Reusable JSON file picker
+│       ├── helpers.ts            # Shared TUI utilities (masking, display names)
+│       └── flows/                # Individual guided flow screens
+│           ├── run.ts
+│           ├── validate.ts
+│           ├── configure.ts      # Configure a provider
+│           ├── set-active.ts     # Switch active provider
+│           ├── list.ts           # List providers
+│           ├── remove.ts         # Remove a provider
+│           ├── reset.ts          # Reset all provider config
+│           ├── settings-paths.ts # Edit storage paths
+│           └── settings-video.ts # Toggle video recording
 └── tests/
-    └── schema.test.ts
+    └── schema.test.ts            # Vitest schema validation tests
 ```
 
 ---
@@ -893,7 +960,10 @@ Add the line to your shell profile (`~/.bashrc`, `~/.zshrc`) to make it permanen
 Run `portalflow validate <file>` first to see detailed, field-level error output before attempting execution.
 
 **Element not found, LLM fallback fails**
-Verify the `aiGuidance` field describes the target element precisely. Check the screenshot saved to `artifactDir` — it captures the page state at the moment of failure and is the fastest way to diagnose what the browser actually rendered.
+Verify the `aiGuidance` field describes the target element precisely. Check the screenshot saved to the configured screenshots directory (default: `~/.portalflow/artifacts/screenshots`) — it captures the page state at the moment of failure and is the fastest way to diagnose what the browser actually rendered.
+
+**Video file is empty or missing after a run**
+Playwright writes the `.webm` file only when the browser context closes cleanly. If the process is killed mid-run (Ctrl+C, crash, or OS signal), the video may be empty or missing. To verify video recording is enabled, check `portalflow settings list` or the "Video recording" panel in the interactive settings TUI.
 
 **"I want to start fresh"**
 Run `portalflow provider` and pick "Reset all configurations" from the menu, or run `portalflow provider reset --yes` non-interactively. This deletes `~/.portalflow/config.json`.
