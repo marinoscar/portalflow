@@ -182,6 +182,33 @@ if [ ! -f "${EXT_DIR}/manifest.json" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Helper — run a command, stream to tmpfile, print a tail on success or
+# the FULL output on failure so the user can diagnose the root cause.
+# ---------------------------------------------------------------------------
+
+run_step() {
+  local label="$1"
+  shift
+  local tmpfile
+  tmpfile="$(mktemp)"
+  if "$@" >"${tmpfile}" 2>&1; then
+    tail -5 "${tmpfile}" || true
+    rm -f "${tmpfile}"
+    return 0
+  else
+    local exit_code=$?
+    echo "" >&2
+    echo -e "  ${RED}✗${RESET}  ${label} failed (exit ${exit_code})" >&2
+    echo -e "  ${DIM}Full output:${RESET}" >&2
+    echo "" >&2
+    sed 's/^/    /' "${tmpfile}" >&2
+    echo "" >&2
+    rm -f "${tmpfile}"
+    exit "${exit_code}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Step 3 — Install dependencies
 # ---------------------------------------------------------------------------
 
@@ -189,9 +216,9 @@ step "[3/5] Installing dependencies"
 
 if [ -f "${REPO_ROOT}/package.json" ] && grep -q '"workspaces"' "${REPO_ROOT}/package.json" 2>/dev/null; then
   info "Monorepo detected — installing workspace dependencies..."
-  (cd "${REPO_ROOT}" && npm install --workspace=tools/extension 2>&1 | tail -5)
+  run_step "npm install" bash -c "cd '${REPO_ROOT}' && npm install --workspace=tools/extension"
 else
-  (cd "${EXT_DIR}" && npm install 2>&1 | tail -5)
+  run_step "npm install" bash -c "cd '${EXT_DIR}' && npm install"
 fi
 success "Dependencies installed"
 
@@ -201,7 +228,7 @@ success "Dependencies installed"
 
 step "[4/5] Building extension"
 
-(cd "${EXT_DIR}" && npm run build 2>&1 | tail -5)
+run_step "npm run build" bash -c "cd '${EXT_DIR}' && npm run build"
 
 DIST_DIR="${EXT_DIR}/dist"
 if [ ! -f "${DIST_DIR}/manifest.json" ]; then
