@@ -36,6 +36,7 @@ PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser aut
   - [Steps](#steps)
   - [Step Types](#step-types)
   - [Step Options](#step-options)
+  - [Reusable functions](#reusable-functions)
   - [Settings](#settings)
   - [Minimal Example](#minimal-example)
 - [How Execution Works](#how-execution-works)
@@ -659,9 +660,10 @@ Each step has a common envelope plus a `type`-specific `action`.
 | `wait` | `condition`, `value?`, `timeout?` | Wait for `selector`, `navigation`, `delay`, or `network_idle` |
 | `extract` | `target`, `outputName`, `attribute?` | Capture `text`, `attribute`, `html`, `url`, `title`, or `screenshot` |
 | `tool_call` | `tool`, `command`, `args`, `outputName?` | Invoke an external tool (`smscli` or `vaultcli`) |
-| `condition` | `check`, `value` | Assert `element_exists`, `url_matches`, `text_contains`, or `variable_equals` |
+| `condition` | `check` or `ai`, plus optional `thenCall`/`elseCall` | Evaluate a deterministic check (`element_exists`, `url_matches`, `text_contains`, `variable_equals`) or a plain-English AI question, optionally branching into a named function. |
 | `download` | `trigger`, `expectedFilename?` | Trigger and capture a file download via `click` or `navigation` |
 | `loop` | `maxIterations`, `items?`, `exitWhen?`, `indexVar?` | Bounded iteration over items (with optional AI discovery) or bounded repetition with an exit condition. Child steps go in `substeps`. See [the full loop spec](../../docs/AUTOMATION-JSON-SPEC.md#14-the-loop-step-in-depth) |
+| `call` | `function`, `args?` | Invoke a named function declared in the top-level `functions` section. See [Reusable functions](#reusable-functions) below. |
 
 ### Step Options
 
@@ -678,6 +680,55 @@ All step types share these fields:
 | `timeout` | `30000` | Step timeout in milliseconds |
 
 The `substeps` field is also accepted on every step object but is only used by the `loop` step type, which places its child steps there. See [`docs/AUTOMATION-JSON-SPEC.md`](../../docs/AUTOMATION-JSON-SPEC.md) for the full field reference.
+
+### Reusable functions
+
+An automation can declare reusable functions at the top level and invoke them via the `call` step type. Functions let you package a sequence of steps under a name and run it from multiple places — once at the top level, N times inside a loop, or from a condition's `thenCall` / `elseCall` branch.
+
+Minimal example:
+
+```json
+{
+  "functions": [
+    {
+      "name": "downloadBill",
+      "parameters": [
+        { "name": "billRow", "required": true }
+      ],
+      "steps": [
+        { "id": "f1", "name": "Click", "type": "interact", "action": { "interaction": "click" }, "selectors": { "primary": "{{billRow}}" } },
+        { "id": "f2", "name": "Save",  "type": "download", "action": { "trigger": "click" }, "selectors": { "primary": "button.download-pdf" } }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "loop",
+      "name": "Download 3 bills",
+      "type": "loop",
+      "action": { "maxIterations": 3, "items": { "description": "bill rows", "selectorPattern": "tr.bill-row", "itemVar": "row" } },
+      "substeps": [
+        {
+          "id": "call",
+          "name": "Call downloadBill",
+          "type": "call",
+          "action": { "function": "downloadBill", "args": { "billRow": "{{row}}" } }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Key rules:
+
+- Functions share the caller's `RunContext` — loop iteration variables, extract outputs, and inputs all flow through automatically.
+- Declared parameters temporarily shadow existing context variables while the function runs, then restore on return.
+- Functions may call other functions up to a hard depth cap of 16 to prevent runaway recursion.
+- Condition steps may set `thenCall` / `elseCall` to a function name to branch based on the boolean result; these are the supported branching mechanism because `thenStep` / `elseStep` are not yet implemented.
+- Duplicate function names and `call` steps that reference an unknown function are rejected at `portalflow validate` time.
+
+See the full specification at [`docs/AUTOMATION-JSON-SPEC.md#45-functions`](../../docs/AUTOMATION-JSON-SPEC.md#45-functions) and the worked example at `examples/functions-demo.json`.
 
 ### Settings
 
@@ -785,7 +836,7 @@ A three-step automation that navigates to a page, types a search query, and extr
 
 Use `{{inputName}}` template syntax inside `action.url` and other string fields to substitute input values at runtime.
 
-See `examples/demo-search.json` for a complete working example, `examples/phone-bill.json` for a template covering portal login, OTP via smscli, and file download, and `examples/att-bills-last-n.json` for the canonical `loop` step example.
+See `examples/demo-search.json` for a complete working example, `examples/phone-bill.json` for a template covering portal login, OTP via smscli, and file download, `examples/att-bills-last-n.json` for the canonical `loop` step example, and `examples/functions-demo.json` for a worked example of the `functions` / `call` feature.
 
 ---
 
