@@ -1,11 +1,15 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { CliConfig, PathsConfig, VideoConfig } from '../config/config.service.js';
 import type { Automation } from '../schema/types.js';
 
+export const PORTALFLOW_HOME = join(homedir(), '.portalflow');
+
 export const DEFAULT_PATHS = {
-  automations: './automations',
-  screenshots: './artifacts/screenshots',
-  videos: './artifacts/videos',
-  downloads: './artifacts/downloads',
+  automations: join(PORTALFLOW_HOME, 'automations'),
+  screenshots: join(PORTALFLOW_HOME, 'artifacts', 'screenshots'),
+  videos: join(PORTALFLOW_HOME, 'artifacts', 'videos'),
+  downloads: join(PORTALFLOW_HOME, 'artifacts', 'downloads'),
 } as const;
 
 export const DEFAULT_VIDEO = {

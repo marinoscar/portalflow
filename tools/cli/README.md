@@ -64,7 +64,8 @@ cd tools/cli
 3. Installs npm dependencies
 4. Installs Playwright Chromium (`npx playwright install chromium`)
 5. Builds the TypeScript project (`npm run build`)
-6. Creates symlinks at `/usr/local/bin/portalflow` and `/usr/local/bin/portalflow-update` (requires `sudo`)
+6. Creates `~/.portalflow/automations/`, `~/.portalflow/artifacts/screenshots/`, `~/.portalflow/artifacts/videos/`, and `~/.portalflow/artifacts/downloads/`, then copies the bundled example automations into `~/.portalflow/automations/`
+7. Creates symlinks at `/usr/local/bin/portalflow` and `/usr/local/bin/portalflow-update` (requires `sudo`)
 
 The installer is idempotent — re-running it pulls the latest code, rebuilds, and refreshes the symlinks.
 
@@ -98,7 +99,7 @@ This removes the `/usr/local/bin/portalflow` and `/usr/local/bin/portalflow-upda
 rm -rf ~/.portalflow-cli
 ```
 
-To also remove provider credentials:
+To also remove provider credentials, default directories, and example automations:
 
 ```bash
 rm -rf ~/.portalflow
@@ -139,19 +140,19 @@ portalflow provider list
 **2. Validate an automation file**
 
 ```bash
-portalflow validate tools/cli/examples/demo-search.json
+portalflow validate ~/.portalflow/automations/demo-search.json
 ```
 
 **3. Run the demo automation**
 
 ```bash
-portalflow run tools/cli/examples/demo-search.json
+portalflow run ~/.portalflow/automations/demo-search.json
 ```
 
 **4. Run headless**
 
 ```bash
-portalflow run tools/cli/examples/demo-search.json --headless
+portalflow run ~/.portalflow/automations/demo-search.json --headless
 ```
 
 ---
@@ -170,7 +171,7 @@ Every PortalFlow command has a guided TUI mode. Run the command without its requ
 
 You can always supply the required argument to skip the TUI and run non-interactively — scripts and CI pipelines are unaffected.
 
-The file picker automatically discovers `.json` files in the configured automations directory first (default: `./automations`), then falls back to `./`, `./examples/`, and `./tools/cli/examples/`, sorted by most recently modified. A "Enter path manually..." option is always available if your file lives elsewhere.
+The file picker automatically discovers `.json` files in the configured automations directory first (default: `~/.portalflow/automations`), then falls back to `./`, `./examples/`, and `./tools/cli/examples/`, sorted by most recently modified. A "Enter path manually..." option is always available if your file lives elsewhere.
 
 ---
 
@@ -205,12 +206,16 @@ PortalFlow writes four kinds of files during a run: automation definitions (inpu
 
 ### Built-in defaults
 
+All default locations live under `~/.portalflow/`:
+
 | Purpose | Default location |
 |---|---|
-| Automation files (file picker) | `./automations` |
-| Screenshots | `./artifacts/screenshots` |
-| Videos | `./artifacts/videos` |
-| Downloads | `./artifacts/downloads` |
+| Automation files (file picker input) | `~/.portalflow/automations` |
+| Screenshots | `~/.portalflow/artifacts/screenshots` |
+| Videos | `~/.portalflow/artifacts/videos` |
+| Downloads | `~/.portalflow/artifacts/downloads` |
+
+These directories are created automatically on first run. The installer also seeds `~/.portalflow/automations/` with the bundled example automations (`demo-search.json` and `phone-bill.json`) so you have something to try immediately after install.
 
 Video recording is disabled by default.
 
@@ -849,6 +854,9 @@ tools/cli/
 ---
 
 ## Troubleshooting
+
+**File picker shows no automations**
+The default automations directory is `~/.portalflow/automations`. After a fresh install, the installer seeds this directory with `demo-search.json` and `phone-bill.json`. If the directory is empty, run `portalflow run` and choose "Enter path manually..." to locate your file, or copy automation JSON files into `~/.portalflow/automations/`.
 
 **"No LLM provider configured"**
 Run `portalflow provider` to launch the interactive setup, or see `portalflow provider --help` for non-interactive configuration options.

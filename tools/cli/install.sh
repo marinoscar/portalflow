@@ -88,7 +88,7 @@ echo ""
 # Step 1 — Prerequisites
 # ---------------------------------------------------------------------------
 
-step "[1/6] Checking prerequisites"
+step "[1/7] Checking prerequisites"
 
 # git
 if ! command -v git &>/dev/null; then
@@ -119,7 +119,7 @@ success "npm $(npm -v)"
 # Step 2 — Get the source code
 # ---------------------------------------------------------------------------
 
-step "[2/6] Getting source code"
+step "[2/7] Getting source code"
 
 # Detect if running from inside the repo or via curl pipe
 SCRIPT_DIR=""
@@ -170,7 +170,7 @@ fi
 # Step 3 — Install dependencies
 # ---------------------------------------------------------------------------
 
-step "[3/6] Installing dependencies"
+step "[3/7] Installing dependencies"
 
 if [ -f "${REPO_ROOT}/package.json" ] && grep -q '"workspaces"' "${REPO_ROOT}/package.json" 2>/dev/null; then
   info "Monorepo detected — installing workspace dependencies..."
@@ -184,7 +184,7 @@ success "Dependencies installed"
 # Step 4 — Install Playwright browsers
 # ---------------------------------------------------------------------------
 
-step "[4/6] Installing Playwright Chromium"
+step "[4/7] Installing Playwright Chromium"
 
 info "This may take a minute on first install..."
 (cd "${CLI_DIR}" && npx playwright install chromium 2>&1 | tail -5) || \
@@ -195,7 +195,7 @@ success "Chromium ready"
 # Step 5 — Build
 # ---------------------------------------------------------------------------
 
-step "[5/6] Building"
+step "[5/7] Building"
 
 (cd "${CLI_DIR}" && npm run build 2>&1 | tail -5)
 success "Build complete"
@@ -211,10 +211,37 @@ CLI_VERSION="$(node "${BIN_SOURCE}" --version 2>/dev/null || echo "unknown")"
 success "Version: ${CLI_VERSION}"
 
 # ---------------------------------------------------------------------------
-# Step 6 — Install globally
+# Step 6 — Seed default directories
 # ---------------------------------------------------------------------------
 
-step "[6/6] Installing to ${LINK_TARGET}"
+step "[6/7] Seeding default directories"
+
+PORTALFLOW_HOME="${HOME}/.portalflow"
+
+# Create the standard layout (idempotent)
+mkdir -p "${PORTALFLOW_HOME}/automations"
+mkdir -p "${PORTALFLOW_HOME}/artifacts/screenshots"
+mkdir -p "${PORTALFLOW_HOME}/artifacts/videos"
+mkdir -p "${PORTALFLOW_HOME}/artifacts/downloads"
+
+# Copy bundled examples into ~/.portalflow/automations if it has no .json files yet
+if [ -d "${CLI_DIR}/examples" ]; then
+  existing_json="$(find "${PORTALFLOW_HOME}/automations" -maxdepth 1 -name '*.json' 2>/dev/null | head -n 1)"
+  if [ -z "${existing_json}" ]; then
+    cp "${CLI_DIR}/examples/"*.json "${PORTALFLOW_HOME}/automations/" 2>/dev/null || true
+    success "Seeded example automations to ${PORTALFLOW_HOME}/automations"
+  else
+    info "Automations directory already has files — leaving it alone"
+  fi
+fi
+
+success "Default directories ready at ${PORTALFLOW_HOME}"
+
+# ---------------------------------------------------------------------------
+# Step 7 — Install globally
+# ---------------------------------------------------------------------------
+
+step "[7/7] Installing to ${LINK_TARGET}"
 
 # Ensure the bin script is executable
 chmod +x "${BIN_SOURCE}"
@@ -273,11 +300,10 @@ echo -e "${BOLD}  └───────────────────�
 echo ""
 echo "  Get started:"
 echo ""
-echo "    ${DIM}\$${RESET} portalflow provider config anthropic --api-key sk-...  ${DIM}# Configure LLM${RESET}"
-echo "    ${DIM}\$${RESET} portalflow provider set anthropic                       ${DIM}# Set active provider${RESET}"
-echo "    ${DIM}\$${RESET} portalflow validate ./automation.json                   ${DIM}# Validate a JSON definition${RESET}"
-echo "    ${DIM}\$${RESET} portalflow run ./automation.json                        ${DIM}# Execute an automation${RESET}"
-echo "    ${DIM}\$${RESET} portalflow --help                                       ${DIM}# Show all commands${RESET}"
+echo "    ${DIM}\$${RESET} portalflow                                                    ${DIM}# Interactive menu${RESET}"
+echo "    ${DIM}\$${RESET} portalflow provider                                          ${DIM}# Set up an LLM provider${RESET}"
+echo "    ${DIM}\$${RESET} portalflow run ${HOME}/.portalflow/automations/demo-search.json"
+echo "    ${DIM}\$${RESET} portalflow --help                                            ${DIM}# Show all commands${RESET}"
 echo ""
 echo "  Update:     ${DIM}portalflow-update${RESET}  or  ${DIM}curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli/install.sh | bash${RESET}"
 echo "  Uninstall:  ${DIM}${CLI_DIR}/install.sh --uninstall${RESET}"
