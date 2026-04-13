@@ -9,6 +9,7 @@ PortalFlow CLI (`portalflow`) is the execution engine for PortalFlow browser aut
 - [Update](#update)
 - [Uninstall](#uninstall)
 - [Quick Start](#quick-start)
+- [Interactive Modes](#interactive-modes)
 - [Interactive Provider Setup](#interactive-provider-setup)
 - [Commands](#commands)
 - [Configuration](#configuration)
@@ -106,6 +107,16 @@ rm -rf ~/.portalflow
 
 ## Quick Start
 
+### Interactive mode (easiest)
+
+Run `portalflow` with no arguments to launch a guided menu:
+
+```bash
+portalflow
+```
+
+This opens a top-level TUI where you can pick any action — run an automation, validate a file, or manage LLM providers — without remembering command names or file paths. Each option has its own guided sub-flow.
+
 **1. Configure a provider**
 
 The easiest way is to launch the interactive setup:
@@ -144,6 +155,23 @@ portalflow run tools/cli/examples/demo-search.json --headless
 
 ---
 
+## Interactive Modes
+
+Every PortalFlow command has a guided TUI mode. Run the command without its required argument and a wizard walks you through the options.
+
+| Command | TUI trigger | What it does |
+|---|---|---|
+| `portalflow` | bare (no args) | Top-level menu: run / validate / manage providers / exit |
+| `portalflow run` | no file argument | File picker (discovers `./*.json`, `./examples/*.json`, `./automations/*.json`), validates before running, shows an automation preview, asks about headless mode, and confirms before launching |
+| `portalflow validate` | no file argument | File picker, then full schema validation with a formatted summary on success or error details on failure |
+| `portalflow provider` | no subcommand | Provider management menu (documented below) |
+
+You can always supply the required argument to skip the TUI and run non-interactively — scripts and CI pipelines are unaffected.
+
+The file picker automatically discovers `.json` files in `./`, `./examples/`, `./automations/`, and `./tools/cli/examples/`, sorted by most recently modified. A "Enter path manually..." option is always available if your file lives elsewhere.
+
+---
+
 ## Interactive Provider Setup
 
 Running `portalflow provider` with no subcommand launches a guided Terminal UI for managing LLM providers. It's the recommended way to configure the CLI for the first time.
@@ -171,25 +199,27 @@ All non-interactive subcommands (`provider list`, `provider set`, `provider conf
 
 ## Commands
 
-### `portalflow run <file>`
+### `portalflow run [file]`
 
-Execute an automation from a JSON file.
+Execute an automation from a JSON file. If `file` is omitted, launches the interactive run TUI (file picker + preview + confirmation). See [Interactive Modes](#interactive-modes).
 
 ```bash
 portalflow run automation.json
 portalflow run automation.json --headless
+portalflow run   # interactive mode
 ```
 
 | Option | Description |
 |---|---|
 | `--headless` | Run Chrome in headless mode (default: headed) |
 
-### `portalflow validate <file>`
+### `portalflow validate [file]`
 
-Validate an automation JSON file against the schema. Prints structured errors on failure; useful before running an automation in CI or production.
+Validate an automation JSON file against the schema. Prints structured errors on failure; useful before running an automation in CI or production. If `file` is omitted, launches the interactive validate TUI (file picker + formatted schema report). See [Interactive Modes](#interactive-modes).
 
 ```bash
 portalflow validate automation.json
+portalflow validate   # interactive mode
 ```
 
 ### `portalflow provider`

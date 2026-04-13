@@ -12,14 +12,23 @@ const program = new Command();
 program
   .name('portalflow')
   .description('PortalFlow CLI — run and manage browser automations')
-  .version('1.1.2');
+  .version('1.1.2')
+  .action(async () => {
+    const { runMainTui } = await import('./tui/main-tui.js');
+    await runMainTui();
+  });
 
-// run <file>
+// run [file]
 program
-  .command('run <file>')
-  .description('Execute an automation from a JSON file')
+  .command('run [file]')
+  .description('Execute an automation from a JSON file (omit file to use interactive TUI)')
   .option('--headless', 'Run browser in headless mode', false)
-  .action(async (file: string, options: { headless: boolean }) => {
+  .action(async (file: string | undefined, options: { headless: boolean }) => {
+    if (!file) {
+      const { runRunFlow } = await import('./tui/flows/run.js');
+      await runRunFlow();
+      return;
+    }
     try {
       const { AutomationRunner } = await import('./runner/automation-runner.js');
       const runner = new AutomationRunner();
@@ -53,11 +62,16 @@ program
     }
   });
 
-// validate <file>
+// validate [file]
 program
-  .command('validate <file>')
-  .description('Validate an automation JSON file against the schema')
-  .action(async (file: string) => {
+  .command('validate [file]')
+  .description('Validate an automation JSON file against the schema (omit file to use interactive TUI)')
+  .action(async (file: string | undefined) => {
+    if (!file) {
+      const { runValidateFlow } = await import('./tui/flows/validate.js');
+      await runValidateFlow();
+      return;
+    }
     logger.info({ file }, 'Validating automation file');
     try {
       const raw = await readFile(file, 'utf-8');

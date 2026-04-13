@@ -10,10 +10,18 @@ import { runResetFlow } from './flows/reset.js';
 
 type MenuAction = 'configure' | 'set-active' | 'list' | 'remove' | 'reset' | 'exit';
 
-export async function runProviderTui(): Promise<void> {
+export interface ProviderTuiOptions {
+  nested?: boolean;
+}
+
+export async function runProviderTui(options: ProviderTuiOptions = {}): Promise<void> {
   const configService = new ConfigService();
 
-  p.intro(pc.bgCyan(pc.black(' PortalFlow · Provider Setup ')));
+  if (!options.nested) {
+    p.intro(pc.bgCyan(pc.black(' PortalFlow · Provider Setup ')));
+  } else {
+    p.log.step(pc.cyan('Provider Setup'));
+  }
 
   // Initial status display
   const cfg = await configService.load();
@@ -116,9 +124,13 @@ export async function runProviderTui(): Promise<void> {
         break;
 
       case 'exit':
-        p.outro(
-          `Run ${pc.cyan('portalflow provider config <name>')} for non-interactive configuration.`,
-        );
+        if (!options.nested) {
+          p.outro(
+            `Run ${pc.cyan('portalflow provider config <name>')} for non-interactive configuration.`,
+          );
+        } else {
+          p.log.info(pc.dim('Returning to main menu...'));
+        }
         return;
     }
   }
