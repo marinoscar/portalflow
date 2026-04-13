@@ -3,6 +3,7 @@ import type { Message } from '../shared/messaging';
 import type { HtmlSnapshot, NavigateEvent, RawEvent, RecordingSession } from '../shared/types';
 import { LlmService } from '../llm/llm.service';
 import { PROMPTS } from '../llm/prompts';
+import { eventsToAutomation } from '../converter/events-to-automation';
 
 const llmService = new LlmService();
 
@@ -51,11 +52,24 @@ async function startRecording(tabId: number): Promise<RecordingSession> {
 }
 
 async function stopRecording(): Promise<RecordingSession | null> {
-  const updated = await updateSession((s) => ({
-    ...s,
-    status: 'stopped',
-    endedAt: Date.now(),
-  }));
+  const updated = await updateSession((s) => {
+    // Capture the raw original automation exactly once — on the first stop.
+    // Any later stop/resume/stop cycle preserves the first version so the
+    // user can always revert to it from the side panel.
+    const stopped: RecordingSession = {
+      ...s,
+      status: 'stopped',
+      endedAt: Date.now(),
+    };
+    if (!s.original && s.events.length > 0) {
+      try {
+        stopped.original = eventsToAutomation(stopped);
+      } catch (err) {
+        console.warn('[PortalFlow] Failed to derive original automation', err);
+      }
+    }
+    return stopped;
+  });
   if (updated) await broadcastSession(updated);
   return updated;
 }

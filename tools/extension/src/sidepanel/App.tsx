@@ -92,6 +92,12 @@ export function App() {
     }
   };
 
+  const revertToOriginal = () => {
+    if (!session?.original) return;
+    setEditing(false);
+    dispatch({ type: 'SET_AUTOMATION', automation: session.original });
+  };
+
   // --- edit helpers ---
 
   const beginEdit = () => setEditing(true);
@@ -178,6 +184,15 @@ export function App() {
             {editing && status !== 'recording' && (
               <button className="btn-secondary" onClick={rederive}>
                 Reset to recording
+              </button>
+            )}
+            {editing && status !== 'recording' && session?.original && (
+              <button
+                className="btn-secondary"
+                onClick={revertToOriginal}
+                title="Restore the original automation as it was first converted from the recording. Keeps all recorded events intact, discards post-recording edits."
+              >
+                Revert to original
               </button>
             )}
           </div>
