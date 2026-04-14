@@ -13,6 +13,8 @@ import type {
   ItemsResult,
   LlmProvider,
   LlmProviderConfig,
+  NextActionQuery,
+  NextActionResult,
   PageContext,
 } from './provider.interface.js';
 
@@ -125,6 +127,16 @@ export class LlmService {
     goal: string,
   ): Promise<ActionDecision> {
     return this.getProvider().decideAction(stepDescription, pageContext, goal);
+  }
+
+  /**
+   * Ask the active provider to pick the next action for an aiscope agent
+   * loop iteration. Forwards the query (goal + page context + allowed
+   * actions + recent history) to the provider, which is expected to emit
+   * a single action in strict JSON form.
+   */
+  async decideNextAction(query: NextActionQuery): Promise<NextActionResult> {
+    return this.getProvider().decideNextAction(query);
   }
 
   async interpretPage(pageContext: PageContext, question: string): Promise<string> {

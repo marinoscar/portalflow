@@ -10,6 +10,8 @@ import type {
   ItemsResult,
   LlmProvider,
   LlmProviderConfig,
+  NextActionQuery,
+  NextActionResult,
   PageContext,
 } from './provider.interface.js';
 import { SYSTEM_PROMPTS } from './prompts.js';
@@ -261,6 +263,10 @@ Question: ${question}`;
       );
       throw err instanceof Error ? err : new Error(String(err));
     }
+  }
+
+  async decideNextAction(_query: NextActionQuery): Promise<NextActionResult> {
+    throw new Error('AnthropicProvider.decideNextAction: not yet implemented');
   }
 
   async extractData(pageContext: PageContext, schema: string): Promise<unknown> {
