@@ -398,19 +398,42 @@ export class StepExecutor {
   }
 
   private async evaluateExitCondition(cond: LoopExitWhen): Promise<boolean> {
-    const page = this.browserService.getPage();
-    const value = this.context.resolveTemplate(cond.value);
-    switch (cond.check) {
+    return this.runDeterministicCheck(cond.check, cond.value);
+  }
+
+  /**
+   * Evaluate a deterministic page check against the current run context.
+   * Shared between the loop's `exitWhen`, the condition step's `check`,
+   * and the aiscope step's `successCheck`. Template resolution happens
+   * inside so every caller gets consistent behavior.
+   *
+   * Supports the full superset of checks across all callers:
+   *   - element_exists  — CSS selector matches at least one DOM element
+   *   - element_missing — CSS selector matches zero DOM elements
+   *   - url_matches     — `value` is a substring of the current page URL
+   *   - text_contains   — `value` is a substring of the rendered HTML
+   *   - variable_equals — context variable `name=expected` matches
+   *
+   * The condition step's schema only allows the first, third, fourth,
+   * and fifth (not `element_missing`); the loop allows all five; aiscope
+   * follows the condition-step shape. The helper itself is permissive
+   * and returns a boolean for any of the five without errors — unknown
+   * check names throw.
+   */
+  private async runDeterministicCheck(
+    check: 'element_exists' | 'element_missing' | 'url_matches' | 'text_contains' | 'variable_equals',
+    rawValue: string,
+  ): Promise<boolean> {
+    const value = this.context.resolveTemplate(rawValue);
+    switch (check) {
       case 'element_exists':
-        return !!(await page.$(value).catch(() => null));
+        return this.pageService.elementExists(value);
       case 'element_missing':
-        return !(await page.$(value).catch(() => null));
+        return !(await this.pageService.elementExists(value));
       case 'url_matches':
-        return page.url().includes(value);
-      case 'text_contains': {
-        const content = await page.content();
-        return content.includes(value);
-      }
+        return (await this.pageService.getUrl()).includes(value);
+      case 'text_contains':
+        return (await this.pageService.getHtml()).includes(value);
       case 'variable_equals': {
         const eqIdx = value.indexOf('=');
         if (eqIdx === -1) return false;
@@ -419,8 +442,8 @@ export class StepExecutor {
         return this.context.getVariable(varName) === expected;
       }
       default: {
-        const exhaustive: never = cond.check;
-        throw new Error(`Unknown exit condition: ${String(exhaustive)}`);
+        const exhaustive: never = check;
+        throw new Error(`Unknown deterministic check: ${String(exhaustive)}`);
       }
     }
   }
@@ -952,46 +975,12 @@ export class StepExecutor {
           `Step "${step.id}": condition with "check" requires a "value".`,
         );
       }
-      const condValue = this.context.resolveTemplate(action.value);
-
-      switch (action.check) {
-        case 'element_exists': {
-          result = await this.pageService.elementExists(condValue);
-          break;
-        }
-
-        case 'url_matches': {
-          const currentUrl = await this.pageService.getUrl();
-          result = currentUrl.includes(condValue);
-          break;
-        }
-
-        case 'text_contains': {
-          const html = await this.pageService.getHtml();
-          result = html.includes(condValue);
-          break;
-        }
-
-        case 'variable_equals': {
-          // condValue format: "varName=expectedValue"
-          const eqIdx = condValue.indexOf('=');
-          if (eqIdx === -1) {
-            this.context.logger.warn(
-              { stepId: step.id },
-              'condition "variable_equals" value must be in format "varName=expectedValue"',
-            );
-            break;
-          }
-          const varName = condValue.slice(0, eqIdx);
-          const expected = condValue.slice(eqIdx + 1);
-          result = this.context.getVariable(varName) === expected;
-          break;
-        }
-
-        default: {
-          throw new Error(`Unknown condition check: ${String(action.check)}`);
-        }
-      }
+      // Condition step's schema does not allow 'element_missing' — the
+      // four remaining cases are covered by the shared helper.
+      result = await this.runDeterministicCheck(
+        action.check as 'element_exists' | 'url_matches' | 'text_contains' | 'variable_equals',
+        action.value,
+      );
 
       this.context.logger.info(
         {
