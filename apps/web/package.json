@@ -20,7 +20,7 @@
     "@emotion/styled": "^11.x",
     "@mui/icons-material": "^5.x",
     "@mui/material": "^5.x",
-    "react": "^18.x",
+    "react": "^19.x",
     "react-dom": "^18.x",
     "react-router-dom": "^6.x"
   },
@@ -28,7 +28,7 @@
     "@testing-library/jest-dom": "^6.x",
     "@testing-library/react": "^14.x",
     "@testing-library/user-event": "^14.x",
-    "@types/react": "^18.x",
+    "@types/react": "^19.x",
     "@types/react-dom": "^18.x",
     "@vitejs/plugin-react": "^5.1.2",
     "@vitest/coverage-v8": "^4.0.17",
