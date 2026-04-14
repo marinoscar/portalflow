@@ -1,4 +1,5 @@
 import type {
+  AiScopeAction,
   CallAction,
   ConditionAction,
   DownloadAction,
@@ -19,8 +20,39 @@ import type { ElementResolver } from '../browser/element-resolver.js';
 import type { BrowserService } from '../browser/browser.service.js';
 import type { PageContextCapture } from '../browser/context.js';
 import type { LlmService } from '../llm/llm.service.js';
+import type {
+  AgentActionHistoryEntry,
+  NextActionResult,
+  PageContext,
+} from '../llm/provider.interface.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext } from './run-context.js';
+
+/**
+ * Default action whitelist for aiscope steps when `allowedActions` is
+ * not explicitly set in the step's action block. Matches the vocabulary
+ * documented in `aiScopeActionDecider` system prompt.
+ */
+const DEFAULT_AISCOPE_ACTIONS = [
+  'navigate',
+  'click',
+  'type',
+  'select',
+  'check',
+  'uncheck',
+  'hover',
+  'focus',
+  'scroll',
+  'wait',
+  'done',
+] as const;
+
+/**
+ * How many recent action entries to keep in the FIFO passed to the LLM
+ * on every iteration. Bounds prompt growth and prevents the model from
+ * getting stuck repeating a failing move.
+ */
+const AISCOPE_HISTORY_WINDOW = 5;
 
 const RETRY_BASE_DELAY_MS = 1_000;
 const MAX_CALL_DEPTH = 16;
@@ -249,11 +281,8 @@ export class StepExecutor {
         await this.executeGoto(step);
         break;
       case 'aiscope':
-        // Wired up in a later commit. Stubbed here so the schema commit
-        // typechecks against the exhaustive-never branch below.
-        throw new Error(
-          `Step "${step.id}": aiscope step type is not yet implemented in the runner.`,
-        );
+        await this.executeAiScope(step);
+        break;
       default: {
         const exhaustive: never = step.type;
         throw new Error(`Unknown step type: ${String(exhaustive)}`);
@@ -825,6 +854,277 @@ export class StepExecutor {
       { stepId: step.id, targetStepId: target },
       'goto step set pending jump',
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // AiScope — hand control to an LLM for a bounded goal-driven sub-run
+  // ---------------------------------------------------------------------------
+  //
+  // The loop shape on every iteration:
+  //
+  //   1. Check both budget caps (wall-clock AND iteration count). Either
+  //      one exceeded throws an error with a clear message naming the cap.
+  //   2. Capture the current page context (simplified HTML + optional
+  //      viewport screenshot).
+  //   3. Evaluate the user's successCheck against the current context.
+  //      If it passes, we're done.
+  //   4. Ask the LLM (via decideNextAction) what to do next. The query
+  //      carries the goal, the page context, the allowed action list,
+  //      and a short history of recent attempts.
+  //   5. Dispatch the chosen action through PageService. If the action
+  //      throws, the error is logged + captured in the history buffer
+  //      so the LLM can correct on the next iteration — the loop does
+  //      NOT abort on a single failed action.
+  //   6. Append to the recent-history FIFO (capped at AISCOPE_HISTORY_WINDOW).
+  //
+  // The loop exits under three conditions:
+  //   - successCheck passes → step succeeds normally.
+  //   - Budget exhausted (wall-clock OR iterations) → throw with clear error.
+  //     The step's own onFailure policy then decides retry/skip/abort.
+  //   - The LLM emits "done" AND the successCheck agrees on the next
+  //     iteration → step succeeds. If the check disagrees, the loop keeps
+  //     going until the budget is exhausted (the LLM can't lie its way out).
+
+  private async executeAiScope(step: Step): Promise<void> {
+    const action = step.action as AiScopeAction;
+    const startedAt = Date.now();
+    const deadlineMs = startedAt + action.maxDurationSec * 1000;
+    const history: AgentActionHistoryEntry[] = [];
+    const logger = this.context.logger;
+    const allowedActions =
+      action.allowedActions ?? (DEFAULT_AISCOPE_ACTIONS as readonly string[] as string[]);
+
+    logger.info(
+      {
+        stepId: step.id,
+        goal: action.goal,
+        maxDurationSec: action.maxDurationSec,
+        maxIterations: action.maxIterations,
+        includeScreenshot: action.includeScreenshot,
+        allowedActions,
+      },
+      'aiscope: start',
+    );
+
+    for (let iteration = 1; iteration <= action.maxIterations; iteration++) {
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        throw new Error(
+          `aiscope step "${step.id}" exceeded wall-clock budget of ${action.maxDurationSec}s after ${iteration - 1} iteration(s) (goal: ${action.goal}).`,
+        );
+      }
+
+      logger.info(
+        {
+          stepId: step.id,
+          iteration,
+          maxIterations: action.maxIterations,
+          remainingMs,
+        },
+        'aiscope: iteration start',
+      );
+
+      // 1. Observe
+      const pageContext = await this.contextCapture.capture({
+        includeScreenshot: action.includeScreenshot,
+      });
+
+      // 2. Success check
+      if (await this.evaluateSuccessCheck(action.successCheck, pageContext)) {
+        logger.info(
+          {
+            stepId: step.id,
+            iteration,
+            durationMs: Date.now() - startedAt,
+          },
+          'aiscope: goal achieved',
+        );
+        return;
+      }
+
+      // 3. Ask the LLM for the next action
+      const decision = await this.llmService.decideNextAction({
+        goal: action.goal,
+        pageContext,
+        allowedActions,
+        recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
+      });
+
+      logger.info(
+        {
+          stepId: step.id,
+          iteration,
+          action: decision.action,
+          selector: decision.selector ?? null,
+          value: decision.value ?? null,
+          reasoning: decision.reasoning,
+        },
+        'aiscope: decided',
+      );
+
+      // 4. Dispatch
+      if (decision.action === 'done') {
+        // Treat as a hint — the top of the next iteration re-runs the
+        // success check. If the model was wrong we keep trying.
+        history.push({
+          iteration,
+          action: 'done',
+          succeeded: true,
+        });
+        continue;
+      }
+
+      if (!allowedActions.includes(decision.action)) {
+        logger.warn(
+          {
+            stepId: step.id,
+            iteration,
+            action: decision.action,
+            allowedActions,
+          },
+          'aiscope: LLM emitted an action outside the allowed list — ignoring',
+        );
+        history.push({
+          iteration,
+          action: decision.action,
+          succeeded: false,
+          error: `action "${decision.action}" is not in the allowed list: ${allowedActions.join(', ')}`,
+        });
+        continue;
+      }
+
+      try {
+        await this.dispatchAiScopeAction(decision);
+        history.push({
+          iteration,
+          action: decision.action,
+          selector: decision.selector,
+          value: decision.value,
+          succeeded: true,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          {
+            stepId: step.id,
+            iteration,
+            action: decision.action,
+            selector: decision.selector ?? null,
+            err,
+          },
+          'aiscope: action dispatch failed — feeding error back to LLM on next iteration',
+        );
+        history.push({
+          iteration,
+          action: decision.action,
+          selector: decision.selector,
+          value: decision.value,
+          succeeded: false,
+          error: message,
+        });
+      }
+    }
+
+    throw new Error(
+      `aiscope step "${step.id}" exhausted the ${action.maxIterations}-iteration budget without reaching the goal "${action.goal}". Consider increasing maxIterations, giving a clearer goal, or replacing with explicit steps.`,
+    );
+  }
+
+  /**
+   * Dispatch a single LLM-chosen action through PageService. Bad
+   * selectors, missing values, and Playwright errors all throw — the
+   * caller (`executeAiScope`) catches these, logs them, and feeds the
+   * error back to the LLM on the next iteration so it can adapt.
+   */
+  private async dispatchAiScopeAction(decision: NextActionResult): Promise<void> {
+    const { action, selector, value } = decision;
+    switch (action) {
+      case 'navigate':
+        if (!value) throw new Error('navigate requires a URL in `value`');
+        await this.pageService.navigate(value);
+        return;
+      case 'click':
+        if (!selector) throw new Error('click requires a `selector`');
+        await this.pageService.click(selector);
+        return;
+      case 'type':
+        if (!selector || value === undefined) {
+          throw new Error('type requires `selector` and `value`');
+        }
+        await this.pageService.type(selector, value);
+        return;
+      case 'select':
+        if (!selector || value === undefined) {
+          throw new Error('select requires `selector` and `value`');
+        }
+        await this.pageService.selectOption(selector, value);
+        return;
+      case 'check':
+        if (!selector) throw new Error('check requires a `selector`');
+        await this.pageService.check(selector);
+        return;
+      case 'uncheck':
+        if (!selector) throw new Error('uncheck requires a `selector`');
+        await this.pageService.uncheck(selector);
+        return;
+      case 'hover':
+        if (!selector) throw new Error('hover requires a `selector`');
+        await this.pageService.hover(selector);
+        return;
+      case 'focus':
+        if (!selector) throw new Error('focus requires a `selector`');
+        await this.pageService.focus(selector);
+        return;
+      case 'scroll': {
+        const direction = (value ?? 'down') as 'up' | 'down' | 'top' | 'bottom';
+        if (!['up', 'down', 'top', 'bottom'].includes(direction)) {
+          throw new Error(
+            `scroll value must be "up", "down", "top", or "bottom" — got "${direction}"`,
+          );
+        }
+        await this.pageService.scroll(direction);
+        return;
+      }
+      case 'wait': {
+        const ms = value ? parseInt(value, 10) : 1000;
+        if (isNaN(ms) || ms < 0) {
+          throw new Error(
+            `wait value must be a non-negative number of milliseconds — got "${value}"`,
+          );
+        }
+        await this.pageService.delay(ms);
+        return;
+      }
+      default:
+        throw new Error(`aiscope: unknown action "${action}"`);
+    }
+  }
+
+  /**
+   * Evaluate the aiscope successCheck against the current page context.
+   * Deterministic checks go through `runDeterministicCheck`; AI checks
+   * go through the existing `llmService.evaluateCondition` path used by
+   * the condition step's `ai:` branch. Schema validation already
+   * enforces that exactly one form is set.
+   */
+  private async evaluateSuccessCheck(
+    sc: AiScopeAction['successCheck'],
+    pageContext: PageContext,
+  ): Promise<boolean> {
+    if (sc.check !== undefined && sc.value !== undefined) {
+      return this.runDeterministicCheck(
+        sc.check as 'element_exists' | 'url_matches' | 'text_contains' | 'variable_equals',
+        sc.value,
+      );
+    }
+    if (sc.ai !== undefined) {
+      const evaluation = await this.llmService.evaluateCondition({
+        question: this.context.resolveTemplate(sc.ai),
+        pageContext,
+      });
+      return evaluation.result;
+    }
+    return false;
   }
 
   /**
