@@ -879,3 +879,170 @@ describe('AutomationSchema · step-id uniqueness and jump references', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// aiscope step validation
+// ---------------------------------------------------------------------------
+
+describe('AutomationSchema · aiscope step type', () => {
+  const aiscopeStep = (action: Record<string, unknown>) => ({
+    id: 'step-ai',
+    name: 'Aiscope',
+    type: 'aiscope' as const,
+    action,
+    onFailure: 'abort' as const,
+    maxRetries: 0,
+    timeout: 0,
+  });
+
+  it('validates a minimal aiscope step with a deterministic successCheck', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Click the accept button',
+          successCheck: {
+            check: 'element_exists',
+            value: 'button.accepted',
+          },
+        }),
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const action = result.data.steps[0].action as {
+        maxDurationSec: number;
+        maxIterations: number;
+        includeScreenshot: boolean;
+      };
+      expect(action.maxDurationSec).toBe(300);
+      expect(action.maxIterations).toBe(25);
+      expect(action.includeScreenshot).toBe(true);
+    }
+  });
+
+  it('validates an aiscope step with an AI successCheck', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Dismiss the cookie banner',
+          successCheck: { ai: 'Is the cookie banner gone?' },
+          maxDurationSec: 60,
+          maxIterations: 10,
+        }),
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an aiscope step with neither check nor ai in successCheck', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Do something',
+          successCheck: {},
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an aiscope step with both check and ai in successCheck', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Do something',
+          successCheck: {
+            check: 'element_exists',
+            value: 'button',
+            ai: 'Is it done?',
+          },
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an aiscope step with check set but no value', () => {
+    // NOTE: the action field is a z.union, so Zod picks the "best" error
+    // from whichever variant matched closest — which may be the condition
+    // variant, not the aiscope variant. We just assert rejection, not the
+    // specific message.
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Do something',
+          successCheck: { check: 'element_exists' },
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing goal', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          successCheck: { check: 'element_exists', value: 'button' },
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('applies defaults for maxDurationSec, maxIterations, and includeScreenshot', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Test defaults',
+          successCheck: { check: 'element_exists', value: 'button' },
+        }),
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const action = result.data.steps[0].action as {
+        maxDurationSec: number;
+        maxIterations: number;
+        includeScreenshot: boolean;
+      };
+      expect(action.maxDurationSec).toBe(300);
+      expect(action.maxIterations).toBe(25);
+      expect(action.includeScreenshot).toBe(true);
+    }
+  });
+
+  it('accepts a custom allowedActions whitelist', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Click only',
+          successCheck: { check: 'element_exists', value: 'button' },
+          allowedActions: ['click', 'done'],
+        }),
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an invalid action name in allowedActions', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Do stuff',
+          successCheck: { check: 'element_exists', value: 'button' },
+          allowedActions: ['eval'],
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+});
