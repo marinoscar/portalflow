@@ -3456,9 +3456,28 @@ Fixes:
 1. **Always run `portalflow validate <file>` first.** This catches schema errors without
    launching a browser and is fast. Fix all validation errors before attempting a run.
 
-2. **Set `LOG_LEVEL=debug`** for detailed logs. With debug level, the runner prints every
-   selector tried, every element resolution result, every context variable set, and every
-   template resolved.
+2. **Raise log verbosity to `debug`** for full troubleshooting detail. At `debug` the runner
+   emits per-step `durationMs`, template resolution traces (raw vs. resolved URLs / args /
+   values), element resolution source + latency, extracted values (first 500 chars), tool call
+   `rawArgs` + `resolvedArgs` with success + duration, LLM provider telemetry (`model`,
+   `operation`, `latencyMs`, `inputTokens`, `outputTokens`), and browser page lifecycle events
+   (`framenavigated`, `pageerror`, `crash`, failed requests, non-2xx responses). Failed steps
+   always carry the full `err.stack` regardless of level.
+
+   Three equivalent ways to raise the level (highest priority first):
+   ```bash
+   portalflow run my-automation.json --log-level debug      # CLI flag
+   LOG_LEVEL=debug portalflow run my-automation.json        # env var
+   portalflow settings logging --level debug                # persisted config
+   ```
+
+   To also write logs to a file in addition to stdout:
+   ```bash
+   portalflow settings logging --level debug --file ~/.portalflow/run.log
+   ```
+   The file receives raw JSON (one entry per line), easy to grep or pipe through `jq`. Secret
+   values from `type: "secret"` inputs and any `apiKey` / `password` / `token` / `otp` fields
+   are redacted by default; disable with `--no-redact` only for local debugging.
 
 3. **Set `headless: false` in settings** during development. Watching the browser run makes it
    obvious when a step is clicking the wrong element or when the page is not in the expected
