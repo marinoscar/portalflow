@@ -13,6 +13,8 @@ import { ExportBar } from './components/ExportBar';
 import { LlmNotConfiguredBanner } from './components/LlmNotConfiguredBanner';
 import { VersionHistory } from './components/VersionHistory';
 import { ChatPanel } from './components/ChatPanel';
+import { ConfirmModal } from './components/ConfirmModal';
+import { SessionsManagerModal } from './components/SessionsManagerModal';
 import { ToastStack, useToasts } from './components/ToastStack';
 import { importSession } from './services/session-import';
 import { useUndoRedoShortcuts } from './hooks/useKeyboardShortcuts';
@@ -26,6 +28,8 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [state, dispatch] = useReducer(automationReducer, initialAutomationState);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showSessionsManager, setShowSessionsManager] = useState(false);
 
   // Load current session on mount
   useEffect(() => {
@@ -88,6 +92,20 @@ export function App() {
     setSession(null);
     dispatch({ type: 'CLEAR_AUTOMATION' });
     setEditing(false);
+  };
+
+  const handleConfirmReset = async () => {
+    setShowResetConfirm(false);
+    await clear();
+    pushToast('info', 'Session reset. Start recording a new one.');
+  };
+
+  const handleOpenArchivedSession = (restored: RecordingSession) => {
+    setShowSessionsManager(false);
+    setEditing(false);
+    dispatch({ type: 'CLEAR_AUTOMATION' });
+    setSession(restored);
+    pushToast('info', 'Opened saved session');
   };
 
   const rederive = () => {
@@ -453,6 +471,50 @@ export function App() {
           </button>
           <button
             className="app-header-icon-button"
+            onClick={() => setShowSessionsManager(true)}
+            title="Saved sessions"
+            aria-label="Open saved sessions"
+            type="button"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          <button
+            className="app-header-icon-button"
+            onClick={() => setShowResetConfirm(true)}
+            disabled={!session}
+            title={session ? 'Reset current session' : 'No session to reset'}
+            aria-label="Reset current session"
+            type="button"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 12a9 9 0 1 0 9-9" />
+              <polyline points="3 4 3 10 9 10" />
+            </svg>
+          </button>
+          <button
+            className="app-header-icon-button"
             onClick={openImportPicker}
             title="Import session (.zip)"
             aria-label="Import session"
@@ -725,6 +787,27 @@ export function App() {
         currentVersionId={state.currentVersionId}
         onCheckout={checkoutVersion}
       />
+      {showResetConfirm && (
+        <ConfirmModal
+          title="Reset current session?"
+          message={
+            session && (session.events.length > 0 || (session.versions?.length ?? 0) > 0)
+              ? "The current session will be saved to 'Saved sessions' and the side panel will start fresh. You can open it again later."
+              : 'This will clear the current session and start fresh.'
+          }
+          confirmLabel="Reset"
+          danger
+          onConfirm={handleConfirmReset}
+          onCancel={() => setShowResetConfirm(false)}
+        />
+      )}
+      {showSessionsManager && (
+        <SessionsManagerModal
+          currentSessionId={session?.id ?? null}
+          onOpen={handleOpenArchivedSession}
+          onClose={() => setShowSessionsManager(false)}
+        />
+      )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
