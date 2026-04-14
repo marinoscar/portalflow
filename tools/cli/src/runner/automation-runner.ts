@@ -221,9 +221,11 @@ export class AutomationRunner {
     );
 
     // ------------------------------------------------------------------
-    // 8. Launch BrowserService
+    // 8. Launch BrowserService (logger is passed so page lifecycle
+    //    events — framenavigated, pageerror, requestfailed, console
+    //    warnings — are captured in the run log at debug level)
     // ------------------------------------------------------------------
-    const browserService = new BrowserService();
+    const browserService = new BrowserService(logger);
 
     const headless = options?.headless ?? settings?.headless ?? false;
 
