@@ -1,6 +1,6 @@
 {
   "name": "@portalflow/extension",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "PortalFlow Chrome extension: record browser workflows and export them as automation JSON",
   "private": true,
   "type": "module",
