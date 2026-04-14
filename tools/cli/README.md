@@ -741,6 +741,44 @@ See `docs/AUTOMATION-JSON-SPEC.md` §6.10 for the full semantics, the worked rec
 
 ---
 
+## AI-driven Sub-Runs (`aiscope`)
+
+PortalFlow also supports `aiscope` steps: a bounded, goal-driven sub-run where the runtime hands control to an LLM. The LLM observes the page (simplified HTML plus an optional viewport screenshot), picks the next browser action, and PortalFlow dispatches it. The loop runs until the user's success check passes, the wall-clock budget expires, or the iteration cap is hit — whichever fires first.
+
+Use it when the exact selectors or flow can't be predicted — "dismiss whatever cookie banner this site shows" or "find the PDF download button somewhere in the bills table". For known flows, stick with explicit steps — they're cheaper and far more debuggable.
+
+**Action shape:**
+
+```json
+{
+  "type": "aiscope",
+  "action": {
+    "goal": "Dismiss the cookie consent banner",
+    "successCheck": { "ai": "Is the page free of any cookie or consent banner?" },
+    "maxDurationSec": 60,
+    "maxIterations": 10,
+    "includeScreenshot": true
+  },
+  "onFailure": "skip",
+  "maxRetries": 0,
+  "timeout": 60000
+}
+```
+
+**Dual budget caps (both enforced, whichever fires first):**
+- `maxDurationSec` — wall-clock budget, default 300s (5 min), range 1–3600.
+- `maxIterations` — observe→decide→dispatch cycles, default 25, range 1–200.
+
+**Vision:** screenshots are sent to the LLM on every iteration by default. Requires a vision-capable model (Claude 3.5+ / GPT-4o+). Set `includeScreenshot: false` to fall back to HTML-only.
+
+**Success check:** either a deterministic `{ check, value }` (same enum as the `condition` step) or an AI `{ ai: "yes/no question" }`. Exactly one must be set.
+
+**Safety:** the LLM can only pick from a fixed action vocabulary (`navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`). There's no `eval` or raw-JS escape hatch. Failed actions are fed back to the LLM in a 5-entry history buffer so the model can adapt instead of repeating broken moves.
+
+See `docs/AUTOMATION-JSON-SPEC.md` §6.11 for the full reference and `tools/cli/examples/aiscope-demo.json` for a runnable example.
+
+---
+
 ## Logging and Troubleshooting
 
 PortalFlow uses [pino](https://getpino.io) for structured, JSON-native logging. Every automation run produces a detailed event stream you can grep, pipe through `jq`, or follow live in a terminal.
