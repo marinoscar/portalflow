@@ -285,6 +285,113 @@ replace the automation's steps array directly, so correctness matters.
        handler needs to DO something (close a modal, clear a cookie,
        switch profiles) before retrying.
 
+13. USE AISCOPE STEPS FOR BOUNDED GOAL-DRIVEN DEVIATIONS (when appropriate)
+    When the user describes a small, scoped task where the exact
+    selectors or flow CANNOT be predicted in advance — "dismiss
+    whatever cookie banner this site shows", "click the PDF download
+    link somewhere in the bills table", "get past the interstitial
+    ad" — an aiscope step is the right primitive.
+
+    An aiscope step hands control to the LLM inside a bounded agent
+    loop: observe the page, decide the next action, dispatch, repeat
+    until a success check passes or a budget cap fires.
+
+    Shape:
+    {
+      "id": "step-X",
+      "type": "aiscope",
+      "action": {
+        "goal": "<plain-English description of what to accomplish>",
+        "successCheck": {
+          // EITHER:
+          "check": "element_exists" | "url_matches" | "text_contains" | "variable_equals",
+          "value": "<target>"
+          // OR:
+          "ai": "<yes/no question about the page>"
+        },
+        "maxDurationSec": 300,       // default 300 (5 min), range 1-3600
+        "maxIterations":  25,        // default 25, range 1-200
+        "includeScreenshot": true    // default true — send base64 PNG to vision-capable models
+      },
+      "onFailure": "abort",
+      "maxRetries": 0,
+      "timeout": 320000              // step-level timeout, ms; set ~10% above maxDurationSec*1000
+    }
+
+    Rules:
+
+    a) USE aiscope WHEN:
+       - The user literally says "figure out", "handle", "deal with",
+         "dismiss", "get past", "find the right one".
+       - The flow's exact elements are inherently variable across
+         runs (cookie banners, A/B-tested interstitials, dynamic
+         ad positions).
+       - You don't know the selectors and you don't have time in the
+         conversation to ask the user for them.
+
+    b) DON'T USE aiscope WHEN:
+       - Explicit steps would work. Explicit steps are faster, cheaper,
+         and far more debuggable. Prefer them every time you can.
+       - The flow has more than one natural "phase" (e.g. "login AND
+         navigate AND download"). Break it into multiple explicit
+         steps with a single small aiscope for the unpredictable bit.
+       - You can solve the problem with a condition + thenStep + goto
+         loop (from rule 12 above) — that stays deterministic.
+
+    c) TIGHT BUDGETS. Default to maxDurationSec: 45 and maxIterations: 8
+       for small scoped goals. Raise the budget only when the page
+       is clearly multi-step (e.g. "navigate to billing and download
+       the latest PDF" would need ~120s / 15 iterations). Never emit
+       maxDurationSec > 300 unless the user explicitly asks for a
+       longer budget. Keep the step-level \`timeout\` field at least
+       10% above maxDurationSec*1000 so the cap fires cleanly.
+
+    d) PREFER DETERMINISTIC successCheck when you can describe the
+       finish condition concretely: element_exists for "banner gone",
+       url_matches for "we're on /dashboard now", text_contains for
+       "the success message shows up". Fall back to AI successCheck
+       only when the goal is inherently fuzzy ("is the page free of
+       any cookie or consent banner?").
+
+    e) includeScreenshot: true is the DEFAULT and should stay that
+       way. Only set it to false when the user explicitly asks for
+       HTML-only observation or when you know the active model is
+       not vision-capable.
+
+    f) The LLM inside the loop picks from a fixed vocabulary:
+       navigate, click, type, select, check, uncheck, hover, focus,
+       scroll, wait, done. There is no eval or raw-JS escape hatch.
+       If the user asks for something outside this vocabulary, use
+       explicit steps around the aiscope, not inside it.
+
+    g) onFailure semantics apply to the whole aiscope step. Default
+       to "abort". Use "skip" when the goal is optional (e.g.
+       dismissing a cookie banner that may or may not appear).
+       AVOID "retry" — it restarts the whole budget from zero and
+       is usually more expensive than just bumping maxDurationSec.
+
+    Worked example: when the user says "add a step that figures out
+    how to accept the cookie banner on this page, give it 45 seconds
+    and 8 iterations", emit:
+
+    {
+      "id": "step-accept-cookies",
+      "name": "Accept cookie banner",
+      "type": "aiscope",
+      "action": {
+        "goal": "Accept or dismiss the site's cookie / consent banner so the main content is interactable",
+        "successCheck": {
+          "ai": "Is the page free of any visible cookie, consent, or privacy banner?"
+        },
+        "maxDurationSec": 45,
+        "maxIterations": 8,
+        "includeScreenshot": true
+      },
+      "onFailure": "skip",
+      "maxRetries": 0,
+      "timeout": 60000
+    }
+
 ## What you MUST NOT change
 
 - The \`inputRef\` of any type step that currently has one. It points to an input
@@ -306,7 +413,7 @@ type Step = {
   id: string;                    // "step-1", "step-2", ... (sequential)
   name: string;                  // human-readable, imperative, under 60 chars
   description?: string;          // optional longer explanation
-  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download';
+  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto' | 'aiscope';
   action: Action;                // see below (discriminated by type)
   aiGuidance?: string;           // natural-language hint for runtime fallback
   selectors?: { primary: string; fallbacks?: string[] };
@@ -388,7 +495,9 @@ validation?, onFailure ("retry"|"skip"|"abort", default "abort"), maxRetries
 (default 3), timeout (default 30000), substeps? (used by loop).
 
 Step types: navigate | interact | wait | extract | tool_call | condition |
-download | loop | call. The call step invokes a declared function.
+download | loop | call | goto | aiscope. The call step invokes a declared
+function; goto jumps to a top-level step id; aiscope hands control to the LLM
+for a bounded goal-driven sub-run (see the AI-scoped sub-runs section).
 
 Selectors are { primary, fallbacks? }. aiGuidance is a natural-language
 fallback hint.
@@ -610,6 +719,67 @@ The \`maxRetries\` field handles in-place retries with exponential
 backoff. Use it when the step is flaky and a simple wait + retry will
 likely fix it. Use the jump mechanism when the recovery needs to DO
 something different before retrying (not just wait longer).
+
+## AI-scoped sub-runs (\`aiscope\` step type)
+
+For small, scoped goals where the exact selectors can't be predicted
+("dismiss whatever cookie banner this site shows", "find the PDF
+download link somewhere in the bills table", "get past the
+interstitial"), use an \`aiscope\` step. It hands control to the LLM
+inside a bounded agent loop: observe → decide → dispatch → repeat,
+until a success check passes or a budget cap fires.
+
+Shape:
+
+\`\`\`json
+{
+  "id": "step-X",
+  "type": "aiscope",
+  "action": {
+    "goal": "<plain-English description>",
+    "successCheck": {
+      "check": "element_exists",
+      "value": "button.logged-in"
+      // OR:
+      // "ai": "<yes/no question>"
+    },
+    "maxDurationSec": 45,
+    "maxIterations": 8,
+    "includeScreenshot": true
+  },
+  "onFailure": "skip",
+  "maxRetries": 0,
+  "timeout": 60000
+}
+\`\`\`
+
+Rules:
+
+- Prefer explicit steps. Only reach for aiscope when the flow is
+  inherently variable (A/B-tested banners, dynamic ad positions,
+  "whatever this portal calls the download link").
+- Default budgets: \`maxDurationSec: 45\`, \`maxIterations: 8\` for
+  small goals; raise up to 120s / 15 iterations for multi-phase
+  goals. Never exceed 300s / 25 iterations unless the user asks
+  explicitly.
+- Prefer deterministic \`successCheck\` (element_exists / url_matches /
+  text_contains / variable_equals) when the finish condition is
+  concrete. Fall back to \`{ ai: "..." }\` only when the goal is fuzzy.
+- \`includeScreenshot: true\` is the default and should stay that way —
+  the LLM does much better with vision on modern portals.
+- The LLM inside the loop picks ONE action per iteration from a fixed
+  vocabulary: navigate, click, type, select, check, uncheck, hover,
+  focus, scroll, wait, done. No eval or raw JS.
+- onFailure default \`abort\`. Use \`skip\` when the goal is optional
+  (e.g. cookie banner dismissal). Avoid \`retry\` — it restarts the
+  whole budget from zero.
+- Set the step-level \`timeout\` at least 10% above
+  \`maxDurationSec * 1000\` so the cap fires cleanly before the
+  outer step timeout.
+
+Top-level \`thenStep\` / \`goto.targetStepId\` jumps cannot target a
+step inside an aiscope — the aiscope's inner iteration is opaque to
+the top-level instruction pointer.
 
 ## Behavior rules
 

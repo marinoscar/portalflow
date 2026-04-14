@@ -6,6 +6,7 @@ import type {
   WaitAction,
   ToolCallAction,
   GotoAction,
+  AiScopeAction,
   Selectors,
 } from '@portalflow/schema';
 import { useHasActiveProvider, useLlmCall } from '../hooks/useLlm';
@@ -169,6 +170,9 @@ function StepEditor({
       {step.type === 'goto' && (
         <GotoEditor action={step.action as GotoAction} onUpdate={onUpdate} />
       )}
+      {step.type === 'aiscope' && (
+        <AiScopeEditor action={step.action as AiScopeAction} onUpdate={onUpdate} />
+      )}
 
       <SelectorsEditor step={step} onUpdate={onUpdate} />
       <AdvancedEditor step={step} onUpdate={onUpdate} />
@@ -219,6 +223,170 @@ function GotoEditor({
         Resets the runner's instruction pointer to the named top-level step. Templates
         like <code>{'{{varName}}'}</code> are allowed. Jumps are scoped to the top level
         only — you cannot target steps inside a loop or function body.
+      </p>
+    </>
+  );
+}
+
+/**
+ * Editor for the `aiscope` step type. Exposes the goal, the success
+ * check (either a deterministic check+value or an AI yes/no question),
+ * the dual budgets (maxDurationSec and maxIterations), and the
+ * include-screenshot toggle.
+ */
+function AiScopeEditor({
+  action,
+  onUpdate,
+}: {
+  action: AiScopeAction;
+  onUpdate: (changes: Partial<Step>) => void;
+}) {
+  const successCheck = action.successCheck ?? {};
+  const isAiCheck = successCheck.ai !== undefined;
+  const checkMode: 'ai' | 'deterministic' = isAiCheck ? 'ai' : 'deterministic';
+
+  const updateAction = (next: Partial<AiScopeAction>) => {
+    onUpdate({ action: { ...action, ...next } as Step['action'] });
+  };
+
+  const setCheckMode = (mode: 'ai' | 'deterministic') => {
+    if (mode === 'ai') {
+      updateAction({
+        successCheck: { ai: successCheck.ai ?? '' },
+      } as Partial<AiScopeAction>);
+    } else {
+      updateAction({
+        successCheck: {
+          check: successCheck.check ?? 'element_exists',
+          value: successCheck.value ?? '',
+        },
+      } as Partial<AiScopeAction>);
+    }
+  };
+
+  return (
+    <>
+      <label className="field">
+        <span>Goal</span>
+        <textarea
+          value={action.goal ?? ''}
+          onChange={(e) => updateAction({ goal: e.target.value })}
+          placeholder="e.g. Dismiss the cookie banner and land on the signed-in dashboard"
+          rows={2}
+        />
+      </label>
+
+      <label className="field">
+        <span>Success check mode</span>
+        <select
+          value={checkMode}
+          onChange={(e) => setCheckMode(e.target.value as 'ai' | 'deterministic')}
+        >
+          <option value="deterministic">Deterministic (check + value)</option>
+          <option value="ai">AI (plain-English question)</option>
+        </select>
+      </label>
+
+      {checkMode === 'deterministic' && (
+        <>
+          <label className="field">
+            <span>Check</span>
+            <select
+              value={successCheck.check ?? 'element_exists'}
+              onChange={(e) =>
+                updateAction({
+                  successCheck: {
+                    check: e.target.value as
+                      | 'element_exists'
+                      | 'url_matches'
+                      | 'text_contains'
+                      | 'variable_equals',
+                    value: successCheck.value ?? '',
+                  },
+                } as Partial<AiScopeAction>)
+              }
+            >
+              <option value="element_exists">element_exists</option>
+              <option value="url_matches">url_matches</option>
+              <option value="text_contains">text_contains</option>
+              <option value="variable_equals">variable_equals</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Check value</span>
+            <input
+              type="text"
+              value={successCheck.value ?? ''}
+              onChange={(e) =>
+                updateAction({
+                  successCheck: {
+                    check: successCheck.check ?? 'element_exists',
+                    value: e.target.value,
+                  },
+                } as Partial<AiScopeAction>)
+              }
+              placeholder="e.g. button.logged-in  /  /dashboard  /  varName=expected"
+            />
+          </label>
+        </>
+      )}
+
+      {checkMode === 'ai' && (
+        <label className="field">
+          <span>Success question (AI)</span>
+          <textarea
+            value={successCheck.ai ?? ''}
+            onChange={(e) =>
+              updateAction({
+                successCheck: { ai: e.target.value },
+              } as Partial<AiScopeAction>)
+            }
+            placeholder="e.g. Is the user logged in and the dashboard visible?"
+            rows={2}
+          />
+        </label>
+      )}
+
+      <label className="field">
+        <span>Max duration (seconds)</span>
+        <input
+          type="number"
+          min={1}
+          max={3600}
+          value={action.maxDurationSec ?? 300}
+          onChange={(e) =>
+            updateAction({ maxDurationSec: parseInt(e.target.value, 10) || 300 })
+          }
+        />
+      </label>
+
+      <label className="field">
+        <span>Max iterations</span>
+        <input
+          type="number"
+          min={1}
+          max={200}
+          value={action.maxIterations ?? 25}
+          onChange={(e) =>
+            updateAction({ maxIterations: parseInt(e.target.value, 10) || 25 })
+          }
+        />
+      </label>
+
+      <label className="field">
+        <span>Include screenshot in LLM input</span>
+        <input
+          type="checkbox"
+          checked={action.includeScreenshot ?? true}
+          onChange={(e) => updateAction({ includeScreenshot: e.target.checked })}
+        />
+      </label>
+
+      <p className="hint-small">
+        Hands control to the LLM for a bounded goal-driven sub-run. The runner
+        stops as soon as the success check passes, or when either budget cap
+        fires. Screenshots are sent to the LLM on every iteration by default —
+        uncheck to use HTML-only input when the model is not vision-capable.
       </p>
     </>
   );
@@ -526,7 +694,8 @@ function SelectorsEditor({
     step.type === 'wait' ||
     step.type === 'tool_call' ||
     step.type === 'condition' ||
-    step.type === 'goto'
+    step.type === 'goto' ||
+    step.type === 'aiscope'
   ) {
     return null;
   }

@@ -112,6 +112,45 @@ export class PageService {
     await new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
 
+  /**
+   * Scroll the page via the window object. Used by the aiscope agent
+   * loop when the model picks a `scroll` action. Four directions are
+   * supported:
+   *
+   *   - "down" / "up"  — scroll by `amountPx` (default: 70% of viewport height)
+   *   - "top"          — jump to the top of the page
+   *   - "bottom"       — jump to the bottom of the page
+   *
+   * Failures (e.g. CSP blocks window access, although rare) are rewrapped
+   * so the agent loop's dispatch-failure handler can feed the error back
+   * to the LLM for the next iteration.
+   */
+  async scroll(
+    direction: 'up' | 'down' | 'top' | 'bottom',
+    amountPx?: number,
+  ): Promise<void> {
+    const page = this.getPage();
+    try {
+      await page.evaluate(
+        ({ dir, amt }: { dir: string; amt?: number }) => {
+          const step = amt ?? Math.floor(window.innerHeight * 0.7);
+          if (dir === 'down') {
+            window.scrollBy(0, step);
+          } else if (dir === 'up') {
+            window.scrollBy(0, -step);
+          } else if (dir === 'top') {
+            window.scrollTo(0, 0);
+          } else if (dir === 'bottom') {
+            window.scrollTo(0, document.body.scrollHeight);
+          }
+        },
+        { dir: direction, amt: amountPx },
+      );
+    } catch (err) {
+      throw new Error(`scroll("${direction}") failed: ${String(err)}`);
+    }
+  }
+
   async getText(selector: string): Promise<string> {
     try {
       const text = await this.getPage().textContent(selector, { timeout: DEFAULT_TIMEOUT });

@@ -83,6 +83,7 @@ automations are resilient to minor UI changes without requiring manual updates t
   - [6.8 loop](#68-loop)
   - [6.9 call](#69-call)
   - [6.10 goto](#610-goto)
+  - [6.11 aiscope](#611-aiscope)
 - [7. Selectors](#7-selectors)
 - [8. AI Guidance](#8-ai-guidance)
 - [9. Validation Blocks](#9-validation-blocks)
@@ -1457,6 +1458,128 @@ If the recovery DOES succeed, the second attempt at `step-login` completes norma
   loop substep or function body step id. Jump targets must be top-level.
 - `Step "<id>" requested a jump to "<target>", but no top-level step with that id exists`
   — runtime error when a templated `targetStepId` resolves to an unknown id.
+
+---
+
+### 6.11 aiscope
+
+**Purpose:** Hand control to an LLM for a bounded, goal-driven sub-run. The runner enters a loop where the LLM observes the current page (simplified HTML plus an optional viewport screenshot), decides the next browser action toward the user's goal, and PortalFlow dispatches it through `PageService`. The loop runs until the user's success check passes, the wall-clock budget expires, or the iteration count is exhausted — whichever comes first.
+
+This is **not** a general-purpose autonomous agent. The action vocabulary is fixed, the observation surface is bounded, and both budget caps are hard ceilings. Use `aiscope` when you have a small, scoped goal on a page whose exact selectors / flow you can't predict (e.g. "dismiss whatever cookie banner this site shows", "find the download button labeled PDF"). For flows whose steps are known, use explicit `navigate` / `interact` / `extract` / etc. — they're faster, cheaper, and far more debuggable.
+
+**Action shape:**
+
+| Field               | Type                       | Required | Default | Description |
+|---------------------|----------------------------|----------|---------|-------------|
+| `goal`              | `string` (min 1 char)      | Yes      | —       | Plain-English description of the goal the LLM should work toward. The LLM receives this verbatim on every iteration. |
+| `successCheck`      | `object` (see below)       | Yes      | —       | The predicate that decides whether the goal is reached. Exactly one of `{ check, value }` or `{ ai }` must be set. |
+| `maxDurationSec`    | `number` (int, 1–3600)     | No       | `300`   | Wall-clock budget in seconds. Whichever cap fires first aborts the step with a clear error. |
+| `maxIterations`     | `number` (int, 1–200)      | No       | `25`    | Maximum number of observe → decide → dispatch cycles. Whichever cap fires first aborts. |
+| `allowedActions`    | `string[]`                 | No       | (all)   | Whitelist restricting which actions the LLM may emit. When omitted, the full vocabulary (see below) is permitted. |
+| `includeScreenshot` | `boolean`                  | No       | `true`  | When true, a base64 PNG viewport screenshot is sent to the LLM on every iteration alongside the HTML. Requires a vision-capable model (Claude 3.5+ / GPT-4o+). Set to `false` for text-only. |
+
+**`successCheck` shape:**
+
+Either a deterministic check (same enum as the `condition` step's `check` field):
+
+```json
+{ "check": "element_exists", "value": "button.logged-in" }
+{ "check": "url_matches",     "value": "/dashboard" }
+{ "check": "text_contains",   "value": "Welcome back" }
+{ "check": "variable_equals", "value": "loginState=ok" }
+```
+
+Or an AI yes/no question (routed through the same AI evaluator the `condition.ai` step uses):
+
+```json
+{ "ai": "Is the user currently logged in and viewing an authenticated account page?" }
+```
+
+Setting both is a schema error. Setting neither is a schema error. Setting `check` without `value` is a schema error.
+
+**Action vocabulary (the LLM picks one per iteration):**
+
+| Action     | Arguments                              | What it does                                              |
+|------------|----------------------------------------|-----------------------------------------------------------|
+| `navigate` | `value` = absolute URL                 | Goes to that URL.                                         |
+| `click`    | `selector`                             | Clicks the element matching the selector.                 |
+| `type`     | `selector`, `value` = text             | Types the text into the element.                          |
+| `select`   | `selector`, `value` = option value     | Picks an option from a select element.                    |
+| `check`    | `selector`                             | Checks a checkbox.                                        |
+| `uncheck`  | `selector`                             | Unchecks a checkbox.                                      |
+| `hover`    | `selector`                             | Hovers the element (reveals hover-triggered menus).       |
+| `focus`    | `selector`                             | Focuses the element without typing.                       |
+| `scroll`   | `value` = `up`/`down`/`top`/`bottom`   | Scrolls the page. No selector.                            |
+| `wait`     | `value` = milliseconds as string       | Pauses the loop for the given duration (useful mid-load). |
+| `done`     | —                                      | Hint from the LLM that it believes the goal is reached. The runner always re-verifies via `successCheck` on the next iteration — if the check still fails, the loop keeps going until the budget is exhausted. |
+
+When `allowedActions` is set, only actions in the list (plus implicit `done`) are dispatched. The LLM is told about the restriction and any out-of-list emissions are logged as warnings and fed back as failures in the recent-history buffer on the next iteration.
+
+**Budget semantics and error messages:**
+
+At the top of every iteration the runner checks both caps:
+
+```
+aiscope step "<id>" exceeded wall-clock budget of <N>s after <K> iteration(s) (goal: ...)
+```
+
+```
+aiscope step "<id>" exhausted the <N>-iteration budget without reaching the goal "..."
+```
+
+Whichever cap fires first wins. Checking at the top of the loop (not inside the LLM call) means a long-running provider request that finishes just past the deadline still aborts cleanly on the next check — no in-flight cancellation.
+
+**Recent-history buffer:**
+
+The LLM receives a short FIFO of the last **5** actions it emitted, annotated with success/failure. When an action fails (e.g. bad selector, element not found), the error string is captured in the history so the model can adapt on the next iteration — "you tried `click button.x` which failed with 'element not found', try a different selector". This prevents the model from looping indefinitely on the same broken move.
+
+**Interaction with `onFailure`:**
+
+The step-level `onFailure` policy applies to the whole aiscope step. On budget exhaustion or a hard error:
+
+- `abort` (default) — halts the whole automation.
+- `skip` — swallows the failure and continues past the aiscope step without having reached the goal.
+- `retry` — restarts the loop from iteration 0 with a fresh budget. Expensive. Prefer raising `maxDurationSec` or `maxIterations` over retrying.
+
+**Worked example:**
+
+```json
+{
+  "id": "step-dismiss-cookies",
+  "name": "Dismiss cookie banner",
+  "type": "aiscope",
+  "action": {
+    "goal": "Accept or dismiss whatever cookie / consent banner is currently showing, so the main content is interactable.",
+    "successCheck": {
+      "ai": "Is the page free of any visible cookie, consent, or privacy banner?"
+    },
+    "maxDurationSec": 45,
+    "maxIterations": 8,
+    "includeScreenshot": true
+  },
+  "onFailure": "skip",
+  "maxRetries": 0,
+  "timeout": 60000
+}
+```
+
+On a page with a typical cookie wall, the LLM sees the banner in the screenshot + its accept button in the simplified HTML and emits `{ action: "click", selector: "button:has-text('Accept')" }`. After the click, the next iteration captures a fresh page context, evaluates the AI success check (banner gone?), and returns. Even when the banner's exact markup changes between sites, the same step handles every variant.
+
+**Cost and safety notes:**
+
+- Each iteration makes **one LLM call**. At debug log level, the per-call `inputTokens` / `outputTokens` / `latencyMs` are captured via the existing observability pipeline (see §19.3 Troubleshooting).
+- Screenshots are sent as base64 PNGs in a single vision content block per iteration. A viewport screenshot at default resolution is roughly 1,500–3,000 tokens on Anthropic / OpenAI vision models. Budget your `maxIterations` accordingly if cost matters.
+- Set `includeScreenshot: false` when using models without vision or when you want a pure-HTML observation path.
+- The action vocabulary is intentionally bounded. There is no `eval` or raw JavaScript escape hatch. If you need something outside the list, drop out of aiscope and use explicit `extract` / `interact` steps after it.
+- Top-level jumps (`condition.thenStep`, `goto.targetStepId`) **cannot** target a step inside an aiscope. The aiscope's inner iteration is opaque to the top-level instruction pointer.
+
+**Validation errors you may see:**
+
+- Missing `goal` or empty string — schema rejects at parse time.
+- `successCheck` missing both `check` and `ai`, or having both — schema rejects.
+- `successCheck` with `check` but no `value` — schema rejects.
+- `maxDurationSec` outside 1–3600 or `maxIterations` outside 1–200 — schema rejects.
+- `allowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`).
 
 ---
 
@@ -3806,7 +3929,7 @@ interface Step {
 }
 
 type StepType = 'navigate' | 'interact' | 'wait' | 'extract'
-              | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
+              | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto' | 'aiscope';
 
 type OnFailure = 'retry' | 'skip' | 'abort';
 ```
@@ -4057,7 +4180,7 @@ interface Settings {
 
 type InputType       = 'string' | 'secret' | 'number' | 'boolean';
 type InputSource     = 'env' | 'vaultcli' | 'cli_arg' | 'literal';
-type StepType        = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
+type StepType        = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto' | 'aiscope';
 type OnFailure       = 'retry' | 'skip' | 'abort';
 type InteractionType = 'click' | 'type' | 'select' | 'check' | 'uncheck' | 'hover' | 'focus';
 type WaitCondition   = 'selector' | 'navigation' | 'delay' | 'network_idle';
