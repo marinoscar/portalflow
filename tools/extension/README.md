@@ -324,6 +324,34 @@ The extension includes a conversational AI chat panel that sits below the Steps 
 - Use the **chat** when you want to iterate (ask follow-up questions, nudge the model in a specific direction, review proposals before they land).
 - Use the **legacy buttons** when you want a fast one-shot rewrite and do not need to review anything.
 
+### Session zip export and import
+
+The extension can export the entire session as a `.zip` file and import one back for round-trippable archival. Unlike the classic `automation.json` export (which only captures the head automation), the zip contains:
+
+- The current head automation
+- The raw original recording (never mutated)
+- Every committed version in the history
+- Every unique HTML snapshot the content script captured
+- The AI chat history including approved and rejected proposals
+- The raw event log
+
+**Export:** click **Export session (.zip)** in the Export card. The button validates the head automation first, then bundles the rest via `fflate` and saves through `chrome.downloads`. The filename pattern is `portalflow-session-<slug>-<date>.zip`.
+
+A secondary **Export automation (.json)** button next to it keeps the existing single-file export for when you only need what the CLI runs.
+
+**Import:** click the up-arrow icon in the header row (next to Version history). A file picker opens constrained to `.zip`. After a successful import:
+
+- The side panel replaces its state with the reconstructed session.
+- The version history drawer shows every version from the archive.
+- The AI chat panel shows the restored conversation.
+- The "Revert to original" button works if the archive included an original recording.
+
+If you attempt to import while a recording is in progress, a confirmation dialog warns that the current session will be replaced.
+
+**Error handling:** malformed zips are rejected with a descriptive error banner at the top of the side panel (missing `manifest.json`, bad schema version, automation failing schema validation, etc.) instead of silently failing.
+
+**Format reference:** see [`docs/EXTENSION-SESSION-FORMAT.md`](../../docs/EXTENSION-SESSION-FORMAT.md) for the full archive layout, the `manifest.json` schema, and round-trip guarantees.
+
 ### Selector cascade
 
 For each captured element, the recorder computes a `{ primary, fallbacks[] }` selector using seven strategies in priority order:
