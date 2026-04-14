@@ -238,18 +238,33 @@ syntax (`{{varName}}`) or through the `inputRef` field on `interact` steps.
 }
 ```
 
-**`vaultcli`** — The `value` field is the key path within the local secrets vault. The runner
-calls `vaultcli` to retrieve the secret before the first step runs.
+**`vaultcli`** — The `value` field is the name of the secret in the local vault. The runner
+calls `vaultcli secrets get <value> --json` to retrieve the secret before the first step runs.
+Vault secrets contain multiple fields (typically `username`, `password`, `url`, …), so the
+runner **explodes every key** in the secret's `values` object into its own context variable
+named `<inputName>_<field>`. The primary `<inputName>` variable is set to the JSON-stringified
+values object so templates can still reference the whole blob for inspection.
 
 ```json
 {
-  "name": "password",
+  "name": "creds",
   "type": "secret",
   "required": true,
   "source": "vaultcli",
   "value": "att"
 }
 ```
+
+With a secret `att` whose values are `{ "username": "oscar@marin.cr", "password": "…", "url": "…" }`,
+this declaration exposes:
+
+- `{{creds}}` — the JSON-stringified values object
+- `{{creds_username}}` — `oscar@marin.cr`
+- `{{creds_password}}` — the password
+- `{{creds_url}}` — the URL
+
+Use the exploded variables directly in `type` steps via `inputRef: "creds_password"` so the
+password is never embedded as a literal in the automation JSON.
 
 **`cli_arg`** — The `value` field is the CLI argument name. The runner reads it from the command
 line when invoked as `portalflow run <file> --billCount 3`. If not found on the command line, the
@@ -282,12 +297,12 @@ Once an input is resolved, it becomes a context variable. Steps can reference it
 
 ### Value semantics per source
 
-| Source     | `value` field meaning                          |
-|------------|------------------------------------------------|
-| `literal`  | The actual resolved value                      |
-| `env`      | The environment variable name (`process.env[value]`) |
-| `vaultcli` | The key path passed to `vaultcli get-secret`   |
-| `cli_arg`  | The CLI argument name; falls back to env var   |
+| Source     | `value` field meaning                                                |
+|------------|----------------------------------------------------------------------|
+| `literal`  | The actual resolved value                                            |
+| `env`      | The environment variable name (`process.env[value]`)                 |
+| `vaultcli` | The secret name passed to `vaultcli secrets get <value> --json`. Every field in the secret's `values` object is exposed as `<inputName>_<field>`. |
+| `cli_arg`  | The CLI argument name; falls back to env var                         |
 
 ### Resolving inputs at runtime
 
@@ -297,7 +312,7 @@ When an automation runs, every declared input is resolved before the first step 
 |---|---|
 | `literal` | CLI override (`--input name=value`) → `input.value` |
 | `env` | CLI override → `process.env[input.value]` → `process.env[input.name]` |
-| `vaultcli` | CLI override → `vaultcli get <input.value>` |
+| `vaultcli` | CLI override → `vaultcli secrets get <input.value> --json` (every field exploded into `<inputName>_<field>` vars) |
 | `cli_arg` | CLI override → `input.value` (as default) |
 
 In every case, a CLI override via `--input <name>=<value>` or `--inputs-json '{...}'` takes precedence. This is useful for testing, scripting, and overriding defaults without editing the JSON.
@@ -826,7 +841,7 @@ result as a context variable.
 | Field        | Type                  | Required  | Description |
 |--------------|-----------------------|-----------|-------------|
 | `tool`       | `ToolName`            | Required  | Which tool to invoke: `"smscli"` or `"vaultcli"`. |
-| `command`    | `string`              | Required  | The sub-command to run (e.g., `"get-otp"`). |
+| `command`    | `string`              | Required  | The sub-command to run (e.g., `"otp-wait"`, `"secrets-get"`). |
 | `args`       | `Record<string, string>` | Optional | Key-value arguments passed to the tool. Values support template syntax. |
 | `outputName` | `string`              | Optional  | Variable name for storing the tool's output. If omitted, output is discarded. |
 
@@ -835,7 +850,16 @@ that name. Subsequent steps reference it as `{{outputName}}` in any templated fi
 `inputRef: "outputName"` in interact steps. For example, setting `outputName: "otpCode"` means
 the next step can type the OTP with `"action": { "interaction": "type", "inputRef": "otpCode" }`.
 
-**Minimal example — smscli OTP retrieval:**
+**Valid commands per tool:**
+
+| Tool       | Command        | Underlying CLI                                          | Args                                                             |
+|------------|----------------|---------------------------------------------------------|------------------------------------------------------------------|
+| `vaultcli` | `secrets-get`  | `vaultcli secrets get "<name>" --json`                  | `{ name: string, field?: string }`                               |
+| `smscli`   | `otp-wait`     | `smscli otp wait --json [--timeout S --sender X ...]`   | `{ sender?, number?, timeout?, since?, device? }` — default `timeout: 60` (seconds). **Auto-fallback to `otp-latest` on `OTP_TIMEOUT`.** |
+| `smscli`   | `otp-latest`   | `smscli otp latest --json [--sender X ...]`             | `{ sender?, number?, since?, device? }` — no fallback.           |
+| `smscli`   | `otp-extract`  | `smscli otp extract --message "<text>" --json`          | `{ message: string }` — offline extraction from a literal body. |
+
+**Minimal example — smscli OTP retrieval with automatic wait→latest fallback:**
 
 ```json
 {
@@ -844,28 +868,28 @@ the next step can type the OTP with `"action": { "interaction": "type", "inputRe
   "type": "tool_call",
   "action": {
     "tool": "smscli",
-    "command": "get-otp",
-    "args": { "sender": "ExampleCarrier", "pattern": "\\d{6}" },
+    "command": "otp-wait",
+    "args": { "sender": "ExampleCarrier", "timeout": "60" },
     "outputName": "otpCode"
   },
   "onFailure": "abort",
-  "maxRetries": 1,
-  "timeout": 120000
+  "maxRetries": 0,
+  "timeout": 180000
 }
 ```
 
-**Minimal example — vaultcli secret retrieval at step level:**
+**Minimal example — vaultcli secret retrieval at step level (multi-field):**
 
 ```json
 {
   "id": "step-2",
-  "name": "Retrieve bearer token from vault",
+  "name": "Retrieve credentials from vault",
   "type": "tool_call",
   "action": {
     "tool": "vaultcli",
-    "command": "get-secret",
-    "args": { "key": "work/api-token" },
-    "outputName": "bearerToken"
+    "command": "secrets-get",
+    "args": { "name": "att" },
+    "outputName": "creds"
   },
   "onFailure": "abort",
   "maxRetries": 0,
@@ -873,9 +897,60 @@ the next step can type the OTP with `"action": { "interaction": "type", "inputRe
 }
 ```
 
+After this step runs, every key in the secret's `values` object is exposed as a
+`<outputName>_<field>` context variable — e.g. `{{creds_username}}`, `{{creds_password}}`,
+`{{creds_url}}`. See §6.5.4 below for the full multi-field exploding rule.
+
+**Minimal example — vaultcli single-field access:**
+
+```json
+{
+  "id": "step-2b",
+  "name": "Retrieve just the password",
+  "type": "tool_call",
+  "action": {
+    "tool": "vaultcli",
+    "command": "secrets-get",
+    "args": { "name": "att", "field": "password" },
+    "outputName": "pwd"
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 10000
+}
+```
+
+With `field` set, the runner returns only that value as `{{pwd}}` — no exploded variables.
+
+#### 6.5.4 Multi-field tool outputs
+
+Some tool commands return more than one value at a time. To make every returned field
+templatable, the runner *explodes* multi-field results into separate context variables:
+
+- **`vaultcli secrets-get` (without a `field` arg)** — The secret's `values` object becomes
+  a set of `<outputName>_<key>` variables. For a secret named `att` with values
+  `{username, password, url}` and `outputName: "creds"`, the runner sets:
+
+  - `{{creds}}` — the JSON-stringified `values` object (for inspection / passing as a blob)
+  - `{{creds_username}}` — the username string
+  - `{{creds_password}}` — the password string
+  - `{{creds_url}}` — the URL string
+
+  The same exploding also applies to top-level inputs with `source: "vaultcli"` — see §4.
+
+- **`smscli otp-*`** — Always returns a single OTP code as `{{outputName}}`. No exploded
+  variables. smscli outputs do not carry additional structured metadata into the context.
+
+**Automatic OTP wait→latest fallback:** When `otp-wait` times out (envelope
+`{ success: false, code: "OTP_TIMEOUT" }`), the adapter automatically retries `smscli otp latest`
+with the same filter args before reporting failure. This handles the race where an SMS arrives
+just after the wait window closes. The fallback is **built in** — automation authors do not need
+to add a separate `otp-latest` fallback step.
+
 **Gotchas:**
-- Set `timeout` high enough for tools that wait on external events. smscli OTP retrieval may take
-  60–120 seconds if the SMS is delayed. The default `timeout: 30000` is too short; use `120000`.
+- Set step-level `timeout` high enough for tools that wait on external events. For `otp-wait` the
+  CLI's `args.timeout` is in seconds, but the step's `timeout` field is in milliseconds — budget
+  at least `(args.timeout + 30) * 1000` ms so the fallback call has room to run.
 - Template syntax is resolved in each `args` value before the tool is called.
 - The tool must be declared in the top-level `tools` array for good practice, though the runner
   does not enforce this at parse time.
@@ -1148,8 +1223,8 @@ and the call depth cap.
   "action": {
     "function": "login",
     "args": {
-      "username": "{{vault_username}}",
-      "password": "{{vault_password}}"
+      "username": "{{creds_username}}",
+      "password": "{{creds_password}}"
     }
   },
   "onFailure": "abort",
@@ -1394,17 +1469,34 @@ authentication flows where the site sends a one-time code via text message.
 **Declare in `tools`:**
 
 ```json
-{ "name": "smscli", "config": { "timeout": "120000" } }
+{ "name": "smscli" }
 ```
 
-**Primary command: `get-otp`**
+**Commands:**
+
+| Command       | Underlying CLI                                              | When to use                                                       |
+|---------------|-------------------------------------------------------------|-------------------------------------------------------------------|
+| `otp-wait`    | `smscli otp wait --json [--timeout S --sender X ...]`       | Default — block until a new OTP arrives. Auto-falls-back to `otp-latest` on `OTP_TIMEOUT`. |
+| `otp-latest`  | `smscli otp latest --json [--sender X ...]`                 | Fetch the most recent OTP without polling (no fallback).         |
+| `otp-extract` | `smscli otp extract --message "<body>" --json`              | Offline extraction from a literal SMS body (useful for tests).   |
+
+**Args (otp-wait / otp-latest):**
 
 | Arg       | Type     | Required | Description |
 |-----------|----------|----------|-------------|
-| `sender`  | `string` | Optional | Filter messages to those from this sender. Empty string matches any sender. |
-| `pattern` | `string` | Required | Regular expression to extract the code from the message body. Use `\\d{6}` for a 6-digit code. |
+| `sender`  | `string` | Optional | Filter messages to those from this sender (brand name or phone number). |
+| `number`  | `string` | Optional | Filter to messages delivered to this phone number (the recipient). |
+| `timeout` | `string` | Optional | Wait budget in seconds (otp-wait only). Default `60`. |
+| `since`   | `string` | Optional | ISO timestamp — only consider messages after this time. |
+| `device`  | `string` | Optional | Restrict to a specific capturing device. |
 
-**Full `tool_call` step example:**
+**Args (otp-extract):**
+
+| Arg       | Type     | Required | Description                                               |
+|-----------|----------|----------|-----------------------------------------------------------|
+| `message` | `string` | Required | The literal SMS body to extract an OTP code from.         |
+
+**Full `tool_call` step example — `otp-wait`:**
 
 ```json
 {
@@ -1413,15 +1505,21 @@ authentication flows where the site sends a one-time code via text message.
   "type": "tool_call",
   "action": {
     "tool": "smscli",
-    "command": "get-otp",
-    "args": { "sender": "ATT", "pattern": "\\d{6}" },
+    "command": "otp-wait",
+    "args": { "sender": "ATT", "timeout": "60" },
     "outputName": "otpCode"
   },
   "onFailure": "abort",
-  "maxRetries": 1,
-  "timeout": 120000
+  "maxRetries": 0,
+  "timeout": 180000
 }
 ```
+
+**Automatic wait→latest fallback:** When `otp-wait` times out (envelope
+`{ "success": false, "code": "OTP_TIMEOUT" }`), the adapter automatically retries `smscli otp latest`
+with the same filter args before reporting failure. This handles the race where the SMS arrives
+just after the wait window closes. Automation authors do **not** need to add a separate
+`otp-latest` fallback step.
 
 **How the output flows:**
 
@@ -1451,7 +1549,8 @@ After this step, `otpCode` is available as:
 ### 10.2 vaultcli
 
 **Purpose:** Pull credentials and secrets from a local secrets vault at runtime. Keeps sensitive
-values out of the automation JSON file.
+values out of the automation JSON file. Vaultcli secrets are multi-field — a credential typically
+holds `username`, `password`, and `url` in a single secret.
 
 **Declare in `tools`:**
 
@@ -1459,40 +1558,52 @@ values out of the automation JSON file.
 { "name": "vaultcli" }
 ```
 
-The key format is free-form. Common patterns: `att`, `carrier/phone-account`,
+The secret name format is free-form. Common patterns: `att`, `carrier/phone-account`,
 `work/github-token`, `company/service-name`.
+
+**Command: `secrets-get`**
+
+| Arg     | Type     | Required | Description                                                                             |
+|---------|----------|----------|-----------------------------------------------------------------------------------------|
+| `name`  | `string` | Required | The secret name as stored in the vault.                                                 |
+| `field` | `string` | Optional | Return only this one field as `{{outputName}}`. Omit to expose every field (see below). |
 
 **Pattern A — Input source (resolved before the first step):**
 
 Use `source: "vaultcli"` on an input declaration. The runner calls vaultcli during input
-resolution, before any step runs.
+resolution, before any step runs. Every key in the secret's `values` object is exploded into
+its own context variable named `<inputName>_<field>`.
 
 ```json
 {
-  "name": "password",
+  "name": "creds",
   "type": "secret",
   "required": true,
   "source": "vaultcli",
   "value": "att",
-  "description": "AT&T account password from vault"
+  "description": "AT&T account credentials from vault (username + password + url)"
 }
 ```
 
+This declaration exposes `{{creds_username}}`, `{{creds_password}}`, `{{creds_url}}`, etc. —
+one variable per field in the secret. The primary `{{creds}}` variable is set to the
+JSON-stringified values object for inspection or pass-through.
+
 **Pattern B — tool_call step (resolved mid-run):**
 
-Use a `tool_call` step when you need to retrieve a secret that depends on runtime context, or
-when you want the retrieval to appear in the step log.
+Use a `tool_call` step when you need to retrieve a secret whose name is determined at runtime,
+or when you want the retrieval to appear in the step log.
 
 ```json
 {
   "id": "step-2",
-  "name": "Retrieve API token from vault",
+  "name": "Retrieve credentials from vault",
   "type": "tool_call",
   "action": {
     "tool": "vaultcli",
-    "command": "get-secret",
-    "args": { "key": "work/api-token" },
-    "outputName": "apiToken"
+    "command": "secrets-get",
+    "args": { "name": "att" },
+    "outputName": "creds"
   },
   "onFailure": "abort",
   "maxRetries": 0,
@@ -1500,8 +1611,26 @@ when you want the retrieval to appear in the step log.
 }
 ```
 
+Multi-field exploding applies here the same way: after this step,
+`{{creds_username}}`, `{{creds_password}}`, `{{creds_url}}` are all available to later steps.
+
+**Single-field mode — passing `field`:**
+
+```json
+{
+  "action": {
+    "tool": "vaultcli",
+    "command": "secrets-get",
+    "args": { "name": "att", "field": "password" },
+    "outputName": "pwd"
+  }
+}
+```
+
+With `field` set, only that one value is returned as `{{pwd}}`. No exploded variables.
+
 Pattern A is preferred for login credentials because it resolves the secret before the browser
-launches. Pattern B is useful when the key to look up is itself determined at runtime.
+launches. Pattern B is useful when the secret name is itself determined at runtime.
 
 ---
 
@@ -1834,24 +1963,24 @@ YYYY-MM-DD string with no time component.
 }
 ```
 
-**Idempotency key in a tool_call args record**:
+**Offline OTP extraction from a templated message body**:
 
 ```json
 {
-  "id": "step-charge",
-  "name": "Submit charge",
+  "id": "step-extract-otp",
+  "name": "Extract OTP from literal test message",
   "type": "tool_call",
   "action": {
-    "tool": "vaultcli",
-    "command": "post-charge",
+    "tool": "smscli",
+    "command": "otp-extract",
     "args": {
-      "amount": "100.00",
-      "idempotencyKey": "{{$runId}}-{{$uuid}}"
-    }
+      "message": "Your verification code is 483921. Sent {{$date}} {{$time}}."
+    },
+    "outputName": "otpCode"
   },
   "onFailure": "abort",
   "maxRetries": 0,
-  "timeout": 30000
+  "timeout": 5000
 }
 ```
 
@@ -2370,8 +2499,9 @@ Navigate to a page, fill in two fields, click submit, and wait for the result.
 
 ### 16.2 Login with Vault-Sourced Credentials
 
-Inputs with `source: "vaultcli"` are resolved before the first step. Steps use `inputRef` to
-avoid embedding credentials in the JSON.
+A single input with `source: "vaultcli"` is resolved before the first step. Because vault
+secrets hold multiple fields (username + password + url), the runner explodes every field into
+`<inputName>_<field>` variables that subsequent steps reference via `inputRef`.
 
 ```json
 {
@@ -2380,8 +2510,7 @@ avoid embedding credentials in the JSON.
   "description": "Log into a web app using credentials from vaultcli",
   "goal": "Authenticate and confirm the dashboard loads",
   "inputs": [
-    { "name": "username", "type": "secret", "source": "vaultcli", "value": "myapp/username" },
-    { "name": "password", "type": "secret", "source": "vaultcli", "value": "myapp/password" }
+    { "name": "creds", "type": "secret", "source": "vaultcli", "value": "myapp" }
   ],
   "tools": [{ "name": "vaultcli" }],
   "steps": [
@@ -2392,14 +2521,14 @@ avoid embedding credentials in the JSON.
     },
     {
       "id": "step-2", "name": "Type username", "type": "interact",
-      "action": { "interaction": "type", "inputRef": "username" },
+      "action": { "interaction": "type", "inputRef": "creds_username" },
       "selectors": { "primary": "#username", "fallbacks": ["input[name='email']"] },
       "aiGuidance": "The username or email input field on the login form",
       "onFailure": "abort", "maxRetries": 2, "timeout": 10000
     },
     {
       "id": "step-3", "name": "Type password", "type": "interact",
-      "action": { "interaction": "type", "inputRef": "password" },
+      "action": { "interaction": "type", "inputRef": "creds_password" },
       "selectors": { "primary": "#password" },
       "aiGuidance": "The password field on the login form",
       "onFailure": "abort", "maxRetries": 2, "timeout": 10000
@@ -2446,15 +2575,18 @@ Wait for the OTP screen to appear, retrieve the code via smscli, then type it.
   "type": "tool_call",
   "action": {
     "tool": "smscli",
-    "command": "get-otp",
-    "args": { "sender": "MyApp", "pattern": "\\d{6}" },
+    "command": "otp-wait",
+    "args": { "sender": "MyApp", "timeout": "60" },
     "outputName": "otpCode"
   },
   "onFailure": "abort",
-  "maxRetries": 1,
-  "timeout": 120000
+  "maxRetries": 0,
+  "timeout": 180000
 }
 ```
+
+On `OTP_TIMEOUT` the adapter automatically retries `smscli otp latest` with the same sender
+filter — no extra fallback step needed.
 
 ```json
 {
@@ -2655,8 +2787,7 @@ This is the canonical "function as a named procedure" pattern.
   "description": "Login once via a reusable function",
   "goal": "Demonstrate a zero-duplication login pattern",
   "inputs": [
-    { "name": "vault_username", "type": "string", "required": true, "source": "vaultcli", "value": "myservice/username" },
-    { "name": "vault_password", "type": "secret", "required": true, "source": "vaultcli", "value": "myservice/password" }
+    { "name": "creds", "type": "secret", "required": true, "source": "vaultcli", "value": "myservice" }
   ],
   "functions": [
     {
@@ -2720,8 +2851,8 @@ This is the canonical "function as a named procedure" pattern.
       "action": {
         "function": "login",
         "args": {
-          "username": "{{vault_username}}",
-          "password": "{{vault_password}}"
+          "username": "{{creds_username}}",
+          "password": "{{creds_password}}"
         }
       },
       "onFailure": "abort",
@@ -3014,20 +3145,12 @@ the next step. The function reads shared context, so it could also reference
   "goal": "Retrieve the most recent phone bill PDF from the carrier website",
   "inputs": [
     {
-      "name": "username",
+      "name": "creds",
       "type": "secret",
       "required": true,
       "source": "vaultcli",
-      "value": "carrier/phone-account",
-      "description": "Login username from vault"
-    },
-    {
-      "name": "password",
-      "type": "secret",
-      "required": true,
-      "source": "vaultcli",
-      "value": "carrier/phone-account",
-      "description": "Login password from vault"
+      "value": "carrier-phone-account",
+      "description": "Carrier portal credentials from vault (username + password + url)"
     }
   ],
   "steps": [
@@ -3045,7 +3168,7 @@ the next step. The function reads shared context, so it could also reference
       "id": "step-2",
       "name": "Enter username",
       "type": "interact",
-      "action": { "interaction": "type", "inputRef": "username" },
+      "action": { "interaction": "type", "inputRef": "creds_username" },
       "selectors": { "primary": "#username", "fallbacks": ["input[name='username']", "input[type='email']"] },
       "aiGuidance": "Find the username or email input field on the login form",
       "onFailure": "abort",
@@ -3056,7 +3179,7 @@ the next step. The function reads shared context, so it could also reference
       "id": "step-3",
       "name": "Enter password",
       "type": "interact",
-      "action": { "interaction": "type", "inputRef": "password" },
+      "action": { "interaction": "type", "inputRef": "creds_password" },
       "selectors": { "primary": "#password", "fallbacks": ["input[name='password']", "input[type='password']"] },
       "aiGuidance": "Find the password input field",
       "onFailure": "abort",
@@ -3090,13 +3213,13 @@ the next step. The function reads shared context, so it could also reference
       "type": "tool_call",
       "action": {
         "tool": "smscli",
-        "command": "get-otp",
-        "args": { "sender": "ExampleCarrier", "pattern": "\\d{6}" },
+        "command": "otp-wait",
+        "args": { "sender": "ExampleCarrier", "timeout": "60" },
         "outputName": "otpCode"
       },
       "onFailure": "abort",
-      "maxRetries": 1,
-      "timeout": 120000
+      "maxRetries": 0,
+      "timeout": 180000
     },
     {
       "id": "step-7",
@@ -3144,7 +3267,7 @@ the next step. The function reads shared context, so it could also reference
     }
   ],
   "tools": [
-    { "name": "smscli", "config": { "timeout": "120000" } },
+    { "name": "smscli" },
     { "name": "vaultcli" }
   ],
   "outputs": [
@@ -3294,21 +3417,23 @@ Cause: The step's action did not complete within the `timeout` value.
 Fixes:
 - Increase `timeout` for slow operations (network-heavy pages, smscli waiting for SMS).
 - Add a preceding `wait` step to ensure the page is ready before the action is attempted.
-- For `smscli` steps, use `timeout: 120000` or higher.
+- For `smscli otp-wait` steps, set `args.timeout` to 60–120 seconds and the step-level `timeout`
+  to at least `args.timeout * 1000 + 30000` ms (to leave room for the auto-`otp-latest` fallback).
 
 **"Tool call failed"**
 
 ```
-Step "step-6": tool "smscli" command "get-otp" failed: No matching SMS received within 60 seconds
+Step "step-6": tool "smscli" command "otp-wait" failed: smscli: otp wait timed out after 60s and otp latest also returned nothing
 ```
 
-Cause: The external tool (smscli or vaultcli) returned an error.
+Cause: The external tool (smscli or vaultcli) returned an error. For `otp-wait`, the adapter
+has already tried `otp-latest` as an automatic fallback — this error means both returned nothing.
 
 Fixes:
-- Ensure smscli is installed and configured (`portalflow config` to check provider settings).
-- Verify the `sender` filter matches the actual SMS sender name exactly.
-- Check the `pattern` regex matches the expected OTP format (use `\\d{6}` for 6-digit codes).
-- For vaultcli: verify the key path exists in the vault and the vault is unlocked.
+- Ensure smscli is installed, authenticated, and has recent messages in the inbox.
+- Verify the `sender` filter matches the actual SMS sender name exactly (case-sensitive).
+- Increase `args.timeout` if the SMS typically arrives late.
+- For vaultcli: verify the secret name exists in the vault and the vault is unlocked.
 
 **"LLM unavailable"**
 
