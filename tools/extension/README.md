@@ -252,6 +252,23 @@ Captured event types:
 | `submit` | Form submission |
 | `navigate` | Page navigation via `chrome.webNavigation.onCommitted` |
 
+### HTML snapshots and page context
+
+Every recorded event also ships a **simplified HTML snapshot** of the page at the moment the event fires. The content script's `captureSnapshot` helper (`src/content/snapshot.ts`) walks the live DOM and produces a trimmed copy with scripts, styles, noscript blocks, hidden elements (via computed style), and HTML comments removed, and with runs of whitespace collapsed. The result is hashed with SHA-256 and used as the dedupe key.
+
+Dedupe is automatic: identical consecutive snapshots on a static page are stored exactly once. A typical 20-step session on a single-page app that does not re-render between clicks produces 1–3 stored snapshots; a session on a dynamic site may produce as many as there are meaningful page transitions. Typical size per unique snapshot: 50–200 KB.
+
+Snapshots are stored under `session.snapshots` in `chrome.storage.local`, and each `RawEvent` references its snapshot by `snapshotId`. They are invisible in the side panel UI in v1 — they exist to give the AI chat flow real page context. The extension declares the `unlimitedStorage` permission so long sessions do not hit the default 10 MB quota.
+
+### Raw original preservation
+
+The first time a user stops a recording, the service worker converts the raw events into an `Automation` and stores a **frozen copy** at `session.original`. This field is never mutated again for the lifetime of the session. Two buttons in the side panel let the user undo edits:
+
+- **Reset to recording** — discards manual edits and re-derives the automation from the current session events. Safe only if no events were lost.
+- **Revert to original** — restores `session.original` byte-for-byte. The safer option — leaves the event log untouched and simply undoes all post-recording edits at once.
+
+Both buttons are available after any manual edit. Use **Revert to original** when you want to abandon your edits wholesale; use **Reset to recording** when you want to regenerate from a modified event log.
+
 ### Selector cascade
 
 For each captured element, the recorder computes a `{ primary, fallbacks[] }` selector using seven strategies in priority order:

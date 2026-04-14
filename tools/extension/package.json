@@ -8,8 +8,10 @@
     "build:schema": "cd ../schema && npm run build",
     "prebuild": "npm run build:schema",
     "predev": "npm run build:schema",
+    "pretest": "npm run build:schema",
     "dev": "vite",
     "build": "vite build",
+    "test": "vitest run",
     "typecheck": "npm run build:schema && tsc --noEmit",
     "package": "npm run build && cd dist && zip -r ../portalflow-extension.zip ."
   },
@@ -25,7 +27,9 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
     "typescript": "^5.7.3",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.2.4"
   }
 }

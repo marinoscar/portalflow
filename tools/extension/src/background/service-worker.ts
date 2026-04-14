@@ -1,8 +1,9 @@
 import { loadSession, saveSession, updateSession } from '../storage/session.storage';
 import type { Message } from '../shared/messaging';
-import type { NavigateEvent, RawEvent, RecordingSession } from '../shared/types';
+import type { HtmlSnapshot, NavigateEvent, RawEvent, RecordingSession } from '../shared/types';
 import { LlmService } from '../llm/llm.service';
 import { PROMPTS } from '../llm/prompts';
+import { eventsToAutomation } from '../converter/events-to-automation';
 
 const llmService = new LlmService();
 
@@ -51,11 +52,24 @@ async function startRecording(tabId: number): Promise<RecordingSession> {
 }
 
 async function stopRecording(): Promise<RecordingSession | null> {
-  const updated = await updateSession((s) => ({
-    ...s,
-    status: 'stopped',
-    endedAt: Date.now(),
-  }));
+  const updated = await updateSession((s) => {
+    // Capture the raw original automation exactly once — on the first stop.
+    // Any later stop/resume/stop cycle preserves the first version so the
+    // user can always revert to it from the side panel.
+    const stopped: RecordingSession = {
+      ...s,
+      status: 'stopped',
+      endedAt: Date.now(),
+    };
+    if (!s.original && s.events.length > 0) {
+      try {
+        stopped.original = eventsToAutomation(stopped);
+      } catch (err) {
+        console.warn('[PortalFlow] Failed to derive original automation', err);
+      }
+    }
+    return stopped;
+  });
   if (updated) await broadcastSession(updated);
   return updated;
 }
@@ -81,7 +95,10 @@ async function clearSession(): Promise<void> {
   await broadcastSession(null);
 }
 
-async function appendEvent(event: RawEvent): Promise<void> {
+async function appendEvent(
+  event: RawEvent,
+  snapshot?: HtmlSnapshot,
+): Promise<void> {
   const session = await loadSession();
   if (!session || session.status !== 'recording') return;
 
@@ -93,9 +110,29 @@ async function appendEvent(event: RawEvent): Promise<void> {
     }
   }
 
+  // Merge the snapshot into the session's snapshots map if it's new.
+  // Identical consecutive snapshots (same hash) cost zero extra storage.
+  let snapshots = session.snapshots;
+  if (snapshot) {
+    if (!snapshots || !snapshots[snapshot.id]) {
+      snapshots = {
+        ...(snapshots ?? {}),
+        [snapshot.id]: {
+          id: snapshot.id,
+          content: snapshot.content,
+          sizeBytes: snapshot.sizeBytes,
+          url: snapshot.url,
+          title: snapshot.title,
+          capturedAt: snapshot.capturedAt ?? Date.now(),
+        },
+      };
+    }
+  }
+
   const next: RecordingSession = {
     ...session,
     events: [...session.events, event],
+    ...(snapshots ? { snapshots } : {}),
   };
   await saveSession(next);
   await broadcastSession(next);
@@ -145,7 +182,7 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
         return;
       }
       case 'RECORDED_EVENT': {
-        await appendEvent(msg.event);
+        await appendEvent(msg.event, msg.snapshot);
         sendResponse({ ok: true });
         return;
       }
