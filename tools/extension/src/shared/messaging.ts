@@ -26,6 +26,10 @@ export type Message =
   | { type: 'PAUSE_RECORDING' }
   | { type: 'RESUME_RECORDING' }
   | { type: 'CLEAR_SESSION' }
+  | { type: 'LIST_ARCHIVED_SESSIONS' }
+  | { type: 'ARCHIVED_SESSIONS_RESPONSE'; sessions: RecordingSession[] }
+  | { type: 'DELETE_ARCHIVED_SESSION'; sessionId: string }
+  | { type: 'RESTORE_ARCHIVED_SESSION'; sessionId: string }
   | { type: 'RECORDED_EVENT'; event: RawEvent; snapshot?: HtmlSnapshot }
   | { type: 'SESSION_UPDATED'; session: RecordingSession | null }
   | { type: 'LLM_IMPROVE_SELECTOR'; stepDescription: string; currentSelector: string }
