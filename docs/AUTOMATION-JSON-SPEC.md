@@ -1772,7 +1772,8 @@ In addition to user variables, the template syntax exposes a small set of **syst
 
 #### 13.4.3 Relative date functions
 
-All computed from "today", fresh on each call.
+All computed from "today", fresh on each call. Every entry returns a strict
+YYYY-MM-DD string with no time component.
 
 | Function        | Output (example) | Notes |
 |-----------------|------------------|-------|
@@ -1780,6 +1781,9 @@ All computed from "today", fresh on each call.
 | `$tomorrow`     | `2026-04-15`     | ISO date one day after today. |
 | `$firstOfMonth` | `2026-04-01`     | First day of the current month. |
 | `$lastOfMonth`  | `2026-04-30`     | Last day of the current month. Handles leap-year February correctly. |
+| `$last7Days`    | `2026-04-07`     | ISO date 7 days before today. Useful for `last week of bills` style filters. |
+| `$last3Months`  | `2026-01-14`     | ISO date 3 calendar months before today. The day-of-month is clamped to the destination month's last day, so `$last3Months` from May 31 returns Feb 28 (or Feb 29 in a leap year), not the JavaScript-default Mar 3. |
+| `$last6Months`  | `2025-10-14`     | ISO date 6 calendar months before today. Same day-clamping rule as `$last3Months`. |
 
 #### 13.4.4 Run metadata (stable across the entire run)
 

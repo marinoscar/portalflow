@@ -117,13 +117,20 @@ replace the automation's steps array directly, so correctness matters.
      \$date, \$year, \$yearShort, \$month, \$month0, \$monthName, \$monthNameShort,
      \$day, \$day0, \$dayOfWeek, \$dayOfWeekShort, \$hour, \$hour12, \$minute,
      \$second, \$ampm, \$time, \$isoDateTime, \$timestamp, \$timestampSec,
-     \$yesterday, \$tomorrow, \$firstOfMonth, \$lastOfMonth, \$runId,
-     \$automationName, \$startedAt, \$uuid, \$nonce.
+     \$yesterday, \$tomorrow, \$firstOfMonth, \$lastOfMonth, \$last7Days,
+     \$last3Months, \$last6Months, \$runId, \$automationName, \$startedAt,
+     \$uuid, \$nonce.
+   - Date-typed functions ALL return strict YYYY-MM-DD with no time
+     component: \$date, \$yesterday, \$tomorrow, \$firstOfMonth, \$lastOfMonth,
+     \$last7Days, \$last3Months, \$last6Months.
    - Suggested uses:
      • Embed \`{{$date}}\` in download \`expectedFilename\` so daily runs do not
        overwrite each other (e.g. \`"report-{{$date}}.pdf"\`).
      • Use \`{{$year}}/{{$month0}}\` in templated URLs that include a
        year-month path segment (e.g. \`"https://example.com/billing/{{$year}}/{{$month0}}"\`).
+     • Use \`{{$last7Days}}\`, \`{{$last3Months}}\`, or \`{{$last6Months}}\` for
+       date-range filters in URL query strings or tool_call args (e.g.
+       \`"?from={{$last3Months}}&to={{$date}}"\`).
      • Use \`{{$uuid}}\` for idempotency keys in tool_call args records — two
        references in one args object produce two different UUIDs.
      • Use \`{{$runId}}\` when you need a stable correlation id across all
@@ -254,14 +261,20 @@ Templates have two forms inside any string field:
    $monthNameShort, $day, $day0, $dayOfWeek, $dayOfWeekShort,
    $hour, $hour12, $minute, $second, $ampm, $time, $isoDateTime,
    $timestamp, $timestampSec, $yesterday, $tomorrow, $firstOfMonth,
-   $lastOfMonth, $runId, $automationName, $startedAt, $uuid, $nonce.
-   Examples: {{$date}} → "2026-04-14", {{$uuid}} → fresh UUID per call,
+   $lastOfMonth, $last7Days, $last3Months, $last6Months, $runId,
+   $automationName, $startedAt, $uuid, $nonce.
+   All date-typed functions ($date, $yesterday, $tomorrow,
+   $firstOfMonth, $lastOfMonth, $last7Days, $last3Months,
+   $last6Months) return strict YYYY-MM-DD with no time component.
+   Examples: {{$date}} → "2026-04-14", {{$last3Months}} → ISO date
+   3 calendar months ago, {{$uuid}} → fresh UUID per call,
    {{$runId}} → stable UUID for the whole run.
 
 Use system functions where they help — e.g. embed {{$date}} in download
 filenames so daily runs do not overwrite each other; use {{$uuid}} for
 idempotency keys when posting; use {{$year}}/{{$month0}} in templated
-URLs that include a year-month path segment.
+URLs that include a year-month path segment; use {{$last7Days}} or
+{{$last3Months}} when filtering a "show me the last N period" view.
 
 ## Behavior rules
 
