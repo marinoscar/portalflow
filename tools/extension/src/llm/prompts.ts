@@ -94,8 +94,10 @@ replace the automation's steps array directly, so correctness matters.
    - interact click: timeout 10000, maxRetries 2, onFailure 'abort'
    - interact type (with inputRef to a vault secret): timeout 10000, maxRetries 3
    - interact type (literal value): timeout 10000, maxRetries 2
-   - tool_call smscli get-otp: timeout 120000, maxRetries 1, onFailure 'abort'
-   - tool_call vaultcli: timeout 10000, maxRetries 1, onFailure 'abort'
+   - tool_call smscli otp-wait: timeout 180000, maxRetries 0, onFailure 'abort'
+     (the adapter auto-falls-back to otp-latest on OTP_TIMEOUT, so no retries are needed)
+   - tool_call smscli otp-latest/otp-extract: timeout 10000, maxRetries 0, onFailure 'abort'
+   - tool_call vaultcli secrets-get: timeout 10000, maxRetries 1, onFailure 'abort'
    - extract (all targets): timeout 5000, maxRetries 0, onFailure 'skip'
      (a failed extract should never abort the run)
    - download: timeout 30000, maxRetries 2, onFailure 'abort'
@@ -110,7 +112,86 @@ replace the automation's steps array directly, so correctness matters.
    - Downloads should be triggered from the step that actually initiates them
      (a click or a navigate), not from a standalone step.
 
-9. USE SYSTEM TEMPLATE FUNCTIONS WHERE THEY HELP
+9. DETECT AND FIX OTP LOGIN FLOWS (mandatory when present)
+   You MUST scan the recorded steps for OTP login signals and rewrite the
+   relevant steps to use smscli properly. Apply this checklist whenever you
+   see any of: a button labeled "Send code", "Text me", "Verify by text",
+   "Send SMS", "Request code"; a field named or labeled "otp", "code",
+   "verification", "verificationCode", "verify_code", "otp_code"; or a page
+   titled something like "Enter your verification code".
+
+   a) INSERT an smscli otp-wait tool_call step between the "send code" click
+      and the "type code" type step. Use:
+        tool: "smscli"
+        command: "otp-wait"
+        args: { "timeout": "60", "sender": "<brand>" }  // sender is optional
+        outputName: "otpCode"
+      If the recording contains visible text naming a specific sender (bank,
+      carrier, brand), copy that string into args.sender so the wait only
+      matches messages from that sender.
+
+   b) REWIRE the OTP "type" step's value to use {{otpCode}} as its inputRef
+      (or resolve via template). Never leave a hardcoded OTP literal in the
+      steps — OTPs are single-use and will fail on replay.
+
+   c) DO NOT add a separate fallback step. The smscli adapter automatically
+      retries "otp latest" with the same filter args on OTP_TIMEOUT. Calling
+      otp-latest explicitly is redundant and wastes a round-trip.
+
+   d) HANDLE "choose where to send the code" number-picker pages. Many
+      sites show a list of masked phone numbers like "(***) ***-1234",
+      "+1•••••5678", or email addresses with prompts like
+      "Where should we send your code?" or "Choose a delivery method".
+      When you detect this pattern:
+        - Preserve (or add) the click that selects the correct destination.
+        - If the recording clicked by DOM position, IMPROVE the selector to
+          match by the LAST 4 DIGITS of the intended number rather than
+          positional index. The selector should target a list item whose
+          visible text contains those 4 digits.
+        - If the page offers both SMS and non-SMS options (voice call,
+          email, authenticator app), ALWAYS pick the SMS option, since
+          the rest of the flow uses smscli.
+        - Add a brief description on the improved step explaining why the
+          selector matches by last-4 digits and that SMS was chosen. This
+          helps future debuggers understand the choice.
+
+   e) PRESERVE trust-device / "remember this device" checkboxes in their
+      recorded state. Do not flip a trust-device checkbox that the user
+      recorded as unchecked or vice versa.
+
+   f) WORKED EXAMPLE of the correct result shape (insertion point between
+      the send-code click and the type-otp step):
+        [send code click] → [choose number by last-4 click] → [smscli
+        otp-wait tool_call with outputName: "otpCode"] → [type otpCode
+        into the verification input via inputRef]
+
+10. VAULTCLI AND SMSCLI COMMAND REFERENCE (authoritative)
+    - vaultcli supports ONE command: "secrets-get".
+        args: { "name": "<secret name>", "field"?: "<one key>" }
+        runs: vaultcli secrets get "<name>" --json
+        Without "field", every key in the secret's values object becomes a
+        context variable named <outputName>_<field>. A secret "att" with
+        values { username, password, url } and outputName "creds" produces
+        {{creds_username}}, {{creds_password}}, {{creds_url}}.
+        With "field", only that one value is returned as {{outputName}}.
+    - smscli supports THREE commands:
+        "otp-wait"    — block until a new OTP arrives; args accept
+                         sender?, number?, timeout? (seconds, default 60),
+                         since?, device?. Auto-falls-back to otp-latest
+                         on OTP_TIMEOUT.
+        "otp-latest"  — most recent OTP without polling; same filter args
+                         minus timeout. No fallback.
+        "otp-extract" — offline extraction from a literal message body;
+                         args { "message": "<text>" }. Useful for tests.
+    - DO NOT emit the legacy names "get-otp", "get-secret", "get" for
+      vaultcli, or any other unrecognized command string. Those were
+      never valid and now produce an explicit error from the adapter.
+    - When rewriting a top-level input with source: "vaultcli", the
+      runner explodes it the same way. An input named "creds" with
+      source "vaultcli" and value "att" yields {{creds_username}},
+      {{creds_password}}, {{creds_url}} for all type steps.
+
+11. USE SYSTEM TEMPLATE FUNCTIONS WHERE THEY HELP
    - Any string field (URLs, args, expectedFilename, validation values) can
      reference built-in functions via the reserved \`{{$name}}\` syntax. They
      resolve at runtime to dynamic values. The full list:
@@ -275,6 +356,111 @@ filenames so daily runs do not overwrite each other; use {{$uuid}} for
 idempotency keys when posting; use {{$year}}/{{$month0}} in templated
 URLs that include a year-month path segment; use {{$last7Days}} or
 {{$last3Months}} when filtering a "show me the last N period" view.
+
+## Tool calls (vaultcli and smscli)
+
+Both CLI tools are invoked via tool_call steps. The valid commands are
+limited; unrecognized commands produce an explicit runtime error.
+
+### vaultcli — single command: "secrets-get"
+
+Runs \`vaultcli secrets get "<name>" --json\` and parses the envelope
+{ "success", "data": { "values": { ... } } }.
+
+  args.name   (required) — the secret name in the vault
+  args.field  (optional) — if set, return only that one value as
+                            {{outputName}}. Otherwise expose every key in
+                            the secret's values object as a separate
+                            context variable named <outputName>_<field>.
+
+Multi-field exploding: a secret "att" with values
+{ username, password, url } retrieved with outputName "creds" produces
+these context variables after the step runs:
+  {{creds}}           — the JSON-stringified values object
+  {{creds_username}}  — the username string
+  {{creds_password}}  — the password string
+  {{creds_url}}       — the URL string
+
+The same exploding applies to top-level inputs with
+source: "vaultcli". An input named "creds" with value "att" exposes
+{{creds_username}}, {{creds_password}}, etc. for use in type steps via
+\`{ "interaction": "type", "inputRef": "creds_password" }\`.
+
+Example step:
+\`\`\`json
+{
+  "id": "step-2",
+  "name": "Retrieve portal credentials",
+  "type": "tool_call",
+  "action": {
+    "tool": "vaultcli",
+    "command": "secrets-get",
+    "args": { "name": "att" },
+    "outputName": "creds"
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 10000
+}
+\`\`\`
+
+### smscli — three commands: "otp-wait", "otp-latest", "otp-extract"
+
+  otp-wait    — \`smscli otp wait --json [--timeout S --sender X ...]\`
+                 Blocks until a new OTP arrives or the timeout elapses.
+                 On OTP_TIMEOUT, the adapter AUTOMATICALLY retries
+                 \`smscli otp latest\` with the same filter args. This is
+                 the default and recommended command for OTP login flows.
+                 Args: sender?, number?, timeout? (seconds, default 60),
+                 since?, device?.
+  otp-latest  — \`smscli otp latest --json [--sender X ...]\`
+                 Returns the most recent OTP without polling. No fallback.
+                 Use it when you already know the OTP has arrived.
+  otp-extract — \`smscli otp extract --message "<text>" --json\`
+                 Offline extraction from a literal SMS body. Used mostly
+                 in tests. Args: { "message": "<text>" } (required).
+
+DO NOT emit legacy command names ("get-otp", "get", "get-secret") or any
+command string not listed above. They were never functional and now
+produce explicit adapter errors.
+
+Example OTP step — no separate fallback is needed:
+\`\`\`json
+{
+  "id": "step-otp",
+  "name": "Retrieve OTP via smscli",
+  "type": "tool_call",
+  "action": {
+    "tool": "smscli",
+    "command": "otp-wait",
+    "args": { "sender": "MyBank", "timeout": "60" },
+    "outputName": "otpCode"
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 180000
+}
+\`\`\`
+
+### OTP login flow detection
+
+When the user asks you to improve, add, or fix an OTP login flow, apply
+these rules automatically:
+
+1. Insert the otp-wait tool_call BETWEEN the "send code" click and the
+   "type otp" step. Never leave a hardcoded OTP literal in the steps.
+2. Rewire the OTP type step to use inputRef: "otpCode" (or whatever
+   outputName you chose).
+3. If the recording contains a "choose where to send the code" page with
+   masked phone numbers like "(***) ***-1234", preserve the destination
+   click but improve the selector to match by the LAST 4 DIGITS rather
+   than positional index. If the page offers non-SMS options (voice,
+   email), pick the SMS option — the rest of the flow uses smscli.
+4. Add an args.sender filter to the otp-wait step when the page text
+   names a specific sender. Don't fabricate a sender that isn't visible
+   in the context.
+5. Do not add a fallback otp-latest step — the adapter already handles
+   OTP_TIMEOUT internally.
 
 ## Behavior rules
 
