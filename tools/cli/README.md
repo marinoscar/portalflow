@@ -575,7 +575,131 @@ All configuration is stored at `~/.portalflow/config.json`:
 
 The `kind` field controls which API client is used: `anthropic` uses the native Anthropic Messages API; `openai-compatible` uses the OpenAI client with a custom `baseUrl`. Existing configs without a `kind` field are automatically upgraded on first use: `anthropic` maps to kind `anthropic`, everything else maps to `openai-compatible`.
 
-The `paths`, `video`, and `logging` sections are all optional; built-in defaults apply for any omitted values. See [Storage and Video Settings](#storage-and-video-settings) and [Logging and Troubleshooting](#logging-and-troubleshooting).
+The `paths`, `video`, `logging`, and `browser` sections are all optional; built-in defaults apply for any omitted values. See [Storage and Video Settings](#storage-and-video-settings), [Logging and Troubleshooting](#logging-and-troubleshooting), and [Browser Profile Configuration](#browser-profile-configuration).
+
+---
+
+## Browser Profile Configuration
+
+PortalFlow can run automations in two browser modes. Picking the right one is one of the most important decisions for any automation that needs long-lived sign-in state, real cookies, browser extensions (password managers, ad blockers), or compatibility with sites that fingerprint bot-like Chromium contexts.
+
+### Modes
+
+| Mode | Use it when | What happens |
+|---|---|---|
+| `isolated` (default) | The automation is short-lived, hermetic, and walks through every login flow on every run. CI runs, smoke tests, ephemeral demos. | Playwright launches a fresh in-memory Chromium for every run. No cookies, no extensions, no sign-in state, no history. Side-effect-free. |
+| `persistent` | You want the automation to behave like a returning human user from your normal browser. Logged-in portals, MFA-gated sites, sites that depend on extensions, sites that block plain Chromium. | Playwright opens (or creates) a real on-disk Chrome / Brave / Chromium / Edge user data directory via `launchPersistentContext`. Cookies, localStorage, saved logins, extensions, and history all persist between runs. |
+
+### Important: the Chrome lock
+
+A Chrome user data directory cannot be opened by two processes at the same time. If you have your normal browser running with the same profile, the persistent-mode launch will fail with a profile-locked error. Two ways to handle it:
+
+1. **Close your normal browser before each run.** Works for occasional runs.
+2. **Reserve a profile for automation.** Create a dedicated Chrome profile (e.g. "Automation"), sign into the portals you need, and tell PortalFlow to use that profile. Your daily-driver profile stays untouched.
+
+### Configuration precedence
+
+Highest priority first:
+
+1. CLI flags on `portalflow run` (`--browser-mode`, `--browser-channel`, `--browser-user-data-dir`, `--browser-profile-directory`)
+2. The `browser` section of `~/.portalflow/config.json`
+3. Default: `mode: "isolated"`
+
+### Configuring a profile interactively
+
+```bash
+portalflow settings   # → "Configure browser profile"
+```
+
+The TUI scans installed Chromium-family browsers (Google Chrome, Chrome Beta/Dev, Chromium, Brave, Microsoft Edge, Edge Beta), reads each browser's `Local State` JSON to discover the named profiles inside, and presents them as a single picker:
+
+```
+Google Chrome / Personal — oscar@marin.cr  [Default]
+Google Chrome / Work — oscar@work.example  [Profile 1]
+Brave / Privacy  [Default]
+Microsoft Edge / Default  [Default]
+```
+
+Pick one, confirm, and the choice is persisted in `~/.portalflow/config.json`.
+
+### Configuring a profile non-interactively
+
+```bash
+# Print current config
+portalflow settings browser
+
+# List installed browser profiles
+portalflow settings browser --list
+
+# Switch to isolated mode
+portalflow settings browser --mode isolated
+
+# Use a specific Chrome profile
+portalflow settings browser \
+  --mode persistent \
+  --channel chrome \
+  --user-data-dir ~/.config/google-chrome \
+  --profile-directory "Default"
+
+# Use a Brave profile (Brave is launched via the chrome channel)
+portalflow settings browser \
+  --mode persistent \
+  --channel chrome \
+  --user-data-dir ~/.config/BraveSoftware/Brave-Browser \
+  --profile-directory "Profile 1"
+
+# Use Microsoft Edge
+portalflow settings browser \
+  --mode persistent \
+  --channel msedge \
+  --user-data-dir ~/.config/microsoft-edge \
+  --profile-directory "Default"
+```
+
+### Per-run override
+
+```bash
+# Force isolated mode for one run, ignoring the saved config
+portalflow run my-automation.json --browser-mode isolated
+
+# Use a different profile just for one run
+portalflow run my-automation.json \
+  --browser-mode persistent \
+  --browser-channel chrome \
+  --browser-user-data-dir ~/.config/google-chrome \
+  --browser-profile-directory "Profile 2"
+```
+
+### Config file shape
+
+```json
+{
+  "browser": {
+    "mode": "persistent",
+    "channel": "chrome",
+    "userDataDir": "/home/marinoscar/.config/google-chrome",
+    "profileDirectory": "Default"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `mode` | `"isolated" \| "persistent"` | `"isolated"` | Launch strategy. |
+| `channel` | string | `undefined` (Playwright Chromium) | Which Chromium-family binary to launch. Valid values: `chromium`, `chrome`, `chrome-beta`, `chrome-dev`, `msedge`, `msedge-beta`, `msedge-dev`. Used only in persistent mode. |
+| `userDataDir` | string | `undefined` | Absolute path to a user data directory. Required when `mode === "persistent"`. |
+| `profileDirectory` | string | `"Default"` | Sub-profile name inside the user data dir (e.g. `"Default"`, `"Profile 1"`). |
+
+### What survives across persistent-mode runs
+
+Everything Chrome normally persists:
+- Cookies and localStorage (so you stay signed in)
+- Saved passwords and form autofill
+- Extensions and their state (password managers, ad blockers, etc.)
+- Browsing history
+- Site permissions (camera, mic, notifications)
+
+This is exactly the surface that makes persistent mode feel like a returning human user instead of a fresh bot.
 
 ---
 
