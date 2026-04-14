@@ -966,7 +966,7 @@ export class StepExecutor {
           thenStep: action.thenStep ?? null,
           elseStep: action.elseStep ?? null,
         },
-        `Condition evaluated to ${result} (step jumping is not yet implemented)`,
+        `Condition evaluated to ${result}`,
       );
     }
 
@@ -977,16 +977,33 @@ export class StepExecutor {
       this.context.setVariable(`${step.id}_reasoning`, reasoning);
     }
 
-    // Branch into a named function based on the boolean result. No args are
-    // passed — the function reads shared context. Schema refinement has
-    // already validated that the referenced function exists.
-    if (result && action.thenCall) {
+    // Branching: thenStep/elseStep jumps take precedence over thenCall/elseCall.
+    // Jumps set a pendingJump that executeWithPolicy reads out after this step
+    // returns. Function calls execute inline (existing behavior).
+    //
+    // Schema refinement guarantees thenStep+thenCall are mutually exclusive —
+    // same for elseStep+elseCall — so the if/else-if cascade is unambiguous.
+    if (result && action.thenStep) {
+      const targetId = this.context.resolveTemplate(action.thenStep);
+      this.context.logger.info(
+        { stepId: step.id, thenStep: targetId },
+        `Condition true — jumping to step "${targetId}"`,
+      );
+      this.pendingJump = targetId;
+    } else if (result && action.thenCall) {
       const fnName = this.context.resolveTemplate(action.thenCall);
       this.context.logger.info(
         { stepId: step.id, thenCall: fnName },
         `Condition true — invoking thenCall function "${fnName}"`,
       );
       await this.invokeFunction(fnName, {}, step.id);
+    } else if (!result && action.elseStep) {
+      const targetId = this.context.resolveTemplate(action.elseStep);
+      this.context.logger.info(
+        { stepId: step.id, elseStep: targetId },
+        `Condition false — jumping to step "${targetId}"`,
+      );
+      this.pendingJump = targetId;
     } else if (!result && action.elseCall) {
       const fnName = this.context.resolveTemplate(action.elseCall);
       this.context.logger.info(
