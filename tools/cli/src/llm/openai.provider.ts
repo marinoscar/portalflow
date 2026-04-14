@@ -255,8 +255,96 @@ Question: ${question}`;
     }
   }
 
-  async decideNextAction(_query: NextActionQuery): Promise<NextActionResult> {
-    throw new Error('OpenAiProvider.decideNextAction: not yet implemented');
+  /**
+   * Drive one iteration of an aiscope agent loop. Builds the prompt
+   * body (goal + allowed actions + recent history + simplified HTML)
+   * and when a base64 PNG screenshot is present, sends it as an
+   * `image_url` content block using a data URI. Uses JSON-object
+   * response format so the model returns strict JSON for the runner
+   * to dispatch directly.
+   */
+  async decideNextAction(query: NextActionQuery): Promise<NextActionResult> {
+    const { goal, pageContext, allowedActions, recentHistory } = query;
+
+    const historyBlock =
+      recentHistory.length > 0
+        ? recentHistory
+            .map((h) => {
+              const head = `[#${h.iteration}] action=${h.action}`;
+              const sel = h.selector ? ` selector="${h.selector}"` : '';
+              const val = h.value ? ` value="${h.value}"` : '';
+              const outcome = h.succeeded
+                ? ' → succeeded'
+                : ` → FAILED: ${h.error ?? '(no message)'}`;
+              return `${head}${sel}${val}${outcome}`;
+            })
+            .join('\n')
+        : '(no prior actions in this aiscope session)';
+
+    const userText = `## Goal
+${goal}
+
+## Allowed actions
+${allowedActions.join(', ')}
+(plus "done" — use when you believe the goal is already satisfied)
+
+## Recent action history (oldest first)
+${historyBlock}
+
+## Current page
+URL: ${pageContext.url}
+Title: ${pageContext.title}
+
+HTML:
+${truncateHtml(pageContext.html)}
+
+Pick the single next action that best advances the goal. Return strict JSON only.`;
+
+    // OpenAI chat content is an array of parts. Image parts come first.
+    type ContentPart =
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string } };
+    const content: ContentPart[] = [];
+    if (pageContext.screenshot) {
+      content.push({
+        type: 'image_url',
+        image_url: { url: `data:image/png;base64,${pageContext.screenshot}` },
+      });
+    }
+    content.push({ type: 'text', text: userText });
+
+    const t0 = Date.now();
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        max_completion_tokens: 1024,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPTS.aiScopeActionDecider },
+          // The OpenAI SDK types accept multi-part user content when the
+          // model supports vision. Cast here because the SDK's union
+          // type is permissive but TypeScript can't narrow it without
+          // a per-model type.
+          { role: 'user', content: content as unknown as string },
+        ],
+      });
+
+      this.logCall('decideNextAction', t0, response.usage, {
+        goal,
+        allowedActions: allowedActions.length,
+        historySize: recentHistory.length,
+        withScreenshot: !!pageContext.screenshot,
+      });
+
+      const text = response.choices[0]?.message?.content ?? '';
+      return parseJsonResponse<NextActionResult>(text, 'decideNextAction');
+    } catch (err) {
+      this.logger.error(
+        { err, goal, operation: 'decideNextAction', latencyMs: Date.now() - t0 },
+        'OpenAiProvider.decideNextAction failed',
+      );
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   }
 
   async extractData(pageContext: PageContext, schema: string): Promise<unknown> {
