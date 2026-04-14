@@ -79,6 +79,22 @@ program
     '-l, --log-level <level>',
     'Log verbosity: trace, debug, info, warn, error, fatal, silent (overrides LOG_LEVEL and config)',
   )
+  .option(
+    '--browser-mode <mode>',
+    'Browser mode: "isolated" (fresh in-memory) or "persistent" (real on-disk profile). Overrides config.',
+  )
+  .option(
+    '--browser-channel <channel>',
+    'Chromium-family channel: chromium, chrome, chrome-beta, chrome-dev, msedge, msedge-beta, msedge-dev. Persistent mode only.',
+  )
+  .option(
+    '--browser-user-data-dir <path>',
+    'Path to the user data directory. Required for persistent mode.',
+  )
+  .option(
+    '--browser-profile-directory <name>',
+    'Sub-profile inside the user data directory (e.g. "Default", "Profile 1").',
+  )
   .addHelpText('after', helpText.runHelpText())
   .action(async (
     file: string | undefined,
@@ -92,6 +108,10 @@ program
       input?: string[];
       inputsJson?: string;
       logLevel?: string;
+      browserMode?: string;
+      browserChannel?: string;
+      browserUserDataDir?: string;
+      browserProfileDirectory?: string;
     },
   ) => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
@@ -140,6 +160,15 @@ program
     try {
       const { AutomationRunner } = await import('./runner/automation-runner.js');
       const runner = new AutomationRunner();
+      // Validate --browser-mode if provided
+      if (options.browserMode && !['isolated', 'persistent'].includes(options.browserMode)) {
+        logger.error(
+          { browserMode: options.browserMode },
+          'Invalid --browser-mode value. Must be "isolated" or "persistent".',
+        );
+        process.exit(1);
+      }
+
       const result = await runner.run(file, {
         headless: options.headless,
         video: options.video,
@@ -149,6 +178,10 @@ program
         automationsDir: options.automationsDir,
         inputs: inputOverrides.size > 0 ? inputOverrides : undefined,
         logLevel: options.logLevel,
+        browserMode: options.browserMode as 'isolated' | 'persistent' | undefined,
+        browserChannel: options.browserChannel,
+        browserUserDataDir: options.browserUserDataDir,
+        browserProfileDirectory: options.browserProfileDirectory,
       });
 
       // Print summary to stdout
