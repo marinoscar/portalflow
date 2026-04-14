@@ -3,7 +3,7 @@ import type { RecordingSession } from '../../shared/types';
 import { sendMessage } from '../../shared/messaging';
 
 interface Props {
-  currentSessionId: string | null;
+  currentSession: RecordingSession | null;
   onOpen: (session: RecordingSession) => void;
   onClose: () => void;
 }
@@ -44,8 +44,8 @@ function describeSession(session: RecordingSession): string {
   return `Untitled session · ${eventCount} event${eventCount === 1 ? '' : 's'}`;
 }
 
-export function SessionsManagerModal({ currentSessionId, onOpen, onClose }: Props) {
-  const [sessions, setSessions] = useState<RecordingSession[] | null>(null);
+export function SessionsManagerModal({ currentSession, onOpen, onClose }: Props) {
+  const [archive, setArchive] = useState<RecordingSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -55,7 +55,7 @@ export function SessionsManagerModal({ currentSessionId, onOpen, onClose }: Prop
       const res = await sendMessage<ArchivedSessionsResponse>({
         type: 'LIST_ARCHIVED_SESSIONS',
       });
-      setSessions(res.sessions ?? []);
+      setArchive(res.sessions ?? []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -66,16 +66,12 @@ export function SessionsManagerModal({ currentSessionId, onOpen, onClose }: Prop
     void refresh();
   }, []);
 
-  const handleOpen = async (session: RecordingSession) => {
-    if (session.id === currentSessionId) {
-      onClose();
-      return;
-    }
-    setBusyId(session.id);
+  const handleOpen = async (sessionId: string) => {
+    setBusyId(sessionId);
     try {
       const res = await sendMessage<SessionStatusResponse>({
         type: 'RESTORE_ARCHIVED_SESSION',
-        sessionId: session.id,
+        sessionId,
       });
       if (res.session) {
         onOpen(res.session);
@@ -97,7 +93,7 @@ export function SessionsManagerModal({ currentSessionId, onOpen, onClose }: Prop
         type: 'DELETE_ARCHIVED_SESSION',
         sessionId: id,
       });
-      setSessions(res.sessions ?? []);
+      setArchive(res.sessions ?? []);
       setPendingDeleteId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -105,6 +101,26 @@ export function SessionsManagerModal({ currentSessionId, onOpen, onClose }: Prop
       setBusyId(null);
     }
   };
+
+  // Build the combined list shown to the user: the active (current) session
+  // at the top, followed by every archived session. The active session is
+  // marked with a "Current" badge and has no Open/Delete actions — those
+  // only make sense for non-active entries. Use the Reset Session header
+  // button to retire the active session.
+  type Row = { session: RecordingSession; isCurrent: boolean };
+  const rows: Row[] = [];
+  if (currentSession) {
+    rows.push({ session: currentSession, isCurrent: true });
+  }
+  if (archive) {
+    for (const s of archive) {
+      if (currentSession && s.id === currentSession.id) continue;
+      rows.push({ session: s, isCurrent: false });
+    }
+  }
+
+  const loading = archive === null;
+  const hasContent = rows.length > 0;
 
   return (
     <div className="modal-backdrop">
@@ -117,22 +133,30 @@ export function SessionsManagerModal({ currentSessionId, onOpen, onClose }: Prop
 
         {error && <p className="modal-error">{error}</p>}
 
-        {sessions === null ? (
+        {loading ? (
           <p className="modal-desc">Loading…</p>
-        ) : sessions.length === 0 ? (
+        ) : !hasContent ? (
           <p className="modal-desc">
-            No saved sessions yet. When you reset the current session, it is moved
-            here (unless it's empty).
+            No sessions yet. Start recording to create one, or reset the current
+            session to move it here.
           </p>
         ) : (
           <ul className="session-list">
-            {sessions.map((s) => {
+            {rows.map(({ session: s, isCurrent }) => {
               const isPendingDelete = pendingDeleteId === s.id;
               const isBusy = busyId === s.id;
               return (
-                <li key={s.id} className="session-row">
+                <li
+                  key={s.id}
+                  className={`session-row${isCurrent ? ' session-row-current' : ''}`}
+                >
                   <div className="session-row-main">
-                    <div className="session-row-title">{describeSession(s)}</div>
+                    <div className="session-row-title">
+                      {describeSession(s)}
+                      {isCurrent && (
+                        <span className="session-row-badge">Current</span>
+                      )}
+                    </div>
                     <div className="session-row-meta">
                       <span>Started: {formatDate(s.startedAt)}</span>
                       <span>Ended: {formatDate(s.endedAt)}</span>
@@ -140,11 +164,13 @@ export function SessionsManagerModal({ currentSessionId, onOpen, onClose }: Prop
                     </div>
                   </div>
                   <div className="session-row-actions">
-                    {!isPendingDelete ? (
+                    {isCurrent ? (
+                      <span className="session-row-hint">In side panel</span>
+                    ) : !isPendingDelete ? (
                       <>
                         <button
                           className="btn-small"
-                          onClick={() => void handleOpen(s)}
+                          onClick={() => void handleOpen(s.id)}
                           disabled={isBusy}
                           title="Open this session"
                         >

@@ -735,6 +735,27 @@ body {
   border-bottom: 1px solid #f1f5f9;
 }
 .session-row:last-child { border-bottom: none; }
+.session-row-current {
+  background: #eff6ff;
+}
+.session-row-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 10px;
+  vertical-align: middle;
+}
+.session-row-hint {
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+  white-space: nowrap;
+}
 .session-row-main {
   flex: 1;
   min-width: 0;
