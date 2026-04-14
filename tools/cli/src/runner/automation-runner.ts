@@ -278,8 +278,18 @@ export class AutomationRunner {
     // ------------------------------------------------------------------
     const steps = automation.steps;
 
-    for (const step of steps) {
-      logger.info({ stepId: step.id, stepName: step.name, type: step.type }, 'Executing step');
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]!;
+      logger.info(
+        {
+          stepId: step.id,
+          stepName: step.name,
+          type: step.type,
+          index: i + 1,
+          total: steps.length,
+        },
+        'Executing step',
+      );
 
       const success = await stepExecutor.executeWithPolicy(step);
 
@@ -289,7 +299,6 @@ export class AutomationRunner {
       }
 
       context.incrementCompleted();
-      logger.info({ stepId: step.id, stepName: step.name }, 'Step completed');
     }
 
     // ------------------------------------------------------------------
@@ -303,7 +312,7 @@ export class AutomationRunner {
       }
       logger.info('Browser closed');
     } catch (err) {
-      logger.warn({ err: String(err) }, 'Error closing browser (non-fatal)');
+      logger.warn({ err }, 'Error closing browser (non-fatal)');
     }
 
     // ------------------------------------------------------------------
