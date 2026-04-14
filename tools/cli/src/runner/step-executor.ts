@@ -24,12 +24,50 @@ import { RunContext } from './run-context.js';
 const RETRY_BASE_DELAY_MS = 1_000;
 const MAX_CALL_DEPTH = 16;
 
+/**
+ * Result of `executeWithPolicy`. Extends the old boolean shape to carry
+ * jump requests emitted by a condition step's `thenStep` / `elseStep`
+ * or by a `goto` step's `targetStepId`. The top-level runner loop is
+ * the only place that actually applies the jump; internal callers (loops
+ * and function bodies) propagate a jump outward by re-throwing it as a
+ * tagged error so the outcome can be honored at the top level.
+ */
+export type StepOutcome =
+  | 'continue'
+  | 'abort'
+  | { kind: 'jump'; targetStepId: string };
+
+/**
+ * Tagged error used to propagate a jump outcome out of a nested executor
+ * (a loop's substep runner or a function body). The top-level runner
+ * loop catches this via executeWithPolicy's normal failure path when a
+ * jump bubbles out of a block it cannot satisfy. Inside the top-level
+ * loop the jump never becomes an error — executeWithPolicy returns the
+ * `{kind:'jump'}` variant directly.
+ */
+export class JumpOutOfBlockError extends Error {
+  constructor(public readonly targetStepId: string) {
+    super(
+      `Cannot jump to step "${targetStepId}" from inside a loop substep or function body. Jumps are only supported at the top level of the automation.`,
+    );
+    this.name = 'JumpOutOfBlockError';
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class StepExecutor {
   private callDepth = 0;
+  /**
+   * Set by `executeCondition` (when a thenStep/elseStep fires) or by
+   * `executeGoto` (unconditionally). Consumed and cleared by
+   * `executeWithPolicy` at the top of the wrapper, so every step gets a
+   * clean slate and a single jump request never bleeds into the next
+   * step's outcome.
+   */
+  private pendingJump: string | null = null;
 
   constructor(
     private readonly pageService: PageService,
@@ -45,9 +83,19 @@ export class StepExecutor {
 
   /**
    * Executes a step with its retry/skip/abort policy.
-   * Returns true if execution should continue to the next step, false to abort.
+   *
+   * Returns a `StepOutcome`:
+   *   - `'continue'` — step ran (or was skipped after failure); run the next step.
+   *   - `'abort'`    — step failed with abort policy; stop the whole run.
+   *   - `{kind:'jump', targetStepId}` — step requested a jump (goto / condition.thenStep / etc).
+   *     The top-level runner loop applies the jump by resetting its instruction pointer.
    */
-  async executeWithPolicy(step: Step): Promise<boolean> {
+  async executeWithPolicy(step: Step): Promise<StepOutcome> {
+    // Clear any stale pending jump from a prior step. The field is set
+    // from inside `execute(step)` (by executeCondition / executeGoto) and
+    // consumed here at the end of the wrapper.
+    this.pendingJump = null;
+
     const policy = step.onFailure;
     const maxRetries = step.maxRetries;
     let attempts = 0;
@@ -68,7 +116,14 @@ export class StepExecutor {
           'step complete',
         );
         this.context.recordStepOutcome(step.id, 'success');
-        return true; // success
+        // If the step set a pending jump (condition.thenStep or goto),
+        // honor it here instead of returning plain 'continue'.
+        if (this.pendingJump !== null) {
+          const target = this.pendingJump;
+          this.pendingJump = null;
+          return { kind: 'jump', targetStepId: target };
+        }
+        return 'continue';
       } catch (err) {
         const durationMs = Date.now() - attemptStart;
         const message = err instanceof Error ? err.message : String(err);
@@ -109,7 +164,15 @@ export class StepExecutor {
             `Step failed and will be skipped: ${message}`,
           );
           this.context.recordStepOutcome(step.id, 'skipped', message);
-          return true; // continue to next step
+          // If the failed step had already set a pending jump before
+          // throwing (unusual but possible for composite handlers),
+          // honor it even on the skip path. Clear otherwise.
+          if (this.pendingJump !== null) {
+            const target = this.pendingJump;
+            this.pendingJump = null;
+            return { kind: 'jump', targetStepId: target };
+          }
+          return 'continue';
         }
 
         // abort (or retry exhausted)
@@ -142,7 +205,8 @@ export class StepExecutor {
         }
 
         this.context.recordStepOutcome(step.id, 'failed', message);
-        return false; // stop execution
+        this.pendingJump = null;
+        return 'abort';
       }
     }
   }
@@ -235,10 +299,17 @@ export class StepExecutor {
 
       let substepAborted = false;
       for (const substep of substeps) {
-        const success = await this.executeWithPolicy(substep);
-        if (!success) {
+        const outcome = await this.executeWithPolicy(substep);
+        if (outcome === 'abort') {
           substepAborted = true;
           break;
+        }
+        if (typeof outcome === 'object' && outcome.kind === 'jump') {
+          // Jumps are not valid from inside a loop substep — the loop's
+          // iteration state would be lost. Surface the attempt as a hard
+          // failure of the iteration so the enclosing loop step respects
+          // its own onFailure policy (retry / skip / abort).
+          throw new JumpOutOfBlockError(outcome.targetStepId);
         }
         this.context.incrementCompleted();
       }
@@ -767,9 +838,15 @@ export class StepExecutor {
 
     try {
       for (const innerStep of fn.steps) {
-        const ok = await this.executeWithPolicy(innerStep);
-        if (!ok) {
+        const outcome = await this.executeWithPolicy(innerStep);
+        if (outcome === 'abort') {
           throw new Error(`Function "${name}" aborted at step "${innerStep.id}"`);
+        }
+        if (typeof outcome === 'object' && outcome.kind === 'jump') {
+          // Jumps inside a function body would escape the function's
+          // parameter-scope save/restore. Reject them as a hard failure
+          // of the call step; the caller's onFailure policy kicks in.
+          throw new JumpOutOfBlockError(outcome.targetStepId);
         }
         this.context.incrementCompleted();
       }

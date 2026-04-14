@@ -335,11 +335,18 @@ export class AutomationRunner {
         'Executing step',
       );
 
-      const success = await stepExecutor.executeWithPolicy(step);
+      const outcome = await stepExecutor.executeWithPolicy(step);
 
-      if (!success) {
+      if (outcome === 'abort') {
         // abort policy — stop processing further steps
         break;
+      }
+      // Jump outcomes are wired up in the next commit. Until then, treat
+      // any jump that leaks through as a runtime error so we notice.
+      if (typeof outcome === 'object' && outcome.kind === 'jump') {
+        throw new Error(
+          `Unexpected jump outcome from step "${step.id}" to "${outcome.targetStepId}" — jumps are not yet wired up in the runner loop.`,
+        );
       }
 
       context.incrementCompleted();
