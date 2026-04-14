@@ -479,6 +479,53 @@ export function settingsVideoHelpText(): string {
   ]);
 }
 
+export function settingsBrowserHelpText(): string {
+  return assemble([
+    section('Description:', [
+      'View, set, or list the browser profile used for automation runs.',
+      '',
+      'Two modes are supported:',
+      '',
+      '  isolated   — Default. Playwright launches a fresh in-memory Chromium',
+      '               for every run. Cookies, extensions, and sign-in state',
+      '               do NOT persist between runs.',
+      '',
+      '  persistent — Playwright opens a real on-disk Chrome / Brave / Edge',
+      '               profile via launchPersistentContext. Cookies, localStorage,',
+      '               extensions, saved logins, and history all persist between',
+      '               runs. The automation looks (to the website) like a returning',
+      '               human user from your normal browser. Recommended for portals',
+      '               that fingerprint bots or that depend on long-lived sessions.',
+      '',
+      'IMPORTANT: Chrome cannot open the same user data directory from two',
+      'processes at once. Close your normal browser for that profile before',
+      'each run, or pick a profile reserved for automation.',
+      '',
+      'Run with --list to scan installed Chrome / Brave / Chromium / Edge',
+      'profiles on this machine and print them. Run with no flags to print the',
+      'current configuration. Run interactively via `portalflow settings` and',
+      'pick "Configure browser profile" for a guided flow.',
+    ]),
+    section('Examples:', [
+      'portalflow settings browser                                  Print current browser config',
+      'portalflow settings browser --list                           List installed browser profiles',
+      'portalflow settings browser --mode isolated                  Use a fresh Chromium for every run (default)',
+      'portalflow settings browser --mode persistent \\',
+      '    --channel chrome \\',
+      '    --user-data-dir ~/.config/google-chrome \\',
+      '    --profile-directory "Default"',
+    ]),
+    section('Exit codes:', [
+      '0   Browser config printed, listed, or updated',
+      '1   Invalid --mode or --channel value',
+    ]),
+    section('See also:', [
+      'portalflow run --browser-mode <mode>           Override mode for a single run',
+      'portalflow run --browser-profile-directory ... Override sub-profile for a single run',
+    ]),
+  ]);
+}
+
 export function settingsLoggingHelpText(): string {
   return assemble([
     section('Description:', [

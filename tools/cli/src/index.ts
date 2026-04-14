@@ -5,6 +5,9 @@ import pino from 'pino';
 import { AutomationSchema } from '@portalflow/schema';
 import {
   ConfigService,
+  type BrowserChannel,
+  type BrowserConfig,
+  type BrowserMode,
   type LogLevel,
   type LoggingConfig,
   type PathsConfig,
@@ -494,6 +497,101 @@ settings
 
     await config.setLogging(update);
     logger.info(update, 'Logging config updated');
+  });
+
+settings
+  .command('browser')
+  .description('Configure the browser profile used for automation runs')
+  .option('--mode <mode>', '"isolated" or "persistent"')
+  .option('--channel <channel>', 'Chromium-family channel: chromium, chrome, chrome-beta, chrome-dev, msedge, msedge-beta, msedge-dev')
+  .option('--user-data-dir <path>', 'Path to the user data directory')
+  .option('--profile-directory <name>', 'Sub-profile name (e.g. "Default", "Profile 1")')
+  .option('--list', 'List installed Chromium-family browser profiles on this machine and exit')
+  .addHelpText('after', helpText.settingsBrowserHelpText())
+  .action(async (opts: {
+    mode?: string;
+    channel?: string;
+    userDataDir?: string;
+    profileDirectory?: string;
+    list?: boolean;
+  }) => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    await bootstrapDefaults();
+
+    if (opts.list) {
+      const { discoverBrowserProfiles, formatProfileLine } = await import(
+        './browser/profile-inspector.js'
+      );
+      const profiles = discoverBrowserProfiles();
+      if (profiles.length === 0) {
+        logger.info('No Chromium-family browser profiles found on this machine.');
+        return;
+      }
+      logger.info({ count: profiles.length }, 'Discovered browser profiles:');
+      for (const p of profiles) {
+        logger.info(`  ${formatProfileLine(p)}`);
+        logger.info(`    user-data-dir:     ${p.userDataDir}`);
+        logger.info(`    profile-directory: ${p.profileDirectory}`);
+        logger.info(`    channel:           ${p.channel}`);
+      }
+      return;
+    }
+
+    const config = new ConfigService();
+
+    const VALID_MODES: BrowserMode[] = ['isolated', 'persistent'];
+    if (opts.mode !== undefined && !VALID_MODES.includes(opts.mode as BrowserMode)) {
+      logger.error(
+        { mode: opts.mode },
+        `Invalid --mode value. Must be one of: ${VALID_MODES.join(', ')}`,
+      );
+      process.exit(1);
+    }
+
+    const VALID_CHANNELS: BrowserChannel[] = [
+      'chromium',
+      'chrome',
+      'chrome-beta',
+      'chrome-dev',
+      'msedge',
+      'msedge-beta',
+      'msedge-dev',
+    ];
+    if (opts.channel !== undefined && !VALID_CHANNELS.includes(opts.channel as BrowserChannel)) {
+      logger.error(
+        { channel: opts.channel },
+        `Invalid --channel value. Must be one of: ${VALID_CHANNELS.join(', ')}`,
+      );
+      process.exit(1);
+    }
+
+    const update: Partial<BrowserConfig> = {};
+    if (opts.mode !== undefined) update.mode = opts.mode as BrowserMode;
+    if (opts.channel !== undefined) update.channel = opts.channel as BrowserChannel;
+    if (opts.userDataDir !== undefined) update.userDataDir = opts.userDataDir;
+    if (opts.profileDirectory !== undefined) {
+      update.profileDirectory = opts.profileDirectory;
+    }
+
+    if (Object.keys(update).length === 0) {
+      const cfg = await config.load();
+      const current = cfg.browser ?? {};
+      logger.info(current, 'Current browser config');
+      return;
+    }
+
+    // Switching back to isolated mode wipes the persistent fields so the
+    // config doesn't accumulate stale values that the runtime ignores.
+    if (update.mode === 'isolated') {
+      const cfg = await config.load();
+      cfg.browser = { mode: 'isolated' };
+      await config.save(cfg);
+      logger.info(cfg.browser, 'Browser config updated (switched to isolated mode)');
+      return;
+    }
+
+    await config.setBrowser(update);
+    logger.info(update, 'Browser config updated');
   });
 
 settings
