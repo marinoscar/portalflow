@@ -688,3 +688,194 @@ describe('Functions and call step schema', () => {
     expect(result.success).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Jump validation (goto step type + condition.thenStep/elseStep)
+// ---------------------------------------------------------------------------
+
+describe('AutomationSchema · step-id uniqueness and jump references', () => {
+  const baseStep = (id: string) => ({
+    id,
+    name: id,
+    type: 'navigate' as const,
+    action: { url: 'https://example.com' },
+    onFailure: 'abort' as const,
+    maxRetries: 0,
+    timeout: 1000,
+  });
+
+  it('accepts a valid goto step targeting a known top-level step', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        baseStep('step-1'),
+        {
+          id: 'jump-back',
+          name: 'Jump back',
+          type: 'goto',
+          action: { targetStepId: 'step-1' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 1000,
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects duplicate top-level step ids', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [baseStep('step-1'), baseStep('step-1')],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => /Duplicate top-level step id/.test(i.message))).toBe(true);
+    }
+  });
+
+  it('rejects a goto step that targets an unknown step id', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        baseStep('step-1'),
+        {
+          id: 'bad-jump',
+          name: 'Bad jump',
+          type: 'goto',
+          action: { targetStepId: 'nowhere' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 1000,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => /not a known top-level step id/.test(i.message)),
+      ).toBe(true);
+    }
+  });
+
+  it('accepts templated targetStepId at schema time (runtime check is separate)', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        baseStep('step-1'),
+        {
+          id: 'templated-jump',
+          name: 'Templated jump',
+          type: 'goto',
+          action: { targetStepId: '{{jumpTarget}}' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 1000,
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a condition with both thenStep and thenCall', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      functions: [
+        {
+          name: 'recover',
+          steps: [baseStep('r1')],
+        },
+      ],
+      steps: [
+        baseStep('step-1'),
+        {
+          id: 'check',
+          name: 'Check',
+          type: 'condition',
+          action: {
+            check: 'variable_equals',
+            value: 'last_step_status=failed',
+            thenStep: 'step-1',
+            thenCall: 'recover',
+          },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 1000,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => /both "thenStep" and "thenCall"/.test(i.message)),
+      ).toBe(true);
+    }
+  });
+
+  it('rejects a thenStep target pointing at a nested (loop substep) step id', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        {
+          id: 'step-loop',
+          name: 'Loop',
+          type: 'loop',
+          action: { maxIterations: 3, indexVar: 'i' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 10000,
+          substeps: [baseStep('inner-1')],
+        },
+        {
+          id: 'bad-check',
+          name: 'Bad check',
+          type: 'condition',
+          action: {
+            check: 'variable_equals',
+            value: 'last_step_status=failed',
+            thenStep: 'inner-1',
+          },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 1000,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => /nested step/.test(i.message)),
+      ).toBe(true);
+    }
+  });
+
+  it('rejects a goto that points at a function body step id', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      functions: [
+        {
+          name: 'helper',
+          steps: [baseStep('helper-1')],
+        },
+      ],
+      steps: [
+        baseStep('step-1'),
+        {
+          id: 'bad-goto',
+          name: 'Bad goto',
+          type: 'goto',
+          action: { targetStepId: 'helper-1' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 1000,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => /nested step/.test(i.message)),
+      ).toBe(true);
+    }
+  });
+});
