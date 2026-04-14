@@ -85,7 +85,7 @@ Find this element: ${description}${failedNote}`;
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 512,
+        max_completion_tokens: 512,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPTS.elementFinder },
@@ -127,7 +127,7 @@ ${truncateHtml(pageContext.html)}`;
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 2048,
+        max_completion_tokens: 2048,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPTS.itemsFinder },
@@ -162,7 +162,7 @@ Question: ${question}`;
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 1024,
+        max_completion_tokens: 1024,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPTS.conditionEvaluator },
@@ -201,7 +201,7 @@ ${truncateHtml(pageContext.html)}`;
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 512,
+        max_completion_tokens: 512,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPTS.actionDecider },
@@ -234,7 +234,7 @@ Question: ${question}`;
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 1024,
+        max_completion_tokens: 1024,
         messages: [
           { role: 'system', content: SYSTEM_PROMPTS.pageInterpreter },
           { role: 'user', content: userMessage },
@@ -266,7 +266,7 @@ ${schema}`;
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 2048,
+        max_completion_tokens: 2048,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPTS.dataExtractor },
