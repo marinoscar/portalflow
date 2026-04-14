@@ -161,6 +161,59 @@ describe('RunContext.resolveTemplate system functions', () => {
     expect(newContext().resolveTemplate('{{$lastOfMonth}}')).toBe('2024-02-29');
   });
 
+  it('$last7Days returns 7 days before today', () => {
+    expect(newContext().resolveTemplate('{{$last7Days}}')).toBe('2026-04-07');
+  });
+
+  it('$last7Days wraps month boundary correctly', () => {
+    // From April 3 minus 7 days = March 27
+    vi.setSystemTime(new Date('2026-04-03T12:00:00Z'));
+    expect(newContext().resolveTemplate('{{$last7Days}}')).toBe('2026-03-27');
+  });
+
+  it('$last3Months returns 3 calendar months before today', () => {
+    expect(newContext().resolveTemplate('{{$last3Months}}')).toBe('2026-01-14');
+  });
+
+  it('$last6Months returns 6 calendar months before today', () => {
+    expect(newContext().resolveTemplate('{{$last6Months}}')).toBe('2025-10-14');
+  });
+
+  it('$last3Months clamps day-of-month for short destination months', () => {
+    // From May 31, going back 3 months would land on Feb 31 in JS's naive
+    // model; addMonthsClamped must clamp to Feb 28 (or 29 in a leap year).
+    vi.setSystemTime(new Date('2026-05-31T12:00:00Z'));
+    expect(newContext().resolveTemplate('{{$last3Months}}')).toBe('2026-02-28');
+  });
+
+  it('$last3Months clamps to Feb 29 from a leap-year May 31', () => {
+    vi.setSystemTime(new Date('2024-05-31T12:00:00Z'));
+    expect(newContext().resolveTemplate('{{$last3Months}}')).toBe('2024-02-29');
+  });
+
+  it('$last6Months wraps the year boundary', () => {
+    // Pinned clock is April 14, 2026; minus 6 months = October 14, 2025.
+    expect(newContext().resolveTemplate('{{$last6Months}}')).toBe('2025-10-14');
+  });
+
+  it('all date-typed system functions return YYYY-MM-DD with no time component', () => {
+    const ctx = newContext();
+    const dateFunctions = [
+      '$date',
+      '$yesterday',
+      '$tomorrow',
+      '$firstOfMonth',
+      '$lastOfMonth',
+      '$last7Days',
+      '$last3Months',
+      '$last6Months',
+    ];
+    for (const fn of dateFunctions) {
+      const out = ctx.resolveTemplate(`{{${fn}}}`);
+      expect(out, `${fn} should be YYYY-MM-DD`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+  });
+
   it('$runId is stable across multiple calls in the same context', () => {
     const ctx = newContext();
     const a = ctx.resolveTemplate('{{$runId}}');

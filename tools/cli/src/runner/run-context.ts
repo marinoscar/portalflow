@@ -31,6 +31,28 @@ function toIsoDate(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/**
+ * Returns a new Date offset from `d` by `months` calendar months, clamping
+ * the day-of-month so we don't get JavaScript's "Feb 31 → Mar 3" overflow
+ * behavior. Example: addMonthsClamped(May 31, -3) → Feb 28 (or Feb 29 in a
+ * leap year), not Feb 31 / Mar 3.
+ */
+function addMonthsClamped(d: Date, months: number): Date {
+  const day = d.getDate();
+  // Build a new date pinned to day 1 of the source month so the subsequent
+  // setMonth call cannot trip over a non-existent day-of-month.
+  const result = new Date(d.getFullYear(), d.getMonth(), 1);
+  result.setMonth(result.getMonth() + months);
+  // Last day of the destination month (day 0 of the next month).
+  const lastDayOfDest = new Date(
+    result.getFullYear(),
+    result.getMonth() + 1,
+    0,
+  ).getDate();
+  result.setDate(Math.min(day, lastDayOfDest));
+  return result;
+}
+
 export interface RunResult {
   success: boolean;
   startedAt: Date;
@@ -125,6 +147,13 @@ export class RunContext {
         const d = new Date();
         return toIsoDate(new Date(d.getFullYear(), d.getMonth() + 1, 0));
       }],
+      ['$last7Days', () => {
+        const d = new Date();
+        d.setDate(d.getDate() - 7);
+        return toIsoDate(d);
+      }],
+      ['$last3Months', () => toIsoDate(addMonthsClamped(new Date(), -3))],
+      ['$last6Months', () => toIsoDate(addMonthsClamped(new Date(), -6))],
 
       // --- Run metadata (stable for the lifetime of this RunContext) ---
       ['$runId',          () => stableRunId],
