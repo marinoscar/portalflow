@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AiScopeActionSchema,
   AutomationSchema,
   CallActionSchema,
   ConditionActionSchema,
@@ -47,6 +48,7 @@ export type LoopItems = z.infer<typeof LoopItemsSchema>;
 export type LoopExitWhen = z.infer<typeof LoopExitWhenSchema>;
 export type CallAction = z.infer<typeof CallActionSchema>;
 export type GotoAction = z.infer<typeof GotoActionSchema>;
+export type AiScopeAction = z.infer<typeof AiScopeActionSchema>;
 
 // Function-related types
 export type FunctionParameter = z.infer<typeof FunctionParameterSchema>;
@@ -62,12 +64,13 @@ export type Action =
   | DownloadAction
   | LoopAction
   | CallAction
-  | GotoAction;
+  | GotoAction
+  | AiScopeAction;
 
 // Convenience enums derived from the schema literals
 export type InputType = Input['type'];
 export type InputSource = NonNullable<Input['source']>;
-export type StepType = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
+export type StepType = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto' | 'aiscope';
 export type OnFailure = 'retry' | 'skip' | 'abort';
 export type InteractionType = InteractAction['interaction'];
 export type WaitCondition = WaitAction['condition'];

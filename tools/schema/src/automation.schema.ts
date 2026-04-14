@@ -132,6 +132,67 @@ export const GotoActionSchema = z.object({
   targetStepId: z.string().min(1),
 });
 
+// An `aiscope` step hands control to an LLM for a bounded, goal-driven
+// sub-run. The runner enters a loop: observe the page (HTML + optional
+// screenshot), evaluate the success check, ask the LLM for the next
+// action, dispatch it through PageService, and repeat until the goal is
+// reached or a budget cap fires. Both budget caps are enforced — whichever
+// one trips first aborts the step with a clear error.
+//
+// This is explicitly NOT a framework-backed autonomous agent: the action
+// vocabulary is fixed, the observation surface is the existing page
+// context, and the scope is a single goal with a hard ceiling. Use it for
+// "figure out how to dismiss the cookie banner" style deviations from an
+// otherwise deterministic flow, not for open-ended tasks.
+export const AiScopeSuccessCheckSchema = z
+  .object({
+    check: z
+      .enum(['element_exists', 'url_matches', 'text_contains', 'variable_equals'])
+      .optional(),
+    value: z.string().optional(),
+    ai: z.string().optional(),
+  })
+  .refine(
+    (sc) => {
+      const hasCheck = sc.check !== undefined;
+      const hasAi = sc.ai !== undefined && sc.ai.trim().length > 0;
+      return (hasCheck || hasAi) && !(hasCheck && hasAi);
+    },
+    {
+      message:
+        'aiscope successCheck must have exactly one of "check"+"value" (deterministic) or "ai" (plain-English question)',
+    },
+  )
+  .refine((sc) => sc.check === undefined || sc.value !== undefined, {
+    message: 'aiscope successCheck with a deterministic "check" requires a "value"',
+    path: ['value'],
+  });
+
+export const AiScopeActionSchema = z.object({
+  goal: z.string().min(1),
+  successCheck: AiScopeSuccessCheckSchema,
+  maxDurationSec: z.number().int().min(1).max(3600).default(300),
+  maxIterations: z.number().int().min(1).max(200).default(25),
+  allowedActions: z
+    .array(
+      z.enum([
+        'navigate',
+        'click',
+        'type',
+        'select',
+        'check',
+        'uncheck',
+        'hover',
+        'focus',
+        'scroll',
+        'wait',
+        'done',
+      ]),
+    )
+    .optional(),
+  includeScreenshot: z.boolean().default(true),
+});
+
 // ---------------------------------------------------------------------------
 // Step
 // ---------------------------------------------------------------------------
@@ -157,13 +218,14 @@ type DownloadActionOutput = z.output<typeof DownloadActionSchema>;
 type LoopActionOutput = z.output<typeof LoopActionSchema>;
 type CallActionOutput = z.output<typeof CallActionSchema>;
 type GotoActionOutput = z.output<typeof GotoActionSchema>;
+type AiScopeActionOutput = z.output<typeof AiScopeActionSchema>;
 
 // Forward-declare the Step interface so TypeScript can resolve z.lazy() recursion.
 export interface Step {
   id: string;
   name: string;
   description?: string;
-  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
+  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto' | 'aiscope';
   action: NavigateActionOutput
     | InteractActionOutput
     | WaitActionOutput
@@ -173,7 +235,8 @@ export interface Step {
     | DownloadActionOutput
     | LoopActionOutput
     | CallActionOutput
-    | GotoActionOutput;
+    | GotoActionOutput
+    | AiScopeActionOutput;
   aiGuidance?: string;
   selectors?: z.output<typeof SelectorsSchema>;
   validation?: z.output<typeof ValidationSchema>;
@@ -195,7 +258,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
     description: z.string().optional(),
     type: z.enum([
       'navigate', 'interact', 'wait', 'extract',
-      'tool_call', 'condition', 'download', 'loop', 'call', 'goto',
+      'tool_call', 'condition', 'download', 'loop', 'call', 'goto', 'aiscope',
     ]),
     action: z.union([
       NavigateActionSchema,
@@ -208,6 +271,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
       LoopActionSchema,
       CallActionSchema,
       GotoActionSchema,
+      AiScopeActionSchema,
     ]),
     aiGuidance: z.string().optional(),
     selectors: SelectorsSchema.optional(),

@@ -248,6 +248,12 @@ export class StepExecutor {
       case 'goto':
         await this.executeGoto(step);
         break;
+      case 'aiscope':
+        // Wired up in a later commit. Stubbed here so the schema commit
+        // typechecks against the exhaustive-never branch below.
+        throw new Error(
+          `Step "${step.id}": aiscope step type is not yet implemented in the runner.`,
+        );
       default: {
         const exhaustive: never = step.type;
         throw new Error(`Unknown step type: ${String(exhaustive)}`);
