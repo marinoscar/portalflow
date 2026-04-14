@@ -1,4 +1,4 @@
-import { zip, strToU8 } from 'fflate';
+import { zipSync, strToU8, type Zippable } from 'fflate';
 import type { RecordingSession } from '../../shared/types';
 import type { Automation } from '@portalflow/schema';
 import type { AutomationVersion, ChatMessage } from '../../shared/types';
@@ -21,12 +21,12 @@ import {
  *
  * All JSON is pretty-printed for human inspection.
  */
-export async function exportSession(
+export function exportSession(
   session: RecordingSession,
   currentAutomation: Automation,
   currentVersionId: string | null,
-): Promise<Blob> {
-  const files: Record<string, Uint8Array> = {};
+): Blob {
+  const files: Zippable = {};
 
   const versions = session.versions ?? [];
   const snapshots = session.snapshots ?? {};
@@ -84,18 +84,11 @@ export async function exportSession(
   files['events.json'] = strToU8(JSON.stringify(session.events, null, 2));
   files['chat/history.json'] = strToU8(JSON.stringify(chatHistory, null, 2));
 
-  return new Promise<Blob>((resolve, reject) => {
-    zip(files, { level: 6 }, (err, data) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      // Explicitly narrow to a plain ArrayBuffer to satisfy the lib.dom
-      // BlobPart type, which excludes SharedArrayBuffer-backed views.
-      const buf = new Uint8Array(data).slice().buffer;
-      resolve(new Blob([buf], { type: 'application/zip' }));
-    });
-  });
+  const data = zipSync(files, { level: 6 });
+  // Explicitly copy into a plain ArrayBuffer to satisfy the lib.dom
+  // BlobPart type, which excludes SharedArrayBuffer-backed views.
+  const buf = new Uint8Array(data).slice().buffer;
+  return new Blob([buf], { type: 'application/zip' });
 }
 
 function sanitizeAuthor(author: string): string {

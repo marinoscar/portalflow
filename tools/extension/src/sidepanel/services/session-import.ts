@@ -24,10 +24,21 @@ export interface ImportedSession {
  * Parse a zip file produced by `exportSession` and reconstruct the
  * RecordingSession shape. Throws on malformed input with a descriptive
  * error; callers should surface the message in a modal instead of
- * silently failing.
+ * silently failing. Accepts any Blob-like source (File, Blob, or a raw
+ * Uint8Array / ArrayBuffer) so the tests can bypass jsdom's incomplete
+ * File.arrayBuffer implementation.
  */
-export async function importSession(file: File): Promise<ImportedSession> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
+export async function importSession(
+  source: Blob | ArrayBuffer | Uint8Array,
+): Promise<ImportedSession> {
+  let bytes: Uint8Array;
+  if (source instanceof Uint8Array) {
+    bytes = source;
+  } else if (source instanceof ArrayBuffer) {
+    bytes = new Uint8Array(source);
+  } else {
+    bytes = new Uint8Array(await source.arrayBuffer());
+  }
 
   const files = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
     unzip(bytes, (err, data) => {
