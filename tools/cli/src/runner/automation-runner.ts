@@ -12,7 +12,7 @@ import { VaultcliAdapter } from '../tools/vaultcli.adapter.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext, type RunResult } from './run-context.js';
 import { StepExecutor } from './step-executor.js';
-import { createRunLogger } from './logger.js';
+import { createRunLogger, resolveLoggingConfig } from './logger.js';
 import { ConfigService } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from './paths.js';
 
@@ -25,6 +25,8 @@ export interface RunOptions {
   automationsDir?: string;
   /** CLI-supplied input overrides. Any key present here wins over the input's source. */
   inputs?: Map<string, string>;
+  /** CLI-supplied log level override (--log-level flag). */
+  logLevel?: string;
 }
 
 export class AutomationRunner {
@@ -60,12 +62,25 @@ export class AutomationRunner {
     const automation: Automation = parsed.data;
 
     // ------------------------------------------------------------------
-    // 3. Create a pino logger
+    // 3. Load user config early so the logger picks up logging settings
     // ------------------------------------------------------------------
-    const logger = createRunLogger(automation.name);
+    const configService = new ConfigService();
+    const userConfig = await configService.load();
+    const loggingConfig = resolveLoggingConfig(userConfig.logging, options?.logLevel);
+    const logger = createRunLogger(automation.name, loggingConfig);
 
     logger.info(
-      { id: automation.id, name: automation.name, version: automation.version },
+      {
+        id: automation.id,
+        name: automation.name,
+        version: automation.version,
+        logging: {
+          level: loggingConfig.level,
+          file: loggingConfig.file ?? null,
+          pretty: loggingConfig.pretty,
+          redactSecrets: loggingConfig.redactSecrets,
+        },
+      },
       'Starting automation run',
     );
 
@@ -180,8 +195,6 @@ export class AutomationRunner {
     // 7. Resolve effective paths and video config
     // ------------------------------------------------------------------
     const settings = automation.settings;
-    const configService = new ConfigService();
-    const userConfig = await configService.load();
 
     const effectivePaths = resolvePaths(userConfig, settings, {
       automations: options?.automationsDir,

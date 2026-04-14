@@ -69,6 +69,10 @@ program
     '--inputs-json <json>',
     'Pass multiple input values as a JSON object',
   )
+  .option(
+    '-l, --log-level <level>',
+    'Log verbosity: trace, debug, info, warn, error, fatal, silent (overrides LOG_LEVEL and config)',
+  )
   .addHelpText('after', helpText.runHelpText())
   .action(async (
     file: string | undefined,
@@ -81,6 +85,7 @@ program
       automationsDir?: string;
       input?: string[];
       inputsJson?: string;
+      logLevel?: string;
     },
   ) => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
@@ -137,6 +142,7 @@ program
         downloadDir: options.downloadDir,
         automationsDir: options.automationsDir,
         inputs: inputOverrides.size > 0 ? inputOverrides : undefined,
+        logLevel: options.logLevel,
       });
 
       // Print summary to stdout
