@@ -1,5 +1,9 @@
 import type { Automation, Input, Step } from '@portalflow/schema';
-import type { AutomationVersion, VersionAuthor } from '../../shared/types';
+import type {
+  AutomationVersion,
+  ChatMessage,
+  VersionAuthor,
+} from '../../shared/types';
 
 /**
  * Maximum number of committed versions retained per session. When the
@@ -16,6 +20,7 @@ export type AutomationState = {
   automation: Automation | null;
   versions: AutomationVersion[];
   currentVersionId: string | null;
+  chatHistory: ChatMessage[];
 };
 
 export type AutomationAction =
@@ -35,13 +40,18 @@ export type AutomationAction =
   | { type: 'COMMIT_VERSION'; author: VersionAuthor; message: string }
   | { type: 'CHECKOUT_VERSION'; versionId: string }
   | { type: 'UNDO' }
-  | { type: 'REDO' };
+  | { type: 'REDO' }
+  | { type: 'HYDRATE_CHAT'; chatHistory: ChatMessage[] }
+  | { type: 'APPEND_CHAT_MESSAGE'; message: ChatMessage }
+  | { type: 'UPDATE_PROPOSAL_STATUS'; messageId: string; status: 'approved' | 'rejected' }
+  | { type: 'CLEAR_CHAT' };
 
 /** Default empty state used by useReducer. */
 export const initialAutomationState: AutomationState = {
   automation: null,
   versions: [],
   currentVersionId: null,
+  chatHistory: [],
 };
 
 /** Returns a new AutomationState that preserves versioning fields. */
@@ -224,5 +234,26 @@ export function automationReducer(
         currentVersionId: next.id,
       };
     }
+
+    // ----- chat actions -----
+
+    case 'HYDRATE_CHAT':
+      return { ...state, chatHistory: action.chatHistory };
+
+    case 'APPEND_CHAT_MESSAGE':
+      return { ...state, chatHistory: [...state.chatHistory, action.message] };
+
+    case 'UPDATE_PROPOSAL_STATUS':
+      return {
+        ...state,
+        chatHistory: state.chatHistory.map((m) =>
+          m.id === action.messageId && m.proposal
+            ? { ...m, proposal: { ...m.proposal, status: action.status } }
+            : m,
+        ),
+      };
+
+    case 'CLEAR_CHAT':
+      return { ...state, chatHistory: [] };
   }
 }

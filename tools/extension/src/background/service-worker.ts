@@ -3,6 +3,7 @@ import type { Message } from '../shared/messaging';
 import type { HtmlSnapshot, NavigateEvent, RawEvent, RecordingSession } from '../shared/types';
 import { LlmService } from '../llm/llm.service';
 import { PROMPTS } from '../llm/prompts';
+import { parseChatEditResponse } from '../llm/chat-edit';
 import { eventsToAutomation } from '../converter/events-to-automation';
 
 const llmService = new LlmService();
@@ -226,6 +227,69 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
             maxTokens: 16384,
           });
           const parsed = tryParseJson(result.text);
+          sendResponse({ type: 'LLM_RESULT', ok: true, data: parsed });
+        } catch (err) {
+          sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });
+        }
+        return;
+      }
+      case 'LLM_CHAT_EDIT': {
+        try {
+          const { userMessage, currentAutomation, recentSnapshots, chatHistory } = msg.request;
+
+          // Build the user prompt. Historical messages first, then the
+          // current automation JSON, then up to 3 recent snapshots, then
+          // the new user question at the end.
+          const historyBlock =
+            chatHistory.length > 0
+              ? chatHistory
+                  .map((m) => `[${m.role}] ${m.content.trim()}`)
+                  .join('\n\n')
+              : '(no prior messages)';
+
+          const automationJson = JSON.stringify(currentAutomation, null, 2);
+
+          // Cap total snapshot payload at ~300 KB. Keep the most recent
+          // snapshots and drop older ones until the budget fits.
+          const SNAPSHOT_BUDGET = 300_000;
+          const pickedSnapshots: typeof recentSnapshots = [];
+          let remaining = SNAPSHOT_BUDGET;
+          for (let i = recentSnapshots.length - 1; i >= 0; i--) {
+            const s = recentSnapshots[i];
+            if (s.sizeBytes > remaining) break;
+            pickedSnapshots.unshift(s);
+            remaining -= s.sizeBytes;
+          }
+
+          const snapshotBlock =
+            pickedSnapshots.length > 0
+              ? pickedSnapshots
+                  .map(
+                    (s, i) =>
+                      `### Snapshot ${i + 1}: ${s.title || '(no title)'}\nURL: ${s.url}\n\n` +
+                      '```html\n' +
+                      s.content +
+                      '\n```',
+                  )
+                  .join('\n\n')
+              : '(no page snapshots available)';
+
+          const userPrompt =
+            `## Chat history (oldest first)\n\n${historyBlock}\n\n` +
+            `## Current automation (JSON)\n\n` +
+            '```json\n' +
+            `${automationJson}\n` +
+            '```\n\n' +
+            `## Recent page snapshots\n\n${snapshotBlock}\n\n` +
+            `## User message\n\n${userMessage}`;
+
+          const result = await llmService.complete({
+            system: PROMPTS.chatEditor.system,
+            user: userPrompt,
+            maxTokens: 16384,
+          });
+
+          const parsed = parseChatEditResponse(result.text);
           sendResponse({ type: 'LLM_RESULT', ok: true, data: parsed });
         } catch (err) {
           sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });

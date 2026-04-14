@@ -846,3 +846,243 @@ body {
 .ai-result li:last-child {
   margin-bottom: 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* AI Chat panel                                                       */
+/* ------------------------------------------------------------------ */
+
+.chat-panel {
+  border-left: 3px solid #7c3aed;
+}
+
+.chat-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.chat-panel-clear {
+  background: transparent;
+  border: 0;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.chat-panel-clear:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.chat-panel-body {
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-empty {
+  padding: 4px 0;
+}
+
+.chat-suggestions {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-suggestion-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.chat-suggestion-button:hover {
+  border-color: #7c3aed;
+  background: #faf5ff;
+}
+
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.chat-message--user {
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  align-self: flex-end;
+  max-width: 88%;
+}
+
+.chat-message--assistant {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  max-width: 100%;
+}
+
+.chat-message-role {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.chat-message-content {
+  white-space: pre-wrap;
+  color: #0f172a;
+}
+
+.chat-message-error {
+  font-size: 12px;
+  color: #b91c1c;
+  background: #fee2e2;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+.chat-thinking {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+.chat-thinking-dot {
+  width: 6px;
+  height: 6px;
+  background: #94a3b8;
+  border-radius: 50%;
+  animation: chat-thinking-bounce 1.2s infinite ease-in-out both;
+}
+.chat-thinking-dot:nth-child(2) { animation-delay: 0.15s; }
+.chat-thinking-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes chat-thinking-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.chat-panel-input {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: flex-end;
+}
+
+.chat-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 60px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: #0f172a;
+  background: #ffffff;
+}
+.chat-input:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 0;
+  border-color: #7c3aed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Proposal card                                                       */
+/* ------------------------------------------------------------------ */
+
+.proposal-card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #ddd6fe;
+  border-radius: 6px;
+  background: #faf5ff;
+}
+
+.proposal-card--approved {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.proposal-card--rejected {
+  border-color: #fecaca;
+  background: #fef2f2;
+  opacity: 0.85;
+}
+
+.proposal-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.proposal-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6d28d9;
+}
+
+.proposal-card-status {
+  font-size: 11px;
+  font-weight: 600;
+}
+.proposal-card-status--approved {
+  color: #166534;
+}
+.proposal-card-status--rejected {
+  color: #b91c1c;
+}
+
+.proposal-card-summary {
+  font-size: 13px;
+  color: #0f172a;
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+
+.proposal-card-changes-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.proposal-card-changes {
+  margin: 0 0 10px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #334155;
+}
+.proposal-card-changes li {
+  margin-bottom: 2px;
+}
+
+.proposal-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
