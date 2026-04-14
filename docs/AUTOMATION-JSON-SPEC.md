@@ -91,6 +91,7 @@ automations are resilient to minor UI changes without requiring manual updates t
 - [11. Outputs](#11-outputs)
 - [12. Settings](#12-settings)
 - [13. Template Syntax](#13-template-syntax)
+  - [13.4 System functions](#134-system-functions)
 - [14. The loop Step in Depth](#14-the-loop-step-in-depth)
   - [14.1 Purpose and Semantics](#141-purpose-and-semantics)
   - [14.2 Required Fields](#142-required-fields)
@@ -1666,6 +1667,7 @@ processed as a template. `"inputRef": "{{password}}"` would look for a variable 
 | Function parameter shadow | For the duration of a function call | When a `call` step invokes a function, each declared parameter is set on the shared context from the caller's resolved arg value. The previous value (if any) is restored on return. |
 | `condition` `<stepId>_result` | After a condition step completes | String `"true"` or `"false"`. |
 | `condition` `<stepId>_reasoning` | After an AI condition completes | The LLM's short reasoning string. |
+| `{{$systemFunction}}` | At template resolution time | Built-in registry on `RunContext`. See [13.4 System functions](#134-system-functions) for the full list. The `$` prefix is reserved — user input names cannot start with `$`. |
 
 ### Example — login step referencing inputs
 
@@ -1720,6 +1722,152 @@ The default value is everything after the **first** colon in the expression. Thi
 The default is NOT whitespace-trimmed, so `{{name: hello }}` yields `" hello "` (with the leading and trailing spaces preserved).
 
 This is useful in combination with the `cli_arg` input source: an automation can reference `{{billCount:3}}` in its steps, allowing runs with or without `--input billCount=N` to succeed while preserving sane defaults.
+
+### 13.4 System functions
+
+In addition to user variables, the template syntax exposes a small set of **system functions** referenced via the reserved `$` prefix: `{{$date}}`, `{{$uuid}}`, `{{$monthName}}`, etc. These functions resolve at runtime to dynamic values like the current date, the current month name, a stable run id, or a freshly generated UUID. They are designed for use cases that have no obvious "user variable" source — naming downloaded files with the current date, building dated URL paths, generating idempotency keys, or stamping outputs with the time of day.
+
+**Naming rules:**
+
+- The `$` prefix is **reserved**. User input names cannot start with `$`. The resolver checks for a leading `$` before consulting the user variables map, so even if you somehow created a variable named `$date`, the system function would still win.
+- System function names use camelCase (`$monthName`, `$dayOfWeek`, `$isoDateTime`, `$timestampSec`).
+- Unknown system functions (typos like `{{$dates}}`) are left as literal placeholder text in the output, the same way unknown user variables are. This surfaces as a downstream error rather than silently producing an empty string.
+- Default suffixes are **ignored** for system functions. `{{$date:fallback}}` yields today's ISO date — the `:fallback` is silently dropped because system functions always resolve. The colon syntax remains valid for user variables only.
+
+**Stable vs fresh values:**
+
+- **Run metadata** (`$runId`, `$startedAt`, `$automationName`) is stable across the entire run. Multiple references to `{{$runId}}` in the same automation always return the same UUID.
+- **Date and time** functions are computed fresh on each substitution. A long-running automation that crosses midnight gets the new date on the next reference.
+- **`$uuid` and `$nonce`** are fresh on every call. Two `{{$uuid}}` references in the same step's args record produce two different UUIDs — useful for idempotency keys when retrying a request.
+
+#### 13.4.1 Date functions (current, fresh on each call)
+
+| Function           | Output (example)        | Notes |
+|--------------------|-------------------------|-------|
+| `$date`            | `2026-04-14`            | ISO date with no time, in the runner's local timezone. |
+| `$year`            | `2026`                  | 4-digit year. |
+| `$yearShort`       | `26`                    | 2-digit year. |
+| `$month`           | `4`                     | Month number 1–12, NOT zero-padded. |
+| `$month0`          | `04`                    | Month number 1–12, zero-padded to 2 digits. |
+| `$monthName`       | `April`                 | Full English month name. |
+| `$monthNameShort`  | `Apr`                   | 3-letter English month name. |
+| `$day`             | `14`                    | Day of month 1–31, NOT zero-padded. |
+| `$day0`            | `14`                    | Day of month, zero-padded to 2 digits. |
+| `$dayOfWeek`       | `Tuesday`               | Full English weekday name. |
+| `$dayOfWeekShort`  | `Tue`                   | 3-letter English weekday name. |
+
+#### 13.4.2 Time functions (current, fresh on each call)
+
+| Function         | Output (example)          | Notes |
+|------------------|---------------------------|-------|
+| `$hour`          | `15`                      | 24-hour, zero-padded. |
+| `$hour12`        | `03`                      | 12-hour, zero-padded. |
+| `$minute`        | `30`                      | Zero-padded. |
+| `$second`        | `45`                      | Zero-padded. |
+| `$ampm`          | `PM`                      | Uppercase. |
+| `$time`          | `15:30:45`                | 24-hour `HH:MM:SS`. |
+| `$isoDateTime`   | `2026-04-14T15:30:45.123Z`| Full ISO 8601 in UTC. |
+| `$timestamp`     | `1776412245123`           | Epoch milliseconds. |
+| `$timestampSec`  | `1776412245`              | Epoch seconds. |
+
+#### 13.4.3 Relative date functions
+
+All computed from "today", fresh on each call.
+
+| Function        | Output (example) | Notes |
+|-----------------|------------------|-------|
+| `$yesterday`    | `2026-04-13`     | ISO date one day before today. |
+| `$tomorrow`     | `2026-04-15`     | ISO date one day after today. |
+| `$firstOfMonth` | `2026-04-01`     | First day of the current month. |
+| `$lastOfMonth`  | `2026-04-30`     | Last day of the current month. Handles leap-year February correctly. |
+
+#### 13.4.4 Run metadata (stable across the entire run)
+
+| Function          | Output (example)                        | Notes |
+|-------------------|-----------------------------------------|-------|
+| `$runId`          | `8a3c2e1f-4b6d-4f8a-9c1d-7e2b3f5a6c8d`  | UUID generated once when the runner starts. Stable for the lifetime of the run. Use for correlating logs or building per-run filenames. |
+| `$automationName` | `Daily AT&T Bill Download`              | The `name` field of the automation being executed. |
+| `$startedAt`      | `2026-04-14T15:30:00.000Z`              | ISO timestamp of when the runner started. Stable. |
+
+#### 13.4.5 Identifier helpers (fresh on each call)
+
+| Function | Output (example)                        | Notes |
+|----------|-----------------------------------------|-------|
+| `$uuid`  | `8a3c2e1f-4b6d-4f8a-9c1d-7e2b3f5a6c8d`  | Fresh UUID v4 on every reference. Two `{{$uuid}}` calls in the same step produce different ids — use for idempotency keys, request ids, or unique filename suffixes when collisions matter. |
+| `$nonce` | `k9m3p7q2`                              | 8-character random alphanumeric string. Cheaper than a UUID for filenames where collision-resistance is not critical. |
+
+#### 13.4.6 Examples
+
+**Dated download filename** so daily runs do not overwrite each other:
+
+```json
+{
+  "id": "step-download",
+  "name": "Download today's report",
+  "type": "download",
+  "action": {
+    "trigger": "click",
+    "expectedFilename": "report-{{$date}}.pdf"
+  },
+  "selectors": { "primary": "button.download-pdf" },
+  "onFailure": "abort",
+  "maxRetries": 2,
+  "timeout": 30000
+}
+```
+
+**Templated URL** that includes the current year and month:
+
+```json
+{
+  "id": "step-billing",
+  "name": "Open this month's billing page",
+  "type": "navigate",
+  "action": { "url": "https://example.com/billing/{{$year}}/{{$month0}}" },
+  "onFailure": "abort",
+  "maxRetries": 1,
+  "timeout": 15000
+}
+```
+
+**Idempotency key in a tool_call args record**:
+
+```json
+{
+  "id": "step-charge",
+  "name": "Submit charge",
+  "type": "tool_call",
+  "action": {
+    "tool": "vaultcli",
+    "command": "post-charge",
+    "args": {
+      "amount": "100.00",
+      "idempotencyKey": "{{$runId}}-{{$uuid}}"
+    }
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 30000
+}
+```
+
+**Stamping a Subject line with the current weekday**:
+
+```json
+{
+  "id": "step-extract",
+  "name": "Save dated subject",
+  "type": "extract",
+  "action": { "target": "title", "outputName": "dailySubject" },
+  "validation": {
+    "type": "title_contains",
+    "value": "Report for {{$dayOfWeek}}, {{$monthName}} {{$day}}"
+  },
+  "onFailure": "skip",
+  "maxRetries": 0,
+  "timeout": 5000
+}
+```
 
 ---
 
