@@ -122,6 +122,16 @@ export const CallActionSchema = z.object({
   args: z.record(z.string()).optional(),
 });
 
+// A goto step jumps the runner's instruction pointer to a named top-level
+// step. Useful for retry-from-earlier patterns (e.g. a condition detects
+// that a login failed and falls back to a handler that re-attempts from
+// step 1). Template syntax is allowed on targetStepId so the jump target
+// can be variable-driven; non-templated values are schema-validated to
+// point at a known top-level step id.
+export const GotoActionSchema = z.object({
+  targetStepId: z.string().min(1),
+});
+
 // ---------------------------------------------------------------------------
 // Step
 // ---------------------------------------------------------------------------
@@ -146,13 +156,14 @@ type ConditionActionOutput = z.output<typeof ConditionActionSchema>;
 type DownloadActionOutput = z.output<typeof DownloadActionSchema>;
 type LoopActionOutput = z.output<typeof LoopActionSchema>;
 type CallActionOutput = z.output<typeof CallActionSchema>;
+type GotoActionOutput = z.output<typeof GotoActionSchema>;
 
 // Forward-declare the Step interface so TypeScript can resolve z.lazy() recursion.
 export interface Step {
   id: string;
   name: string;
   description?: string;
-  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
+  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
   action: NavigateActionOutput
     | InteractActionOutput
     | WaitActionOutput
@@ -161,7 +172,8 @@ export interface Step {
     | ConditionActionOutput
     | DownloadActionOutput
     | LoopActionOutput
-    | CallActionOutput;
+    | CallActionOutput
+    | GotoActionOutput;
   aiGuidance?: string;
   selectors?: z.output<typeof SelectorsSchema>;
   validation?: z.output<typeof ValidationSchema>;
@@ -183,7 +195,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
     description: z.string().optional(),
     type: z.enum([
       'navigate', 'interact', 'wait', 'extract',
-      'tool_call', 'condition', 'download', 'loop', 'call',
+      'tool_call', 'condition', 'download', 'loop', 'call', 'goto',
     ]),
     action: z.union([
       NavigateActionSchema,
@@ -195,6 +207,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
       DownloadActionSchema,
       LoopActionSchema,
       CallActionSchema,
+      GotoActionSchema,
     ]),
     aiGuidance: z.string().optional(),
     selectors: SelectorsSchema.optional(),

@@ -4,6 +4,7 @@ import type {
   DownloadAction,
   ExtractAction,
   FunctionDefinition,
+  GotoAction,
   InteractAction,
   LoopAction,
   LoopExitWhen,
@@ -243,6 +244,9 @@ export class StepExecutor {
         break;
       case 'call':
         await this.executeCall(step);
+        break;
+      case 'goto':
+        await this.executeGoto(step);
         break;
       default: {
         const exhaustive: never = step.type;
@@ -767,6 +771,31 @@ export class StepExecutor {
     const action = step.action as CallAction;
     const fnName = this.context.resolveTemplate(action.function);
     await this.invokeFunction(fnName, action.args ?? {}, step.id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Goto — request an unconditional jump to a named top-level step
+  // ---------------------------------------------------------------------------
+  //
+  // Sets `pendingJump` on the executor. `executeWithPolicy` reads and clears
+  // the field after this step returns and surfaces the jump as a
+  // `{kind:'jump', targetStepId}` outcome. The top-level runner loop applies
+  // the jump by resetting its instruction pointer. `targetStepId` supports
+  // template resolution so the jump target can be variable-driven.
+
+  private async executeGoto(step: Step): Promise<void> {
+    const action = step.action as GotoAction;
+    const target = this.context.resolveTemplate(action.targetStepId).trim();
+    if (target.length === 0) {
+      throw new Error(
+        `Step "${step.id}": goto action has an empty targetStepId (resolved from "${action.targetStepId}").`,
+      );
+    }
+    this.pendingJump = target;
+    this.context.logger.debug(
+      { stepId: step.id, targetStepId: target },
+      'goto step set pending jump',
+    );
   }
 
   /**

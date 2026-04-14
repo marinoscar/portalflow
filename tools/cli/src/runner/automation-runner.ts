@@ -320,9 +320,33 @@ export class AutomationRunner {
     // ------------------------------------------------------------------
     // 11. Execute steps
     // ------------------------------------------------------------------
+    //
+    // The top-level step loop runs as an instruction pointer (`i`) over
+    // the `steps` array. Normal steps advance i by 1; a jump outcome
+    // (from a condition.thenStep/elseStep or a goto step) resets i to
+    // the index of the named target step.
+    //
+    // A hard execution cap (MAX_STEP_EXECUTIONS) bounds the total work
+    // done by a single run, so a broken goto loop fails fast with a
+    // clear error instead of hanging the process.
     const steps = automation.steps;
+    const stepIndexById = new Map<string, number>();
+    for (let j = 0; j < steps.length; j++) {
+      stepIndexById.set(steps[j]!.id, j);
+    }
 
-    for (let i = 0; i < steps.length; i++) {
+    const MAX_STEP_EXECUTIONS = 1000;
+    let executionsRemaining = MAX_STEP_EXECUTIONS;
+    let i = 0;
+
+    while (i < steps.length) {
+      if (executionsRemaining-- <= 0) {
+        throw new Error(
+          `Step execution cap (${MAX_STEP_EXECUTIONS}) exceeded — likely a goto loop. ` +
+            `Add a condition that breaks the cycle or raise the cap.`,
+        );
+      }
+
       const step = steps[i]!;
       logger.info(
         {
@@ -331,6 +355,7 @@ export class AutomationRunner {
           type: step.type,
           index: i + 1,
           total: steps.length,
+          executionsRemaining,
         },
         'Executing step',
       );
@@ -341,15 +366,27 @@ export class AutomationRunner {
         // abort policy — stop processing further steps
         break;
       }
-      // Jump outcomes are wired up in the next commit. Until then, treat
-      // any jump that leaks through as a runtime error so we notice.
-      if (typeof outcome === 'object' && outcome.kind === 'jump') {
-        throw new Error(
-          `Unexpected jump outcome from step "${step.id}" to "${outcome.targetStepId}" — jumps are not yet wired up in the runner loop.`,
-        );
-      }
 
       context.incrementCompleted();
+
+      if (typeof outcome === 'object' && outcome.kind === 'jump') {
+        const target = outcome.targetStepId;
+        const nextIndex = stepIndexById.get(target);
+        if (nextIndex === undefined) {
+          throw new Error(
+            `Step "${step.id}" requested a jump to "${target}", but no top-level step with that id exists. ` +
+              `Jumps must reference top-level step ids; loop substeps and function body steps are not valid targets.`,
+          );
+        }
+        logger.info(
+          { from: step.id, to: target, executionsRemaining },
+          'Jumping to step',
+        );
+        i = nextIndex;
+        continue;
+      }
+
+      i += 1;
     }
 
     // ------------------------------------------------------------------
