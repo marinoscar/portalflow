@@ -13,6 +13,7 @@ import { ExportBar } from './components/ExportBar';
 import { LlmNotConfiguredBanner } from './components/LlmNotConfiguredBanner';
 import { VersionHistory } from './components/VersionHistory';
 import { ChatPanel } from './components/ChatPanel';
+import { ToastStack, useToasts } from './components/ToastStack';
 import { importSession } from './services/session-import';
 import { useUndoRedoShortcuts } from './hooks/useKeyboardShortcuts';
 import { useHasActiveProvider } from './hooks/useLlm';
@@ -101,6 +102,7 @@ export function App() {
     if (!session?.original) return;
     setEditing(false);
     dispatch({ type: 'SET_AUTOMATION', automation: session.original });
+    pushToast('info', 'Reverted to the original recording');
   };
 
   // Seed the version history with a raw-recording entry the first time
@@ -145,8 +147,16 @@ export function App() {
     };
   }, [state.automation, editing, state.versions.length]);
 
-  const undo = useCallback(() => dispatch({ type: 'UNDO' }), []);
-  const redo = useCallback(() => dispatch({ type: 'REDO' }), []);
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
+
+  const undo = useCallback(() => {
+    dispatch({ type: 'UNDO' });
+    pushToast('info', 'Undone — walked back one version');
+  }, [pushToast]);
+  const redo = useCallback(() => {
+    dispatch({ type: 'REDO' });
+    pushToast('info', 'Redone — walked forward one version');
+  }, [pushToast]);
   useUndoRedoShortcuts(undo, redo);
 
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -154,8 +164,9 @@ export function App() {
     (versionId: string) => {
       dispatch({ type: 'CHECKOUT_VERSION', versionId });
       setHistoryOpen(false);
+      pushToast('info', 'Checked out version from history');
     },
-    [],
+    [pushToast],
   );
 
   // Determine button enablement for the history controls.
@@ -263,15 +274,17 @@ export function App() {
         author: 'ai-chat',
         message: msg.proposal.summary,
       });
+      pushToast('success', `Proposal applied: ${msg.proposal.summary}`);
     },
-    [state.chatHistory],
+    [state.chatHistory, pushToast],
   );
 
   const rejectProposal = useCallback(
     (messageId: string) => {
       dispatch({ type: 'UPDATE_PROPOSAL_STATUS', messageId, status: 'rejected' });
+      pushToast('info', 'Proposal rejected');
     },
-    [],
+    [pushToast],
   );
 
   const clearChat = useCallback(() => {
@@ -321,11 +334,16 @@ export function App() {
           chatHistory: imported.session.chatHistory ?? [],
         });
         setEditing(false);
+        pushToast(
+          'success',
+          `Imported session: ${imported.manifest.counts.versions} versions, ${imported.manifest.counts.snapshots} snapshots`,
+        );
       } catch (err) {
         setImportError(err instanceof Error ? err.message : String(err));
+        pushToast('error', 'Import failed — see error banner for details');
       }
     },
-    [session],
+    [session, pushToast],
   );
 
   // --- edit helpers ---
@@ -703,6 +721,7 @@ export function App() {
         currentVersionId={state.currentVersionId}
         onCheckout={checkoutVersion}
       />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
