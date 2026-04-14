@@ -5,8 +5,16 @@ import { resolvePaths, resolveVideo } from '../runner/paths.js';
 import { runSettingsPathsFlow } from './flows/settings-paths.js';
 import { runSettingsVideoFlow } from './flows/settings-video.js';
 import { runSettingsLoggingFlow } from './flows/settings-logging.js';
+import { runSettingsBrowserFlow } from './flows/settings-browser.js';
 
-type SettingsAction = 'view' | 'paths' | 'video' | 'logging' | 'reset' | 'exit';
+type SettingsAction =
+  | 'view'
+  | 'paths'
+  | 'video'
+  | 'logging'
+  | 'browser'
+  | 'reset'
+  | 'exit';
 
 export interface SettingsTuiOptions {
   nested?: boolean;
@@ -46,9 +54,14 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
           hint: 'level, file output, pretty print, secret redaction',
         },
         {
+          value: 'browser' as SettingsAction,
+          label: 'Configure browser profile',
+          hint: 'isolated vs persistent, pick a real Chrome / Brave / Edge profile',
+        },
+        {
           value: 'reset' as SettingsAction,
           label: 'Reset to defaults',
-          hint: pc.yellow('removes paths, video, and logging from config'),
+          hint: pc.yellow('removes paths, video, logging, and browser from config'),
         },
         {
           value: 'exit' as SettingsAction,
@@ -68,6 +81,7 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         const paths = resolvePaths(cfg);
         const video = resolveVideo(cfg);
         const logging = cfg.logging ?? {};
+        const browser = cfg.browser ?? {};
         p.note(
           [
             pc.dim('Storage paths:'),
@@ -86,6 +100,12 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
             `  File:           ${logging.file ?? pc.dim('(none — stdout only)')}`,
             `  Pretty:         ${logging.pretty ?? true ? 'yes' : 'no'}`,
             `  Redact secrets: ${logging.redactSecrets ?? true ? 'yes' : 'no'}`,
+            '',
+            pc.dim('Browser profile:'),
+            `  Mode:              ${browser.mode ?? 'isolated (default)'}`,
+            `  Channel:           ${browser.channel ?? pc.dim('(bundled chromium)')}`,
+            `  User data dir:     ${browser.userDataDir ?? pc.dim('(none)')}`,
+            `  Profile directory: ${browser.profileDirectory ?? pc.dim('(Default)')}`,
           ].join('\n'),
           'Current Settings',
         );
@@ -104,9 +124,13 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         await runSettingsLoggingFlow(configService);
         break;
 
+      case 'browser':
+        await runSettingsBrowserFlow(configService);
+        break;
+
       case 'reset': {
         const confirm = await p.confirm({
-          message: 'Remove paths, video, and logging sections from config (reset to built-in defaults)?',
+          message: 'Remove paths, video, logging, and browser sections from config (reset to built-in defaults)?',
           initialValue: false,
         });
         if (p.isCancel(confirm) || !confirm) {
@@ -117,8 +141,9 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         delete cfg.paths;
         delete cfg.video;
         delete cfg.logging;
+        delete cfg.browser;
         await configService.save(cfg);
-        p.log.success('Paths, video, and logging settings reset to built-in defaults');
+        p.log.success('Paths, video, logging, and browser settings reset to built-in defaults');
         break;
       }
 
