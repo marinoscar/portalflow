@@ -265,8 +265,100 @@ Question: ${question}`;
     }
   }
 
-  async decideNextAction(_query: NextActionQuery): Promise<NextActionResult> {
-    throw new Error('AnthropicProvider.decideNextAction: not yet implemented');
+  /**
+   * Drive one iteration of an aiscope agent loop. Builds a text prompt
+   * describing the goal, allowed actions, and recent history, and
+   * prepends a base64 PNG image block when the page context carries a
+   * screenshot. Parses the model's JSON response into a NextActionResult.
+   */
+  async decideNextAction(query: NextActionQuery): Promise<NextActionResult> {
+    const { goal, pageContext, allowedActions, recentHistory } = query;
+
+    const historyBlock =
+      recentHistory.length > 0
+        ? recentHistory
+            .map((h) => {
+              const head = `[#${h.iteration}] action=${h.action}`;
+              const sel = h.selector ? ` selector="${h.selector}"` : '';
+              const val = h.value ? ` value="${h.value}"` : '';
+              const outcome = h.succeeded
+                ? ' → succeeded'
+                : ` → FAILED: ${h.error ?? '(no message)'}`;
+              return `${head}${sel}${val}${outcome}`;
+            })
+            .join('\n')
+        : '(no prior actions in this aiscope session)';
+
+    const userText = `## Goal
+${goal}
+
+## Allowed actions
+${allowedActions.join(', ')}
+(plus "done" — use when you believe the goal is already satisfied)
+
+## Recent action history (oldest first)
+${historyBlock}
+
+## Current page
+URL: ${pageContext.url}
+Title: ${pageContext.title}
+
+HTML:
+${truncateHtml(pageContext.html)}
+
+Pick the single next action that best advances the goal. Return strict JSON only.`;
+
+    // Anthropic content shape: each user message's `content` is an array
+    // of blocks. Image block comes first so the model reads it before
+    // the text per Anthropic's vision recommendations.
+    const content: Array<
+      | { type: 'text'; text: string }
+      | {
+          type: 'image';
+          source: { type: 'base64'; media_type: 'image/png'; data: string };
+        }
+    > = [];
+    if (pageContext.screenshot) {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: pageContext.screenshot,
+        },
+      });
+    }
+    content.push({ type: 'text', text: userText });
+
+    const t0 = Date.now();
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 1024,
+        system: SYSTEM_PROMPTS.aiScopeActionDecider,
+        messages: [{ role: 'user', content }],
+      });
+
+      this.logCall('decideNextAction', t0, response.usage, {
+        goal,
+        allowedActions: allowedActions.length,
+        historySize: recentHistory.length,
+        withScreenshot: !!pageContext.screenshot,
+      });
+
+      const text = response.content
+        .filter((b) => b.type === 'text')
+        .map((b) => (b as { type: 'text'; text: string }).text)
+        .join('');
+
+      return parseJsonResponse<NextActionResult>(text, 'decideNextAction');
+    } catch (err) {
+      this.logger.error(
+        { err, goal, operation: 'decideNextAction', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.decideNextAction failed',
+      );
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   }
 
   async extractData(pageContext: PageContext, schema: string): Promise<unknown> {
