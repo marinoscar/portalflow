@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { sendMessage } from '../shared/messaging';
 import type { RecordingSession } from '../shared/types';
 import type { Message } from '../shared/messaging';
@@ -11,7 +11,10 @@ import { InputsList } from './components/InputsList';
 import { StepRow } from './components/StepRow';
 import { ExportBar } from './components/ExportBar';
 import { LlmNotConfiguredBanner } from './components/LlmNotConfiguredBanner';
+import { useUndoRedoShortcuts } from './hooks/useKeyboardShortcuts';
 import './app.css';
+
+const AUTO_COMMIT_DEBOUNCE_MS = 2000;
 
 export function App() {
   const [session, setSession] = useState<RecordingSession | null>(null);
@@ -96,6 +99,57 @@ export function App() {
     dispatch({ type: 'SET_AUTOMATION', automation: session.original });
   };
 
+  // Seed the version history with a raw-recording entry the first time
+  // the converter produces an automation AND no versions exist yet.
+  useEffect(() => {
+    if (!state.automation) return;
+    if (state.versions.length > 0) return;
+    if (editing) return;
+    dispatch({
+      type: 'COMMIT_VERSION',
+      author: 'raw-recording',
+      message: `Initial recording (${session?.events.length ?? 0} events)`,
+    });
+    // We deliberately do NOT depend on `state` as a whole to avoid a
+    // feedback loop. Only the presence of an automation and the empty
+    // versions list matter here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.automation, state.versions.length, editing]);
+
+  // Auto-commit a user-edit version after AUTO_COMMIT_DEBOUNCE_MS of idle
+  // time following a manual edit. Typing/clicking resets the timer so
+  // rapid edits coalesce into a single committed version.
+  const commitTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!editing || !state.automation) return;
+    if (state.versions.length === 0) return; // wait for raw-recording seed
+    if (commitTimer.current !== null) {
+      window.clearTimeout(commitTimer.current);
+    }
+    commitTimer.current = window.setTimeout(() => {
+      dispatch({
+        type: 'COMMIT_VERSION',
+        author: 'user-edit',
+        message: 'Manual edit',
+      });
+      commitTimer.current = null;
+    }, AUTO_COMMIT_DEBOUNCE_MS);
+    return () => {
+      if (commitTimer.current !== null) {
+        window.clearTimeout(commitTimer.current);
+      }
+    };
+  }, [state.automation, editing, state.versions.length]);
+
+  const undo = useCallback(() => dispatch({ type: 'UNDO' }), []);
+  const redo = useCallback(() => dispatch({ type: 'REDO' }), []);
+  useUndoRedoShortcuts(undo, redo);
+
+  // Determine button enablement for the history controls.
+  const headIdx = state.versions.findIndex((v) => v.id === state.currentVersionId);
+  const canUndo = headIdx > 0;
+  const canRedo = headIdx >= 0 && headIdx < state.versions.length - 1;
+
   // --- edit helpers ---
 
   const beginEdit = () => setEditing(true);
@@ -131,6 +185,53 @@ export function App() {
           <h1>PortalFlow Recorder</h1>
           <span className={`status-pill status-${status}`}>{status}</span>
         </div>
+        <div className="app-header-actions">
+          <button
+            className="app-header-icon-button"
+            onClick={undo}
+            disabled={!canUndo}
+            title={canUndo ? 'Undo (Ctrl+Z)' : 'Nothing to undo'}
+            aria-label="Undo"
+            type="button"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            </svg>
+          </button>
+          <button
+            className="app-header-icon-button"
+            onClick={redo}
+            disabled={!canRedo}
+            title={canRedo ? 'Redo (Ctrl+Shift+Z)' : 'Nothing to redo'}
+            aria-label="Redo"
+            type="button"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+          </button>
         <button
           className="app-settings-button"
           onClick={openOptions}
@@ -153,6 +254,7 @@ export function App() {
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
         </button>
+        </div>
       </header>
       <main className="app-main">
         <LlmNotConfiguredBanner />
