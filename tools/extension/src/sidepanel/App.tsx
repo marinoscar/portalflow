@@ -13,6 +13,7 @@ import { ExportBar } from './components/ExportBar';
 import { LlmNotConfiguredBanner } from './components/LlmNotConfiguredBanner';
 import { VersionHistory } from './components/VersionHistory';
 import { ChatPanel } from './components/ChatPanel';
+import { importSession } from './services/session-import';
 import { useUndoRedoShortcuts } from './hooks/useKeyboardShortcuts';
 import { useHasActiveProvider } from './hooks/useLlm';
 import './app.css';
@@ -277,6 +278,56 @@ export function App() {
     dispatch({ type: 'CLEAR_CHAT' });
   }, []);
 
+  // --- session zip import ---
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const openImportPicker = useCallback(() => {
+    setImportError(null);
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleImportFile = useCallback(
+    async (ev: React.ChangeEvent<HTMLInputElement>) => {
+      const file = ev.target.files?.[0];
+      // Reset the input so the same file can be re-selected later.
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (!file) return;
+
+      if (session && session.status === 'recording') {
+        const ok = window.confirm(
+          'A recording is in progress. Importing will replace the current session. Continue?',
+        );
+        if (!ok) return;
+      }
+
+      try {
+        const imported = await importSession(file);
+        // Persist the reconstructed session to chrome.storage.local via the
+        // service worker's CLEAR_SESSION + manual save pathway is complex;
+        // the simpler approach is to overwrite the UI state directly.
+        // Future: introduce an IMPORT_SESSION message type.
+        await chrome.storage.local.set({ 'portalflow:session': imported.session });
+        setSession(imported.session);
+        dispatch({ type: 'SET_AUTOMATION', automation: imported.currentAutomation });
+        dispatch({
+          type: 'HYDRATE_VERSIONS',
+          versions: imported.session.versions ?? [],
+          currentVersionId: imported.session.currentVersionId ?? null,
+        });
+        dispatch({
+          type: 'HYDRATE_CHAT',
+          chatHistory: imported.session.chatHistory ?? [],
+        });
+        setEditing(false);
+      } catch (err) {
+        setImportError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [session],
+  );
+
   // --- edit helpers ---
 
   const beginEdit = () => setEditing(true);
@@ -382,6 +433,36 @@ export function App() {
               <polyline points="12 6 12 12 16 14" />
             </svg>
           </button>
+          <button
+            className="app-header-icon-button"
+            onClick={openImportPicker}
+            title="Import session (.zip)"
+            aria-label="Import session"
+            type="button"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip,application/zip"
+            style={{ display: 'none' }}
+            onChange={handleImportFile}
+          />
         <button
           className="app-settings-button"
           onClick={openOptions}
@@ -408,6 +489,19 @@ export function App() {
       </header>
       <main className="app-main">
         <LlmNotConfiguredBanner />
+        {importError && (
+          <div className="error-box" role="alert">
+            <strong>Import failed:</strong>
+            <p>{importError}</p>
+            <button
+              className="btn-secondary btn-small"
+              onClick={() => setImportError(null)}
+              type="button"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <section className="card">
           <h2 className="card-title">Recording</h2>
           <div className="controls">
@@ -584,7 +678,11 @@ export function App() {
               ))}
             </section>
 
-            <ExportBar automation={automation} />
+            <ExportBar
+              automation={automation}
+              session={session}
+              currentVersionId={state.currentVersionId}
+            />
 
             <ChatPanel
               messages={state.chatHistory}
