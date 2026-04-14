@@ -428,4 +428,118 @@ describe('StepExecutor · executeAiScope', () => {
     expect(callArg.question).toBe('Is the login form visible?');
     expect(env.llmService.decideNextAction).not.toHaveBeenCalled();
   });
+
+  it('resolves {{var}} references in the goal before sending to the LLM', async () => {
+    const env = buildEnv({
+      decideSequence: [{ action: 'done', reasoning: 'trivial' }],
+      successCheckResults: [false, true], // iter1 check false → decide → iter2 check true
+    });
+    env.ctx.setVariable('banner_type', 'cookie');
+
+    const step: Step = {
+      id: 'step-aiscope',
+      name: 'templated goal',
+      type: 'aiscope',
+      action: {
+        goal: 'Dismiss the {{banner_type}} banner',
+        successCheck: { ai: 'Is the banner gone?' },
+        maxDurationSec: 300,
+        maxIterations: 3,
+        includeScreenshot: true,
+      } as Step['action'],
+      onFailure: 'abort',
+      maxRetries: 0,
+      timeout: 0,
+    };
+
+    await env.exec.executeWithPolicy(step);
+
+    expect(env.llmService.decideNextAction).toHaveBeenCalledTimes(1);
+    const sentGoal = env.llmService.decideNextAction.mock.calls[0][0].goal;
+    expect(sentGoal).toBe('Dismiss the cookie banner');
+    expect(sentGoal).not.toContain('{{');
+  });
+
+  it('propagates the resolved goal into the iteration-budget error message', async () => {
+    const env = buildEnv({
+      decideSequence: Array(5).fill({
+        action: 'click',
+        selector: 'button',
+        reasoning: '',
+      }),
+      successCheckResults: Array(5).fill(false),
+    });
+    env.ctx.setVariable('target', 'checkout');
+
+    const step: Step = {
+      id: 'step-aiscope',
+      name: 'templated goal budget',
+      type: 'aiscope',
+      action: {
+        goal: 'Navigate to the {{target}} page',
+        successCheck: { ai: 'Are we there yet?' },
+        maxDurationSec: 300,
+        maxIterations: 2,
+        includeScreenshot: false,
+      } as Step['action'],
+      onFailure: 'abort',
+      maxRetries: 0,
+      timeout: 0,
+    };
+
+    await env.exec.executeWithPolicy(step);
+
+    const err = (env.ctx.getVariable('step-aiscope_error') ?? '') as string;
+    expect(err).toContain('Navigate to the checkout page');
+    expect(err).not.toContain('{{target}}');
+  });
+
+  it('rejects "done" when the user explicitly excludes it from allowedActions', async () => {
+    // Iteration 1: LLM emits `done` but allowedActions omits it → should
+    // be rejected as "not in the allowed list" (history records failure,
+    // loop continues).
+    // Iteration 2: LLM emits a valid `click`, successCheck finally passes.
+    const env = buildEnv({
+      decideSequence: [
+        { action: 'done', reasoning: 'I think we are done' },
+        { action: 'click', selector: 'button.ok', reasoning: 'final click' },
+      ],
+      successCheckResults: [false, false, true],
+    });
+    const step = aiscopeStep({
+      ai: 'Is the goal reached?',
+      maxIterations: 5,
+      allowedActions: ['click'], // note: no "done"
+    });
+
+    const outcome = await env.exec.executeWithPolicy(step);
+
+    expect(outcome).toBe('continue');
+    expect(env.ctx.getVariable('step-aiscope_status')).toBe('success');
+    // History passed on the 2nd call should carry the rejection for `done`
+    const secondCallArgs = env.llmService.decideNextAction.mock.calls[1][0];
+    const rejected = secondCallArgs.recentHistory.find(
+      (h: { action: string }) => h.action === 'done',
+    );
+    expect(rejected).toBeDefined();
+    expect(rejected.succeeded).toBe(false);
+    expect(rejected.error).toContain('not in the allowed list');
+  });
+
+  it('forwards the screenshot to evaluateCondition on AI successCheck when includeScreenshot is true', async () => {
+    const env = buildEnv({
+      decideSequence: [{ action: 'click', selector: 'button', reasoning: '' }],
+      successCheckResults: [true],
+    });
+    const step = aiscopeStep({
+      ai: 'Is the login form visible?',
+      includeScreenshot: true,
+    });
+
+    await env.exec.executeWithPolicy(step);
+
+    expect(env.llmService.evaluateCondition).toHaveBeenCalledTimes(1);
+    const callArg = env.llmService.evaluateCondition.mock.calls[0][0];
+    expect(callArg.pageContext.screenshot).toBe('base64-screenshot-data');
+  });
 });

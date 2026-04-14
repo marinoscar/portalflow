@@ -947,10 +947,18 @@ export class StepExecutor {
     const allowedActions =
       action.allowedActions ?? (DEFAULT_AISCOPE_ACTIONS as readonly string[] as string[]);
 
+    // Resolve `${var}` references in the goal once up front. Every other
+    // user-editable string the runner touches (navigate.url, type values,
+    // condition.ai questions, etc.) passes through resolveTemplate; the
+    // aiscope goal is no different and is especially useful when an
+    // aiscope step lives inside a loop body that wants to reference
+    // `${loop_index}` or the item variable in the goal text.
+    const resolvedGoal = this.context.resolveTemplate(action.goal);
+
     logger.info(
       {
         stepId: step.id,
-        goal: action.goal,
+        goal: resolvedGoal,
         maxDurationSec: action.maxDurationSec,
         maxIterations: action.maxIterations,
         includeScreenshot: action.includeScreenshot,
@@ -963,7 +971,7 @@ export class StepExecutor {
       const remainingMs = deadlineMs - Date.now();
       if (remainingMs <= 0) {
         throw new Error(
-          `aiscope step "${step.id}" exceeded wall-clock budget of ${action.maxDurationSec}s after ${iteration - 1} iteration(s) (goal: ${action.goal}).`,
+          `aiscope step "${step.id}" exceeded wall-clock budget of ${action.maxDurationSec}s after ${iteration - 1} iteration(s) (goal: ${resolvedGoal}).`,
         );
       }
 
@@ -997,7 +1005,7 @@ export class StepExecutor {
 
       // 3. Ask the LLM for the next action
       const decision = await this.llmService.decideNextAction({
-        goal: action.goal,
+        goal: resolvedGoal,
         pageContext,
         allowedActions,
         recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
@@ -1015,18 +1023,11 @@ export class StepExecutor {
         'aiscope: decided',
       );
 
-      // 4. Dispatch
-      if (decision.action === 'done') {
-        // Treat as a hint — the top of the next iteration re-runs the
-        // success check. If the model was wrong we keep trying.
-        history.push({
-          iteration,
-          action: 'done',
-          succeeded: true,
-        });
-        continue;
-      }
-
+      // 4. Dispatch — validate against the allowed list FIRST so that a
+      // user who explicitly excludes `done` from `allowedActions` actually
+      // gets the exclusion they asked for. The default list does include
+      // `done`, so the usual behavior (loop re-verifies success check on
+      // the next iteration) is unchanged.
       if (!allowedActions.includes(decision.action)) {
         logger.warn(
           {
@@ -1042,6 +1043,17 @@ export class StepExecutor {
           action: decision.action,
           succeeded: false,
           error: `action "${decision.action}" is not in the allowed list: ${allowedActions.join(', ')}`,
+        });
+        continue;
+      }
+
+      if (decision.action === 'done') {
+        // Treat as a hint — the top of the next iteration re-runs the
+        // success check. If the model was wrong we keep trying.
+        history.push({
+          iteration,
+          action: 'done',
+          succeeded: true,
         });
         continue;
       }
@@ -1079,7 +1091,7 @@ export class StepExecutor {
     }
 
     throw new Error(
-      `aiscope step "${step.id}" exhausted the ${action.maxIterations}-iteration budget without reaching the goal "${action.goal}". Consider increasing maxIterations, giving a clearer goal, or replacing with explicit steps.`,
+      `aiscope step "${step.id}" exhausted the ${action.maxIterations}-iteration budget without reaching the goal "${resolvedGoal}". Consider increasing maxIterations, giving a clearer goal, or replacing with explicit steps.`,
     );
   }
 

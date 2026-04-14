@@ -160,12 +160,36 @@ ${truncateHtml(pageContext.html)}`;
   async evaluateCondition(query: ConditionQuery): Promise<ConditionEvaluation> {
     const { question, pageContext } = query;
 
-    const userMessage = `Page URL: ${pageContext.url}
+    const userText = `Page URL: ${pageContext.url}
 Page title: ${pageContext.title}
 HTML:
 ${truncateHtml(pageContext.html)}
 
 Question: ${question}`;
+
+    // When the caller passed a base64 screenshot (aiscope sets this via
+    // its `includeScreenshot` flag), send it as an image content block
+    // so questions about visual state ("is the cookie banner dismissed?")
+    // can actually use the pixels instead of guessing from HTML alone.
+    // Standard condition steps pass no screenshot and stay text-only.
+    const content: Array<
+      | { type: 'text'; text: string }
+      | {
+          type: 'image';
+          source: { type: 'base64'; media_type: 'image/png'; data: string };
+        }
+    > = [];
+    if (pageContext.screenshot) {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: pageContext.screenshot,
+        },
+      });
+    }
+    content.push({ type: 'text', text: userText });
 
     const t0 = Date.now();
     try {
@@ -173,10 +197,13 @@ Question: ${question}`;
         model: this.model,
         max_tokens: 1024,
         system: SYSTEM_PROMPTS.conditionEvaluator,
-        messages: [{ role: 'user', content: userMessage }],
+        messages: [{ role: 'user', content }],
       });
 
-      this.logCall('evaluateCondition', t0, response.usage, { question });
+      this.logCall('evaluateCondition', t0, response.usage, {
+        question,
+        withScreenshot: !!pageContext.screenshot,
+      });
 
       const text = response.content
         .filter((b) => b.type === 'text')
@@ -294,7 +321,6 @@ ${goal}
 
 ## Allowed actions
 ${allowedActions.join(', ')}
-(plus "done" — use when you believe the goal is already satisfied)
 
 ## Recent action history (oldest first)
 ${historyBlock}
