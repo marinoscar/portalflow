@@ -249,47 +249,92 @@ export class StepExecutor {
       { stepId: step.id, stepName: step.name, type: step.type },
       'step start',
     );
-    switch (step.type) {
-      case 'navigate':
-        await this.executeNavigate(step);
-        break;
-      case 'interact':
-        await this.executeInteract(step);
-        break;
-      case 'wait':
-        await this.executeWait(step);
-        break;
-      case 'extract':
-        await this.executeExtract(step);
-        break;
-      case 'tool_call':
-        await this.executeToolCall(step);
-        break;
-      case 'condition':
-        await this.executeCondition(step);
-        break;
-      case 'download':
-        await this.executeDownload(step);
-        break;
-      case 'loop':
-        await this.executeLoop(step);
-        break;
-      case 'call':
-        await this.executeCall(step);
-        break;
-      case 'goto':
-        await this.executeGoto(step);
-        break;
-      case 'aiscope':
-        await this.executeAiScope(step);
-        break;
-      default: {
-        const exhaustive: never = step.type;
-        throw new Error(`Unknown step type: ${String(exhaustive)}`);
+    const runBody = async (): Promise<void> => {
+      switch (step.type) {
+        case 'navigate':
+          await this.executeNavigate(step);
+          break;
+        case 'interact':
+          await this.executeInteract(step);
+          break;
+        case 'wait':
+          await this.executeWait(step);
+          break;
+        case 'extract':
+          await this.executeExtract(step);
+          break;
+        case 'tool_call':
+          await this.executeToolCall(step);
+          break;
+        case 'condition':
+          await this.executeCondition(step);
+          break;
+        case 'download':
+          await this.executeDownload(step);
+          break;
+        case 'loop':
+          await this.executeLoop(step);
+          break;
+        case 'call':
+          await this.executeCall(step);
+          break;
+        case 'goto':
+          await this.executeGoto(step);
+          break;
+        case 'aiscope':
+          await this.executeAiScope(step);
+          break;
+        default: {
+          const exhaustive: never = step.type;
+          throw new Error(`Unknown step type: ${String(exhaustive)}`);
+        }
       }
+
+      await this.validateStep(step);
+    };
+
+    await this.runWithStepTimeout(step, runBody);
+  }
+
+  /**
+   * Enforce `step.timeout` as a hard ceiling by racing the step body
+   * against a timer. Composite step types that carry their own internal
+   * budgets (`loop` via its iteration cap, `call` via the nested child
+   * steps' own timeouts, `aiscope` via `maxDurationSec`/`maxIterations`)
+   * are exempt — wrapping them here would silently cap them at the
+   * schema default of 30 seconds regardless of their declared budgets.
+   *
+   * The race cannot cancel the inner operation if the timer fires first;
+   * the underlying promise keeps running until it settles. That's
+   * acceptable because a step timeout is a hard failure — the run
+   * aborts (or retries / skips per `onFailure`) and the browser is
+   * reset / closed shortly after. The wrapper's job is to surface a
+   * clear error instead of letting the run hang forever.
+   */
+  private async runWithStepTimeout(step: Step, fn: () => Promise<void>): Promise<void> {
+    const EXEMPT: ReadonlyArray<Step['type']> = ['loop', 'call', 'aiscope'];
+    if (EXEMPT.includes(step.type) || !step.timeout || step.timeout <= 0) {
+      await fn();
+      return;
     }
 
-    await this.validateStep(step);
+    const timeoutMs = step.timeout;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(
+            `Step "${step.id}" (${step.type}) exceeded step timeout of ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+    });
+
+    try {
+      await Promise.race([fn(), timeoutPromise]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -616,6 +661,14 @@ export class StepExecutor {
   private async executeWait(step: Step): Promise<void> {
     const action = step.action as WaitAction;
 
+    // Effective timeout: prefer the action-level override, then the
+    // step-level `timeout` field (schema default 30000), then let
+    // PageService fall back to its own internal default. This is what
+    // the user intuitively expects when they write
+    // `"timeout": 60000` on a wait step without repeating it inside
+    // `action.timeout`.
+    const effectiveTimeout = action.timeout ?? step.timeout;
+
     switch (action.condition) {
       case 'selector': {
         const rawSelector = action.value ?? '';
@@ -623,12 +676,12 @@ export class StepExecutor {
           throw new Error(`Step "${step.id}": wait with condition "selector" requires a value.`);
         }
         const selector = this.context.resolveTemplate(rawSelector);
-        await this.pageService.waitForSelector(selector, action.timeout);
+        await this.pageService.waitForSelector(selector, effectiveTimeout);
         break;
       }
 
       case 'navigation':
-        await this.pageService.waitForNavigation(action.value, action.timeout);
+        await this.pageService.waitForNavigation(action.value, effectiveTimeout);
         break;
 
       case 'delay': {
@@ -643,7 +696,7 @@ export class StepExecutor {
       }
 
       case 'network_idle':
-        await this.pageService.waitForNetworkIdle(action.timeout);
+        await this.pageService.waitForNetworkIdle(effectiveTimeout);
         break;
 
       default: {
