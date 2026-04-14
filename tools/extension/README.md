@@ -295,6 +295,35 @@ The 2-second debounce after manual edits means rapid typing coalesces into a sin
 
 **Retention:** sessions keep the most recent 100 versions plus the pinned raw-recording entry. When the cap is exceeded, the oldest non-pinned version is dropped. For longer archival, export the session as a zip (covered in a later phase).
 
+### AI chat with approval
+
+The extension includes a conversational AI chat panel that sits below the Steps card. You type a request in plain English; the AI replies with either a clarification or a structured proposal you explicitly approve or reject.
+
+**What the AI sees:**
+
+- The full current automation JSON (including any edits you have already made)
+- Up to 3 of the most recent unique HTML snapshots from the session, capped at roughly 300 KB total
+- The last 10 chat messages for continuity
+- The new user message
+
+**Two response shapes:**
+
+1. **Clarification** — the AI answers a question in plain text. No changes are proposed; nothing to approve.
+2. **Proposal** — the AI explains its plan briefly, then includes a structured proposal card with:
+   - A 1-2 sentence summary
+   - A bullet list of the specific changes
+   - An **Approve** button that applies the new automation and commits it as an `ai-chat` version in history
+   - A **Reject** button that dismisses the proposal without touching the automation
+
+**Parse failure handling:** if the AI returns invalid JSON or a proposal whose new automation fails schema validation, the chat surfaces the error inline on the assistant message so you can retry with a different prompt rather than silently crashing.
+
+**Legacy "Improve Steps" button:** the existing one-shot AI buttons in the AI Assistant section still work. They continue to replace the automation in one step, but now also commit their output as `ai-improve-legacy` versions — so you can undo an unwanted Improve with Ctrl+Z just like any other change.
+
+**When to use which:**
+
+- Use the **chat** when you want to iterate (ask follow-up questions, nudge the model in a specific direction, review proposals before they land).
+- Use the **legacy buttons** when you want a fast one-shot rewrite and do not need to review anything.
+
 ### Selector cascade
 
 For each captured element, the recorder computes a `{ primary, fallbacks[] }` selector using seven strategies in priority order:
