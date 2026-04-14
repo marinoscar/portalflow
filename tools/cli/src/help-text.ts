@@ -478,3 +478,43 @@ export function settingsVideoHelpText(): string {
     ]),
   ]);
 }
+
+export function settingsLoggingHelpText(): string {
+  return assemble([
+    section('Description:', [
+      'View or update logging defaults for automation runs. Running with no',
+      'flags prints the current logging configuration. Use --level to set',
+      'verbosity, --file to fan logs out to a file, --pretty / --no-pretty',
+      'to toggle stdout formatting, and --redact / --no-redact to control',
+      'secret redaction.',
+      '',
+      'Precedence when an automation runs (highest to lowest):',
+      '  1. CLI flag         --log-level <level>',
+      '  2. Environment var  LOG_LEVEL',
+      '  3. This config      logging.level',
+      '  4. Default          info',
+      '',
+      'Valid levels: trace, debug, info, warn, error, fatal, silent.',
+      'Use `debug` for troubleshooting — it captures per-step durations,',
+      'template resolutions, extracted values, LLM latency, token usage,',
+      'and browser page lifecycle events. `trace` adds the most verbose',
+      'internal detail.',
+    ]),
+    section('Examples:', [
+      'portalflow settings logging                                Print current logging config',
+      'portalflow settings logging --level debug                  Set level to debug',
+      'portalflow settings logging --file ~/.portalflow/run.log   Enable file logging',
+      'portalflow settings logging --no-file                      Disable file logging',
+      'portalflow settings logging --no-redact                    Stop redacting secrets (caution)',
+      'portalflow settings logging --no-pretty                    Emit raw JSON to stdout',
+    ]),
+    section('Exit codes:', [
+      '0   Logging config updated or printed',
+      '1   Invalid --level value',
+    ]),
+    section('See also:', [
+      'portalflow run --log-level debug      Override level for a single run',
+      'LOG_LEVEL=debug portalflow run ...    Set level via env var',
+    ]),
+  ]);
+}

@@ -4,8 +4,9 @@ import { ConfigService } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from '../runner/paths.js';
 import { runSettingsPathsFlow } from './flows/settings-paths.js';
 import { runSettingsVideoFlow } from './flows/settings-video.js';
+import { runSettingsLoggingFlow } from './flows/settings-logging.js';
 
-type SettingsAction = 'view' | 'paths' | 'video' | 'reset' | 'exit';
+type SettingsAction = 'view' | 'paths' | 'video' | 'logging' | 'reset' | 'exit';
 
 export interface SettingsTuiOptions {
   nested?: boolean;
@@ -40,9 +41,14 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
           hint: 'enable/disable, resolution',
         },
         {
+          value: 'logging' as SettingsAction,
+          label: 'Configure logging',
+          hint: 'level, file output, pretty print, secret redaction',
+        },
+        {
           value: 'reset' as SettingsAction,
           label: 'Reset to defaults',
-          hint: pc.yellow('removes paths and video from config'),
+          hint: pc.yellow('removes paths, video, and logging from config'),
         },
         {
           value: 'exit' as SettingsAction,
@@ -61,6 +67,7 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         const cfg = await configService.load();
         const paths = resolvePaths(cfg);
         const video = resolveVideo(cfg);
+        const logging = cfg.logging ?? {};
         p.note(
           [
             pc.dim('Storage paths:'),
@@ -73,6 +80,12 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
             `  Enabled: ${video.enabled ? pc.green('yes') : pc.dim('no')}`,
             `  Width:   ${video.width}`,
             `  Height:  ${video.height}`,
+            '',
+            pc.dim('Logging:'),
+            `  Level:          ${logging.level ?? 'info (default)'}`,
+            `  File:           ${logging.file ?? pc.dim('(none — stdout only)')}`,
+            `  Pretty:         ${logging.pretty ?? true ? 'yes' : 'no'}`,
+            `  Redact secrets: ${logging.redactSecrets ?? true ? 'yes' : 'no'}`,
           ].join('\n'),
           'Current Settings',
         );
@@ -87,9 +100,13 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         await runSettingsVideoFlow(configService);
         break;
 
+      case 'logging':
+        await runSettingsLoggingFlow(configService);
+        break;
+
       case 'reset': {
         const confirm = await p.confirm({
-          message: 'Remove paths and video sections from config (reset to built-in defaults)?',
+          message: 'Remove paths, video, and logging sections from config (reset to built-in defaults)?',
           initialValue: false,
         });
         if (p.isCancel(confirm) || !confirm) {
@@ -99,8 +116,9 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         const cfg = await configService.load();
         delete cfg.paths;
         delete cfg.video;
+        delete cfg.logging;
         await configService.save(cfg);
-        p.log.success('Paths and video settings reset to built-in defaults');
+        p.log.success('Paths, video, and logging settings reset to built-in defaults');
         break;
       }
 
