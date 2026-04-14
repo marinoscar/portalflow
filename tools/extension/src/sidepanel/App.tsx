@@ -636,7 +636,7 @@ export function App() {
                     beginEdit();
                     dispatch({ type: 'MOVE_STEP', from: idx, to: idx + 1 });
                   }}
-                  onConvertToVault={(vaultKey, inputName) => {
+                  onConvertToVault={(secretName, inputName) => {
                     beginEdit();
                     const existing = automation.inputs.find((i) => i.name === inputName);
                     if (!existing) {
@@ -647,37 +647,41 @@ export function App() {
                           type: 'secret',
                           required: true,
                           source: 'vaultcli',
-                          value: vaultKey,
-                          description: 'Retrieved from vaultcli',
+                          value: secretName,
+                          description: 'Retrieved from vaultcli (multi-field)',
                         },
                       });
                     }
+                    // Default the type step to the _password field of the
+                    // exploded secret — users can swap to _username, etc.
                     dispatch({
                       type: 'UPDATE_STEP',
                       index: idx,
                       changes: {
                         action: {
                           interaction: 'type',
-                          inputRef: inputName,
+                          inputRef: `${inputName}_password`,
                         } as Step['action'],
                       },
                     });
                   }}
-                  onInsertOtpBefore={(sender, pattern) => {
+                  onInsertOtpBefore={(sender, timeoutSeconds) => {
                     beginEdit();
+                    const waitArgs: Record<string, string> = { timeout: timeoutSeconds };
+                    if (sender) waitArgs['sender'] = sender;
                     const newToolStep: Step = {
                       id: `step-${idx + 1}`,
                       name: 'Retrieve OTP via smscli',
                       type: 'tool_call',
                       action: {
                         tool: 'smscli',
-                        command: 'get-otp',
-                        args: { sender, pattern },
+                        command: 'otp-wait',
+                        args: waitArgs,
                         outputName: 'otpCode',
                       },
                       onFailure: 'abort',
-                      maxRetries: 1,
-                      timeout: 120000,
+                      maxRetries: 0,
+                      timeout: 180000,
                     };
                     dispatch({
                       type: 'INSERT_STEP',

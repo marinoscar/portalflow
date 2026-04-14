@@ -119,7 +119,43 @@ export function App() {
       <h1>PortalFlow Recorder · Settings</h1>
 
       <section className="section">
-        <h2>{editingName ? `Edit "${editingName}"` : 'Add a provider'}</h2>
+        <h2>Configured providers</h2>
+        {configuredProviders.length === 0 ? (
+          <p className="muted">No providers yet. Add one below to get started.</p>
+        ) : (
+          <ul className="provider-list">
+            {configuredProviders.map(([name, provider]) => (
+              <li key={name} className="provider-card">
+                <div className="provider-header">
+                  <label className="radio-label">
+                    <input
+                      type="radio"
+                      name="activeProvider"
+                      checked={config.activeProvider === name}
+                      onChange={() => handleActivate(name)}
+                    />
+                    <strong>{name}</strong>
+                    {config.activeProvider === name && <span className="active-tag">active</span>}
+                  </label>
+                  <div className="provider-actions">
+                    <button className="btn-small" onClick={() => handleEdit(name)}>Edit</button>
+                    <button className="btn-small btn-danger" onClick={() => handleRemove(name)}>Remove</button>
+                  </div>
+                </div>
+                <div className="provider-details">
+                  <span><strong>Kind:</strong> {provider.kind}</span>
+                  <span><strong>Model:</strong> {provider.model ?? '—'}</span>
+                  {provider.baseUrl && <span><strong>Base URL:</strong> {provider.baseUrl}</span>}
+                  <span><strong>API key:</strong> {maskApiKey(provider.apiKey)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="section">
+        <h2>{editingName ? `Edit "${editingName}"` : 'Add a new provider'}</h2>
 
         {!editingName && (
           <div className="field">
@@ -220,42 +256,6 @@ export function App() {
             </button>
           )}
         </div>
-      </section>
-
-      <section className="section">
-        <h2>Configured providers</h2>
-        {configuredProviders.length === 0 ? (
-          <p className="muted">No providers yet. Add one above to get started.</p>
-        ) : (
-          <ul className="provider-list">
-            {configuredProviders.map(([name, provider]) => (
-              <li key={name} className="provider-card">
-                <div className="provider-header">
-                  <label className="radio-label">
-                    <input
-                      type="radio"
-                      name="activeProvider"
-                      checked={config.activeProvider === name}
-                      onChange={() => handleActivate(name)}
-                    />
-                    <strong>{name}</strong>
-                    {config.activeProvider === name && <span className="active-tag">active</span>}
-                  </label>
-                  <div className="provider-actions">
-                    <button className="btn-small" onClick={() => handleEdit(name)}>Edit</button>
-                    <button className="btn-small btn-danger" onClick={() => handleRemove(name)}>Remove</button>
-                  </div>
-                </div>
-                <div className="provider-details">
-                  <span><strong>Kind:</strong> {provider.kind}</span>
-                  <span><strong>Model:</strong> {provider.model ?? '—'}</span>
-                  {provider.baseUrl && <span><strong>Base URL:</strong> {provider.baseUrl}</span>}
-                  <span><strong>API key:</strong> {maskApiKey(provider.apiKey)}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
     </div>
   );

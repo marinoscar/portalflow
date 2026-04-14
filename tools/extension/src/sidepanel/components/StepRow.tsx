@@ -19,8 +19,8 @@ interface Props {
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
-  onConvertToVault?: (vaultKey: string, inputName: string) => void;
-  onInsertOtpBefore?: (sender: string, pattern: string) => void;
+  onConvertToVault?: (secretName: string, inputName: string) => void;
+  onInsertOtpBefore?: (sender: string, timeoutSeconds: string) => void;
 }
 
 export function StepRow({
@@ -96,8 +96,8 @@ function StepEditor({
 }: {
   step: Step;
   onUpdate: (changes: Partial<Step>) => void;
-  onConvertToVault?: (vaultKey: string, inputName: string) => void;
-  onInsertOtpBefore?: (sender: string, pattern: string) => void;
+  onConvertToVault?: (secretName: string, inputName: string) => void;
+  onInsertOtpBefore?: (sender: string, timeoutSeconds: string) => void;
 }) {
   const [showVaultModal, setShowVaultModal] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -145,8 +145,8 @@ function StepEditor({
 
       {showOtpModal && onInsertOtpBefore && (
         <SmsOtpModal
-          onConfirm={({ sender, pattern }) => {
-            onInsertOtpBefore(sender, pattern);
+          onConfirm={({ sender, timeout }) => {
+            onInsertOtpBefore(sender, timeout);
             setShowOtpModal(false);
           }}
           onCancel={() => setShowOtpModal(false)}
@@ -296,38 +296,184 @@ function ToolCallEditor({
   action: ToolCallAction;
   onUpdate: (changes: Partial<Step>) => void;
 }) {
+  const updateArg = (key: string, value: string) => {
+    const nextArgs = { ...(action.args ?? {}) };
+    if (value === '' || value === undefined) {
+      delete nextArgs[key];
+    } else {
+      nextArgs[key] = value;
+    }
+    onUpdate({ action: { ...action, args: nextArgs } });
+  };
+
+  const toolSelect = (
+    <label className="field">
+      <span>Tool</span>
+      <select
+        value={action.tool}
+        onChange={(e) => {
+          const nextTool = e.target.value as ToolCallAction['tool'];
+          const defaults: Partial<ToolCallAction> =
+            nextTool === 'vaultcli'
+              ? { tool: nextTool, command: 'secrets-get', args: {} }
+              : nextTool === 'smscli'
+                ? { tool: nextTool, command: 'otp-wait', args: {} }
+                : { tool: nextTool, command: '', args: {} };
+          onUpdate({ action: { ...action, ...defaults } });
+        }}
+      >
+        <option value="smscli">smscli</option>
+        <option value="vaultcli">vaultcli</option>
+      </select>
+    </label>
+  );
+
+  const outputNameField = (placeholder: string) => (
+    <label className="field">
+      <span>Output name</span>
+      <input
+        type="text"
+        value={action.outputName ?? ''}
+        onChange={(e) => onUpdate({ action: { ...action, outputName: e.target.value } })}
+        placeholder={placeholder}
+      />
+    </label>
+  );
+
+  if (action.tool === 'vaultcli') {
+    const args = action.args ?? {};
+    const outputName = (action.outputName ?? 'creds').trim() || 'creds';
+    return (
+      <>
+        {toolSelect}
+        <label className="field">
+          <span>Command</span>
+          <select
+            value={action.command || 'secrets-get'}
+            onChange={(e) => onUpdate({ action: { ...action, command: e.target.value } })}
+          >
+            <option value="secrets-get">secrets-get</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Secret name</span>
+          <input
+            type="text"
+            value={args['name'] ?? ''}
+            onChange={(e) => updateArg('name', e.target.value)}
+            placeholder="att"
+          />
+        </label>
+        <label className="field">
+          <span>Field (optional)</span>
+          <input
+            type="text"
+            value={args['field'] ?? ''}
+            onChange={(e) => updateArg('field', e.target.value)}
+            placeholder="password — leave empty to expose all fields"
+          />
+        </label>
+        {outputNameField('creds')}
+        <p className="hint-small">
+          Omit <code>field</code> to expose every key in the secret as{' '}
+          <code>{`{{${outputName}_<field>}}`}</code> (e.g.{' '}
+          <code>{`{{${outputName}_username}}`}</code>,{' '}
+          <code>{`{{${outputName}_password}}`}</code>).
+        </p>
+      </>
+    );
+  }
+
+  if (action.tool === 'smscli') {
+    const args = action.args ?? {};
+    const command = action.command || 'otp-wait';
+    const isWait = command === 'otp-wait';
+    const isLatest = command === 'otp-latest';
+    const isExtract = command === 'otp-extract';
+    return (
+      <>
+        {toolSelect}
+        <label className="field">
+          <span>Command</span>
+          <select
+            value={command}
+            onChange={(e) => onUpdate({ action: { ...action, command: e.target.value } })}
+          >
+            <option value="otp-wait">otp-wait (wait for a new SMS)</option>
+            <option value="otp-latest">otp-latest (most recent OTP)</option>
+            <option value="otp-extract">otp-extract (from literal message)</option>
+          </select>
+        </label>
+        {(isWait || isLatest) && (
+          <>
+            <label className="field">
+              <span>Sender (optional)</span>
+              <input
+                type="text"
+                value={args['sender'] ?? ''}
+                onChange={(e) => updateArg('sender', e.target.value)}
+                placeholder="MyBank"
+              />
+            </label>
+            <label className="field">
+              <span>Number (optional)</span>
+              <input
+                type="text"
+                value={args['number'] ?? ''}
+                onChange={(e) => updateArg('number', e.target.value)}
+                placeholder="+15551234567"
+              />
+            </label>
+          </>
+        )}
+        {isWait && (
+          <>
+            <label className="field">
+              <span>Timeout (seconds)</span>
+              <input
+                type="number"
+                value={args['timeout'] ?? '60'}
+                onChange={(e) => updateArg('timeout', e.target.value)}
+                placeholder="60"
+                min={1}
+              />
+            </label>
+            <p className="hint-small">
+              On timeout, the runtime automatically retries <code>smscli otp latest</code> with
+              the same filters. You don&apos;t need a separate fallback step.
+            </p>
+          </>
+        )}
+        {isExtract && (
+          <label className="field">
+            <span>Message body</span>
+            <textarea
+              value={args['message'] ?? ''}
+              onChange={(e) => updateArg('message', e.target.value)}
+              placeholder="Your verification code is 483921"
+              rows={3}
+            />
+          </label>
+        )}
+        {outputNameField('otpCode')}
+      </>
+    );
+  }
+
+  // Generic fallback editor for any future tool.
   return (
     <>
-      <label className="field">
-        <span>Tool</span>
-        <select
-          value={action.tool}
-          onChange={(e) =>
-            onUpdate({ action: { ...action, tool: e.target.value as ToolCallAction['tool'] } })
-          }
-        >
-          <option value="smscli">smscli</option>
-          <option value="vaultcli">vaultcli</option>
-        </select>
-      </label>
+      {toolSelect}
       <label className="field">
         <span>Command</span>
         <input
           type="text"
           value={action.command}
           onChange={(e) => onUpdate({ action: { ...action, command: e.target.value } })}
-          placeholder="get-otp"
+          placeholder="command"
         />
       </label>
-      <label className="field">
-        <span>Output name</span>
-        <input
-          type="text"
-          value={action.outputName ?? ''}
-          onChange={(e) => onUpdate({ action: { ...action, outputName: e.target.value } })}
-          placeholder="otpCode"
-        />
-      </label>
+      {outputNameField('result')}
     </>
   );
 }

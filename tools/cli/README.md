@@ -869,7 +869,17 @@ The design is a hybrid model: the JSON provides deterministic process guidance w
 
 ### smscli (OTP retrieval)
 
-`smscli` waits for and extracts OTP codes during MFA flows. Use it in a `tool_call` step. The captured value is stored in the run context under `outputName` and referenced by later steps via `inputRef`.
+`smscli` waits for and extracts OTP codes during MFA flows. Use it in a `tool_call` step.
+The captured value is stored in the run context under `outputName` and referenced by later
+steps via `inputRef`.
+
+Commands:
+
+| Command       | Underlying CLI                                              |
+|---------------|-------------------------------------------------------------|
+| `otp-wait`    | `smscli otp wait --json [--timeout S --sender X ...]` — **auto-falls back to `otp-latest` on `OTP_TIMEOUT`**. |
+| `otp-latest`  | `smscli otp latest --json [--sender X ...]`                 |
+| `otp-extract` | `smscli otp extract --message "<body>" --json`              |
 
 ```json
 {
@@ -878,38 +888,53 @@ The design is a hybrid model: the JSON provides deterministic process guidance w
   "type": "tool_call",
   "action": {
     "tool": "smscli",
-    "command": "get-otp",
-    "args": { "sender": "ExampleCarrier", "pattern": "\\d{6}" },
+    "command": "otp-wait",
+    "args": { "sender": "ExampleCarrier", "timeout": "60" },
     "outputName": "otpCode"
   },
   "onFailure": "abort",
-  "maxRetries": 2,
-  "timeout": 60000
+  "maxRetries": 0,
+  "timeout": 180000
 }
 ```
 
-A subsequent interact step can then use `"inputRef": "otpCode"` to type the code into the OTP field.
+On `OTP_TIMEOUT`, the adapter automatically retries `smscli otp latest` with the same filter
+args — no extra fallback step is needed. A subsequent interact step can then use
+`"inputRef": "otpCode"` to type the code into the OTP field.
 
-See the [smscli README](https://github.com/marinoscar/sink/blob/main/tools/smscli/README.md) for setup instructions.
+See the [smscli README](https://github.com/marinoscar/sink/blob/main/tools/smscli/README.md)
+for setup instructions, and §6.5 of `docs/AUTOMATION-JSON-SPEC.md` for the full command/args
+reference.
 
 ### vaultcli (secrets)
 
-`vaultcli` pulls credentials at runtime so that sensitive values are never embedded in automation JSON. Reference it as an input `source`:
+`vaultcli` pulls credentials at runtime so that sensitive values are never embedded in
+automation JSON. Vault secrets contain multiple fields (typically `username`, `password`,
+`url`) — the runner exposes every field as its own context variable named
+`<inputName>_<field>`.
+
+Reference it as an input `source`:
 
 ```json
 {
-  "name": "password",
+  "name": "creds",
   "type": "secret",
   "required": true,
   "source": "vaultcli",
-  "value": "carrier/phone-account",
-  "description": "Account password from vault"
+  "value": "att",
+  "description": "Portal credentials from vault (username + password + url)"
 }
 ```
 
-The resolved secret is available as `password` throughout the automation.
+After resolution, `{{creds_username}}`, `{{creds_password}}`, `{{creds_url}}` are all
+available as context variables. Use them via `inputRef: "creds_password"` in type steps.
 
-See the [vaultcli README](https://github.com/marinoscar/vault/blob/main/tools/vaultcli/README.md) for setup instructions.
+Or invoke it as a mid-run `tool_call` step with `command: "secrets-get"` (optionally passing
+`field: "<one-key>"` for single-field access). See §6.5 and §10.2 of
+`docs/AUTOMATION-JSON-SPEC.md` for the full reference.
+
+See the [vaultcli README](https://github.com/marinoscar/vault/blob/main/tools/vaultcli/README.md)
+for setup instructions.
 
 ---
 

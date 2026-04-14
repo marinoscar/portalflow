@@ -548,6 +548,19 @@ export class StepExecutor {
     if (action.outputName) {
       this.context.addOutput(action.outputName, result.output);
       this.context.setVariable(action.outputName, result.output);
+      if (result.fields) {
+        for (const [k, v] of Object.entries(result.fields)) {
+          this.context.setVariable(`${action.outputName}_${k}`, v);
+        }
+        this.context.logger.debug(
+          {
+            stepId: step.id,
+            outputName: action.outputName,
+            explodedFields: Object.keys(result.fields),
+          },
+          'Tool returned multi-field result; exploded into context variables',
+        );
+      }
       this.context.logger.debug(
         { stepId: step.id, outputName: action.outputName },
         'Tool output stored in context',
