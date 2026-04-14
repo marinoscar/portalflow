@@ -27,6 +27,15 @@ export interface RunOptions {
   inputs?: Map<string, string>;
   /** CLI-supplied log level override (--log-level flag). */
   logLevel?: string;
+  // ---- Browser profile overrides (--browser-* flags) ----
+  /** "isolated" | "persistent" — overrides config.browser.mode for this run. */
+  browserMode?: 'isolated' | 'persistent';
+  /** Channel override (e.g. "chrome", "msedge"). */
+  browserChannel?: string;
+  /** User data directory override. */
+  browserUserDataDir?: string;
+  /** Sub-profile name override (e.g. "Default", "Profile 1"). */
+  browserProfileDirectory?: string;
 }
 
 export class AutomationRunner {
@@ -229,6 +238,31 @@ export class AutomationRunner {
 
     const headless = options?.headless ?? settings?.headless ?? false;
 
+    // Resolve effective browser config. Precedence (highest to lowest):
+    //   1. CLI flags  (--browser-mode / --browser-channel / etc.)
+    //   2. config file `browser` section
+    //   3. defaults (mode = "isolated", everything else unset)
+    const storedBrowser = userConfig.browser ?? {};
+    const browserMode =
+      options?.browserMode ?? storedBrowser.mode ?? 'isolated';
+    const browserChannel =
+      (options?.browserChannel as typeof storedBrowser.channel | undefined) ??
+      storedBrowser.channel;
+    const browserUserDataDir =
+      options?.browserUserDataDir ?? storedBrowser.userDataDir;
+    const browserProfileDirectory =
+      options?.browserProfileDirectory ?? storedBrowser.profileDirectory;
+
+    logger.info(
+      {
+        mode: browserMode,
+        channel: browserChannel ?? 'chromium',
+        userDataDir: browserUserDataDir ?? null,
+        profileDirectory: browserProfileDirectory ?? null,
+      },
+      'Resolved browser config',
+    );
+
     await browserService.launch({
       headless,
       viewport: settings?.viewport,
@@ -238,6 +272,10 @@ export class AutomationRunner {
       downloadDir: effectivePaths.downloads,
       recordVideo: effectiveVideo.enabled,
       videoSize: { width: effectiveVideo.width, height: effectiveVideo.height },
+      mode: browserMode,
+      channel: browserChannel,
+      userDataDir: browserUserDataDir,
+      profileDirectory: browserProfileDirectory,
     });
 
     logger.info({ headless }, 'Browser launched');

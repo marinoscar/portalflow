@@ -3500,6 +3500,34 @@ Fixes:
    adding a `wait` with `condition: "delay"` and `value: "5000"` before the failing step to
    pause and inspect the page state.
 
+8. **Switch to a real browser profile when sites fight you.** Many real-world portals
+   fingerprint plain Chromium contexts and respond very differently to a returning human
+   user with cookies + extensions in place. PortalFlow supports launching against your
+   real Chrome / Brave / Chromium / Edge profile via `mode: "persistent"`. When a flow
+   that works in your normal browser fails in PortalFlow with selector drift, captchas,
+   or login prompts that shouldn't be there, switch the runtime to persistent mode:
+
+   ```bash
+   # Interactive — discovers profiles and lets you pick
+   portalflow settings    # → Configure browser profile
+
+   # Or non-interactively
+   portalflow settings browser --list
+   portalflow settings browser \
+     --mode persistent \
+     --channel chrome \
+     --user-data-dir ~/.config/google-chrome \
+     --profile-directory "Default"
+
+   # Override per-run
+   portalflow run my-automation.json --browser-mode persistent
+   ```
+
+   Note: a Chrome user data directory cannot be opened by two processes at the same
+   time. Close your normal browser for that profile before each run, or reserve a
+   profile dedicated to automation. See "Browser Profile Configuration" in
+   `tools/cli/README.md` for the full guide.
+
 ---
 
 ## 20. Schema Reference Appendix
