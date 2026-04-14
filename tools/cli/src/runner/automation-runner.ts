@@ -182,13 +182,17 @@ export class AutomationRunner {
     }
 
     // ------------------------------------------------------------------
-    // 6. Initialize LlmService
+    // 6. Initialize LlmService (passes the run logger through so provider
+    //    calls are logged with latency + token usage at debug level)
     // ------------------------------------------------------------------
-    const llmService = new LlmService();
+    const llmService = new LlmService(logger);
     try {
       await llmService.initialize();
     } catch (err) {
-      logger.warn({ err: String(err) }, 'LLM service initialization failed — AI element resolution will not be available');
+      logger.warn(
+        { err },
+        'LLM service initialization failed — AI element resolution will not be available',
+      );
     }
 
     // ------------------------------------------------------------------

@@ -15,7 +15,6 @@ import type {
 import { SYSTEM_PROMPTS } from './prompts.js';
 
 const MAX_HTML_CHARS = 50_000;
-const logger = pino({ level: 'info' });
 
 function truncateHtml(html: string): string {
   if (html.length <= MAX_HTML_CHARS) return html;
@@ -36,10 +35,37 @@ export class AnthropicProvider implements LlmProvider {
   readonly name = 'anthropic';
   private readonly client: Anthropic;
   private readonly model: string;
+  private readonly logger: pino.Logger;
 
-  constructor(config: LlmProviderConfig) {
+  constructor(config: LlmProviderConfig, logger?: pino.Logger) {
     this.client = new Anthropic({ apiKey: config.apiKey });
     this.model = config.model;
+    this.logger = logger ?? pino({ level: 'silent' });
+  }
+
+  /**
+   * Log a structured entry for an LLM call. Called from within each
+   * operation once the SDK response is in hand so we can capture
+   * latency AND token usage in a single log line.
+   */
+  private logCall(
+    operation: string,
+    startTs: number,
+    usage: { input_tokens?: number; output_tokens?: number } | undefined,
+    extra?: Record<string, unknown>,
+  ): void {
+    this.logger.debug(
+      {
+        provider: 'anthropic',
+        model: this.model,
+        operation,
+        latencyMs: Date.now() - startTs,
+        inputTokens: usage?.input_tokens ?? null,
+        outputTokens: usage?.output_tokens ?? null,
+        ...extra,
+      },
+      'llm call',
+    );
   }
 
   async findElement(query: ElementQuery): Promise<ElementResult> {
@@ -56,12 +82,18 @@ ${truncateHtml(pageContext.html)}
 
 Find this element: ${description}${failedNote}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.messages.create({
         model: this.model,
         max_tokens: 512,
         system: SYSTEM_PROMPTS.elementFinder,
         messages: [{ role: 'user', content: userMessage }],
+      });
+
+      this.logCall('findElement', t0, response.usage, {
+        description,
+        failedSelectorCount: failedSelectors?.length ?? 0,
       });
 
       const text = response.content
@@ -71,7 +103,10 @@ Find this element: ${description}${failedNote}`;
 
       return parseJsonResponse<ElementResult>(text, 'findElement');
     } catch (err) {
-      logger.error({ err, description }, 'AnthropicProvider.findElement failed');
+      this.logger.error(
+        { err, description, operation: 'findElement', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.findElement failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -90,12 +125,19 @@ Max items: ${maxItems}${existingNote}
 Page HTML (truncated):
 ${truncateHtml(pageContext.html)}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.messages.create({
         model: this.model,
         max_tokens: 2048,
         system: SYSTEM_PROMPTS.itemsFinder,
         messages: [{ role: 'user', content: userMessage }],
+      });
+
+      this.logCall('findItems', t0, response.usage, {
+        description,
+        maxItems,
+        order,
       });
 
       const text = response.content
@@ -105,7 +147,10 @@ ${truncateHtml(pageContext.html)}`;
 
       return parseJsonResponse<ItemsResult>(text, 'findItems');
     } catch (err) {
-      logger.error({ err, description }, 'AnthropicProvider.findItems failed');
+      this.logger.error(
+        { err, description, operation: 'findItems', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.findItems failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -120,6 +165,7 @@ ${truncateHtml(pageContext.html)}
 
 Question: ${question}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.messages.create({
         model: this.model,
@@ -128,6 +174,8 @@ Question: ${question}`;
         messages: [{ role: 'user', content: userMessage }],
       });
 
+      this.logCall('evaluateCondition', t0, response.usage, { question });
+
       const text = response.content
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)
@@ -135,7 +183,10 @@ Question: ${question}`;
 
       return parseJsonResponse<ConditionEvaluation>(text, 'evaluateCondition');
     } catch (err) {
-      logger.error({ err, question }, 'AnthropicProvider.evaluateCondition failed');
+      this.logger.error(
+        { err, question, operation: 'evaluateCondition', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.evaluateCondition failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -154,6 +205,7 @@ Page title: ${pageContext.title}
 HTML:
 ${truncateHtml(pageContext.html)}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.messages.create({
         model: this.model,
@@ -162,6 +214,8 @@ ${truncateHtml(pageContext.html)}`;
         messages: [{ role: 'user', content: userMessage }],
       });
 
+      this.logCall('decideAction', t0, response.usage, { stepDescription });
+
       const text = response.content
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)
@@ -169,7 +223,10 @@ ${truncateHtml(pageContext.html)}`;
 
       return parseJsonResponse<ActionDecision>(text, 'decideAction');
     } catch (err) {
-      logger.error({ err, stepDescription }, 'AnthropicProvider.decideAction failed');
+      this.logger.error(
+        { err, stepDescription, operation: 'decideAction', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.decideAction failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -182,6 +239,7 @@ ${truncateHtml(pageContext.html)}
 
 Question: ${question}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.messages.create({
         model: this.model,
@@ -190,12 +248,17 @@ Question: ${question}`;
         messages: [{ role: 'user', content: userMessage }],
       });
 
+      this.logCall('interpretPage', t0, response.usage, { question });
+
       return response.content
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)
         .join('');
     } catch (err) {
-      logger.error({ err, question }, 'AnthropicProvider.interpretPage failed');
+      this.logger.error(
+        { err, question, operation: 'interpretPage', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.interpretPage failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -209,6 +272,7 @@ ${truncateHtml(pageContext.html)}
 Extract data matching this schema:
 ${schema}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.messages.create({
         model: this.model,
@@ -217,6 +281,8 @@ ${schema}`;
         messages: [{ role: 'user', content: userMessage }],
       });
 
+      this.logCall('extractData', t0, response.usage);
+
       const text = response.content
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)
@@ -224,7 +290,10 @@ ${schema}`;
 
       return parseJsonResponse<unknown>(text, 'extractData');
     } catch (err) {
-      logger.error({ err }, 'AnthropicProvider.extractData failed');
+      this.logger.error(
+        { err, operation: 'extractData', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.extractData failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
