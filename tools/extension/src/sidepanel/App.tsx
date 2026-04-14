@@ -458,10 +458,22 @@ export function App() {
               onUpdateMetadata={(changes) => {
                 beginEdit();
                 dispatch({ type: 'UPDATE_METADATA', changes });
+                // Flush the pending auto-commit and record this as an
+                // ai-improve-legacy version so it's visible in history.
+                dispatch({
+                  type: 'COMMIT_VERSION',
+                  author: 'ai-improve-legacy',
+                  message: 'AI polished metadata',
+                });
               }}
               onReplaceSteps={(steps) => {
                 beginEdit();
                 dispatch({ type: 'REPLACE_STEPS', steps });
+                dispatch({
+                  type: 'COMMIT_VERSION',
+                  author: 'ai-improve-legacy',
+                  message: 'AI improved steps',
+                });
               }}
             />
             <MetadataForm
