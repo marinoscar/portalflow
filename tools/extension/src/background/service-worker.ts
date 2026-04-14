@@ -1,4 +1,12 @@
-import { loadSession, saveSession, updateSession } from '../storage/session.storage';
+import {
+  archiveCurrentSession,
+  deleteArchivedSession,
+  loadArchive,
+  loadSession,
+  restoreArchivedSession,
+  saveSession,
+  updateSession,
+} from '../storage/session.storage';
 import type { Message } from '../shared/messaging';
 import type { HtmlSnapshot, NavigateEvent, RawEvent, RecordingSession } from '../shared/types';
 import { LlmService } from '../llm/llm.service';
@@ -92,7 +100,9 @@ async function resumeRecording(): Promise<RecordingSession | null> {
 }
 
 async function clearSession(): Promise<void> {
-  await saveSession(null);
+  // Archive the current session (if it has any content worth keeping)
+  // before wiping the active slot. Empty scaffolding sessions are dropped.
+  await archiveCurrentSession();
   await broadcastSession(null);
 }
 
@@ -180,6 +190,24 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       case 'CLEAR_SESSION': {
         await clearSession();
         sendResponse({ type: 'SESSION_STATUS_RESPONSE', session: null });
+        return;
+      }
+      case 'LIST_ARCHIVED_SESSIONS': {
+        const sessions = await loadArchive();
+        sendResponse({ type: 'ARCHIVED_SESSIONS_RESPONSE', sessions });
+        return;
+      }
+      case 'DELETE_ARCHIVED_SESSION': {
+        const sessions = await deleteArchivedSession(msg.sessionId);
+        sendResponse({ type: 'ARCHIVED_SESSIONS_RESPONSE', sessions });
+        return;
+      }
+      case 'RESTORE_ARCHIVED_SESSION': {
+        const session = await restoreArchivedSession(msg.sessionId);
+        if (session) {
+          await broadcastSession(session);
+        }
+        sendResponse({ type: 'SESSION_STATUS_RESPONSE', session });
         return;
       }
       case 'RECORDED_EVENT': {
