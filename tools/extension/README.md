@@ -352,6 +352,21 @@ If you attempt to import while a recording is in progress, a confirmation dialog
 
 **Format reference:** see [`docs/EXTENSION-SESSION-FORMAT.md`](../../docs/EXTENSION-SESSION-FORMAT.md) for the full archive layout, the `manifest.json` schema, and round-trip guarantees.
 
+### Keyboard shortcuts
+
+The side panel supports these shortcuts:
+
+| Shortcut              | Action                                                        |
+|-----------------------|---------------------------------------------------------------|
+| `Ctrl+Z` / `Cmd+Z`    | Undo — walk back one version in history.                      |
+| `Ctrl+Shift+Z` / `Cmd+Shift+Z` | Redo — walk forward one version.                     |
+| `Ctrl+Enter` / `Cmd+Enter` | Send the current chat message (when the chat input is focused). |
+| `Escape`              | Close the version history drawer when it is open.            |
+
+Undo/redo automatically yield to form controls: if your keyboard focus is inside a text input or textarea, the browser's native text undo takes precedence, so you can undo typing without clobbering the automation history.
+
+All transient actions (undo, redo, checkout, revert, approve, reject, import success/failure) show a 3-second toast in the bottom-right corner. Toasts are announced via `role="status"` + `aria-live="polite"` for screen readers.
+
 ### Selector cascade
 
 For each captured element, the recorder computes a `{ primary, fallbacks[] }` selector using seven strategies in priority order:
