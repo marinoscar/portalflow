@@ -1,3 +1,4 @@
+import type pino from 'pino';
 import { ConfigService } from '../config/config.service.js';
 import { AnthropicProvider } from './anthropic.provider.js';
 import { OpenAiProvider } from './openai.provider.js';
@@ -20,6 +21,11 @@ const OPENAI_DEFAULT_MODEL = 'gpt-4o';
 
 export class LlmService {
   private provider: LlmProvider | null = null;
+  private logger?: pino.Logger;
+
+  constructor(logger?: pino.Logger) {
+    this.logger = logger;
+  }
 
   async initialize(): Promise<void> {
     const config = new ConfigService();
@@ -46,7 +52,7 @@ export class LlmService {
           model: providerCfg?.model ?? ANTHROPIC_DEFAULT_MODEL,
           baseUrl: providerCfg?.baseUrl,
         };
-        this.provider = new AnthropicProvider(llmConfig);
+        this.provider = new AnthropicProvider(llmConfig, this.logger);
         return;
       }
 
@@ -62,24 +68,30 @@ export class LlmService {
         model: providerCfg?.model ?? OPENAI_DEFAULT_MODEL,
         baseUrl,
       };
-      this.provider = new OpenAiProvider(llmConfig);
+      this.provider = new OpenAiProvider(llmConfig, this.logger);
       return;
     }
 
     // No active provider in config — fall back to env vars
     if (process.env['ANTHROPIC_API_KEY']) {
-      this.provider = new AnthropicProvider({
-        apiKey: process.env['ANTHROPIC_API_KEY'],
-        model: ANTHROPIC_DEFAULT_MODEL,
-      });
+      this.provider = new AnthropicProvider(
+        {
+          apiKey: process.env['ANTHROPIC_API_KEY'],
+          model: ANTHROPIC_DEFAULT_MODEL,
+        },
+        this.logger,
+      );
       return;
     }
 
     if (process.env['OPENAI_API_KEY']) {
-      this.provider = new OpenAiProvider({
-        apiKey: process.env['OPENAI_API_KEY'],
-        model: OPENAI_DEFAULT_MODEL,
-      });
+      this.provider = new OpenAiProvider(
+        {
+          apiKey: process.env['OPENAI_API_KEY'],
+          model: OPENAI_DEFAULT_MODEL,
+        },
+        this.logger,
+      );
       return;
     }
 

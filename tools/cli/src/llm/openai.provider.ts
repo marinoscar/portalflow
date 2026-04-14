@@ -15,7 +15,6 @@ import type {
 import { SYSTEM_PROMPTS } from './prompts.js';
 
 const MAX_HTML_CHARS = 50_000;
-const logger = pino({ level: 'info' });
 
 function truncateHtml(html: string): string {
   if (html.length <= MAX_HTML_CHARS) return html;
@@ -36,13 +35,36 @@ export class OpenAiProvider implements LlmProvider {
   readonly name = 'openai';
   private readonly client: OpenAI;
   private readonly model: string;
+  private readonly logger: pino.Logger;
 
-  constructor(config: LlmProviderConfig) {
+  constructor(config: LlmProviderConfig, logger?: pino.Logger) {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
     });
     this.model = config.model;
+    this.logger = logger ?? pino({ level: 'silent' });
+  }
+
+  private logCall(
+    operation: string,
+    startTs: number,
+    usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined,
+    extra?: Record<string, unknown>,
+  ): void {
+    this.logger.debug(
+      {
+        provider: 'openai',
+        model: this.model,
+        operation,
+        latencyMs: Date.now() - startTs,
+        inputTokens: usage?.prompt_tokens ?? null,
+        outputTokens: usage?.completion_tokens ?? null,
+        totalTokens: usage?.total_tokens ?? null,
+        ...extra,
+      },
+      'llm call',
+    );
   }
 
   async findElement(query: ElementQuery): Promise<ElementResult> {
@@ -59,6 +81,7 @@ ${truncateHtml(pageContext.html)}
 
 Find this element: ${description}${failedNote}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
@@ -70,10 +93,18 @@ Find this element: ${description}${failedNote}`;
         ],
       });
 
+      this.logCall('findElement', t0, response.usage, {
+        description,
+        failedSelectorCount: failedSelectors?.length ?? 0,
+      });
+
       const text = response.choices[0]?.message?.content ?? '';
       return parseJsonResponse<ElementResult>(text, 'findElement');
     } catch (err) {
-      logger.error({ err, description }, 'OpenAiProvider.findElement failed');
+      this.logger.error(
+        { err, description, operation: 'findElement', latencyMs: Date.now() - t0 },
+        'OpenAiProvider.findElement failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -92,6 +123,7 @@ Max items: ${maxItems}${existingNote}
 Page HTML (truncated):
 ${truncateHtml(pageContext.html)}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
@@ -103,10 +135,15 @@ ${truncateHtml(pageContext.html)}`;
         ],
       });
 
+      this.logCall('findItems', t0, response.usage, { description, maxItems, order });
+
       const text = response.choices[0]?.message?.content ?? '';
       return parseJsonResponse<ItemsResult>(text, 'findItems');
     } catch (err) {
-      logger.error({ err, description }, 'OpenAiProvider.findItems failed');
+      this.logger.error(
+        { err, description, operation: 'findItems', latencyMs: Date.now() - t0 },
+        'OpenAiProvider.findItems failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -121,6 +158,7 @@ ${truncateHtml(pageContext.html)}
 
 Question: ${question}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
@@ -132,10 +170,15 @@ Question: ${question}`;
         ],
       });
 
+      this.logCall('evaluateCondition', t0, response.usage, { question });
+
       const text = response.choices[0]?.message?.content ?? '';
       return parseJsonResponse<ConditionEvaluation>(text, 'evaluateCondition');
     } catch (err) {
-      logger.error({ err, question }, 'OpenAiProvider.evaluateCondition failed');
+      this.logger.error(
+        { err, question, operation: 'evaluateCondition', latencyMs: Date.now() - t0 },
+        'OpenAiProvider.evaluateCondition failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -154,6 +197,7 @@ Page title: ${pageContext.title}
 HTML:
 ${truncateHtml(pageContext.html)}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
@@ -165,10 +209,15 @@ ${truncateHtml(pageContext.html)}`;
         ],
       });
 
+      this.logCall('decideAction', t0, response.usage, { stepDescription });
+
       const text = response.choices[0]?.message?.content ?? '';
       return parseJsonResponse<ActionDecision>(text, 'decideAction');
     } catch (err) {
-      logger.error({ err, stepDescription }, 'OpenAiProvider.decideAction failed');
+      this.logger.error(
+        { err, stepDescription, operation: 'decideAction', latencyMs: Date.now() - t0 },
+        'OpenAiProvider.decideAction failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -181,6 +230,7 @@ ${truncateHtml(pageContext.html)}
 
 Question: ${question}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
@@ -191,9 +241,14 @@ Question: ${question}`;
         ],
       });
 
+      this.logCall('interpretPage', t0, response.usage, { question });
+
       return response.choices[0]?.message?.content ?? '';
     } catch (err) {
-      logger.error({ err, question }, 'OpenAiProvider.interpretPage failed');
+      this.logger.error(
+        { err, question, operation: 'interpretPage', latencyMs: Date.now() - t0 },
+        'OpenAiProvider.interpretPage failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -207,6 +262,7 @@ ${truncateHtml(pageContext.html)}
 Extract data matching this schema:
 ${schema}`;
 
+    const t0 = Date.now();
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
@@ -218,10 +274,15 @@ ${schema}`;
         ],
       });
 
+      this.logCall('extractData', t0, response.usage);
+
       const text = response.choices[0]?.message?.content ?? '';
       return parseJsonResponse<unknown>(text, 'extractData');
     } catch (err) {
-      logger.error({ err }, 'OpenAiProvider.extractData failed');
+      this.logger.error(
+        { err, operation: 'extractData', latencyMs: Date.now() - t0 },
+        'OpenAiProvider.extractData failed',
+      );
       throw err instanceof Error ? err : new Error(String(err));
     }
   }

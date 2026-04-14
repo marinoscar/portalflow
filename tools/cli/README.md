@@ -575,7 +575,102 @@ All configuration is stored at `~/.portalflow/config.json`:
 
 The `kind` field controls which API client is used: `anthropic` uses the native Anthropic Messages API; `openai-compatible` uses the OpenAI client with a custom `baseUrl`. Existing configs without a `kind` field are automatically upgraded on first use: `anthropic` maps to kind `anthropic`, everything else maps to `openai-compatible`.
 
-The `paths` and `video` sections are optional; built-in defaults apply for any omitted values. See [Storage and Video Settings](#storage-and-video-settings).
+The `paths`, `video`, and `logging` sections are all optional; built-in defaults apply for any omitted values. See [Storage and Video Settings](#storage-and-video-settings) and [Logging and Troubleshooting](#logging-and-troubleshooting).
+
+---
+
+## Logging and Troubleshooting
+
+PortalFlow uses [pino](https://getpino.io) for structured, JSON-native logging. Every automation run produces a detailed event stream you can grep, pipe through `jq`, or follow live in a terminal.
+
+### What gets logged
+
+At **info** (default) you see:
+- Automation id/name/version, the effective logging config, and the effective paths/video config.
+- Input resolution (per input, with secret values redacted).
+- Per-step start / complete / failed events with `stepId`, `stepName`, `type`, `attempt`, and `durationMs`.
+- Retry backoffs (attempt number, delay, error message).
+- Final run summary (success, stepsCompleted, stepsTotal, errorCount, artifactCount, durationMs).
+- Screenshot paths on step failure.
+
+At **debug** you additionally see:
+- Template resolution: raw vs. resolved URL, type-step source (`inputRef` / `template`), tool-call `rawArgs` vs. `resolvedArgs`.
+- Element resolution source (primary / fallback / AI), AI confidence, and resolution latency.
+- Extracted values (first 500 characters, longer payloads truncated with a `truncated: true` marker).
+- Tool call dispatch: raw + resolved args, success flag, duration, output length, multi-field exploding.
+- **LLM provider telemetry**: `provider`, `model`, `operation`, `latencyMs`, `inputTokens`, `outputTokens`. Emitted after every `findElement`, `findItems`, `evaluateCondition`, `decideAction`, `interpretPage`, and `extractData` call.
+- **Browser page lifecycle**: `framenavigated`, `load`, `domcontentloaded`, `pageerror`, `crash`, `dialog`, console warnings/errors, failed requests, and non-2xx responses.
+
+At **trace** pino forwards every call site above the threshold — currently equivalent to `debug` plus any extra-verbose diagnostics you add to the code.
+
+On step failure, errors are logged with the full stack trace (pino's default `err` serializer). A failure screenshot is captured automatically and its path is recorded.
+
+### Log level precedence
+
+Highest priority first:
+
+1. `--log-level <level>` CLI flag
+2. `LOG_LEVEL` environment variable
+3. `logging.level` in `~/.portalflow/config.json`
+4. Default: `info`
+
+Valid levels: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent`.
+
+### Configuring logging
+
+**Interactive TUI** — run `portalflow settings` and pick **Configure logging**.
+
+**Non-interactive subcommand**:
+
+```bash
+portalflow settings logging                                   # print current config
+portalflow settings logging --level debug                     # set default level
+portalflow settings logging --file ~/.portalflow/run.log      # enable file output
+portalflow settings logging --no-file                         # disable file output
+portalflow settings logging --no-pretty                       # emit raw JSON to stdout
+portalflow settings logging --no-redact                       # disable secret redaction (CAUTION)
+```
+
+**Per-run override**:
+
+```bash
+# CLI flag
+portalflow run my-automation.json --log-level debug
+
+# Or via env var
+LOG_LEVEL=debug portalflow run my-automation.json
+```
+
+### Log destination
+
+By default, logs go to stdout (pretty-printed and colorized). When `logging.file` is set, logs are fanned out to **both** stdout AND the file. The file output is always raw JSON (one entry per line) to keep it easy to grep and parse with `jq`.
+
+The file's parent directory is created automatically if missing. Logs are appended, not truncated, so successive runs accumulate in the same file. Rotate it yourself with `logrotate` or a cron job if it grows too large.
+
+### Secret redaction
+
+When `logging.redactSecrets` is true (default), pino's redact feature replaces the values of these property paths with `[REDACTED]` before writing the log line:
+
+`apiKey`, `password`, `secret`, `token`, `otp`, `otpCode`, and the same set under `args.*` / `resolvedArgs.*`.
+
+This protects credentials pulled from vaultcli, OTP codes from smscli, and any nested config passed through `tool_call` args. **Disable it only for local debugging** — the CLI will still print secrets to stderr via uncaught exceptions if something panics deeply, so redaction alone is not a compliance boundary.
+
+### Piping to a file ad-hoc
+
+Even without file logging enabled, you can always redirect stdout:
+
+```bash
+LOG_LEVEL=debug portalflow run my-automation.json 2>&1 | tee run.log
+```
+
+### Troubleshooting tips
+
+- **Step timing**: look for `step complete` events with `durationMs` to find slow steps.
+- **Selector drift**: at debug level, every interact step logs `source: "primary" | "fallback" | "ai"`. Steps that consistently fall back to AI have brittle primary selectors — replace them with data-testid or stable attributes.
+- **LLM cost**: the `llm call` debug entries include `inputTokens` + `outputTokens` so you can audit token usage per run.
+- **Failed OTP runs**: search for `smscli` tool_call entries. The adapter automatically falls back from `otp-wait` to `otp-latest` on `OTP_TIMEOUT` — the fallback appears as a second `Executing tool call` log line.
+- **Page errors**: at debug level, `page uncaught exception` (warn) and `page request failed` entries catch JS errors and broken network calls that the automation didn't otherwise notice.
+- **Stack traces**: failed steps log the full `err.stack` automatically. No need to re-run with extra flags.
 
 ---
 
@@ -588,7 +683,7 @@ Environment variables override the values in `~/.portalflow/config.json` at runt
 | `PORTALFLOW_LLM_PROVIDER` | Override the active provider (must match a configured provider name) |
 | `ANTHROPIC_API_KEY` | Fallback API key for Anthropic when no config file entry exists |
 | `OPENAI_API_KEY` | Fallback API key for OpenAI when no config file entry exists |
-| `LOG_LEVEL` | Pino log level: `trace`, `debug`, `info`, `warn`, `error` (default: `info`) |
+| `LOG_LEVEL` | Pino log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent` (default: `info`). Overridden by `--log-level` CLI flag. |
 | `PORTALFLOW_INSTALL_DIR` | Installer: override clone location (default: `~/.portalflow-cli`) |
 
 ---

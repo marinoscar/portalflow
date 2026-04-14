@@ -53,17 +53,39 @@ export class StepExecutor {
     let attempts = 0;
 
     while (true) {
+      const attemptNumber = attempts + 1;
+      const attemptStart = Date.now();
       try {
         await this.execute(step);
+        this.context.logger.info(
+          {
+            stepId: step.id,
+            stepName: step.name,
+            type: step.type,
+            attempt: attemptNumber,
+            durationMs: Date.now() - attemptStart,
+          },
+          'step complete',
+        );
         return true; // success
       } catch (err) {
+        const durationMs = Date.now() - attemptStart;
         const message = err instanceof Error ? err.message : String(err);
         attempts += 1;
 
         if (policy === 'retry' && attempts <= maxRetries) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempts - 1);
           this.context.logger.warn(
-            { stepId: step.id, attempt: attempts, maxRetries, delayMs: delay },
+            {
+              stepId: step.id,
+              stepName: step.name,
+              type: step.type,
+              attempt: attempts,
+              maxRetries,
+              durationMs,
+              delayMs: delay,
+              err,
+            },
             `Step failed (attempt ${attempts}/${maxRetries}), retrying after ${delay}ms: ${message}`,
           );
           await sleep(delay);
@@ -75,7 +97,14 @@ export class StepExecutor {
 
         if (policy === 'skip') {
           this.context.logger.warn(
-            { stepId: step.id, policy: 'skip' },
+            {
+              stepId: step.id,
+              stepName: step.name,
+              type: step.type,
+              policy: 'skip',
+              durationMs,
+              err,
+            },
             `Step failed and will be skipped: ${message}`,
           );
           return true; // continue to next step
@@ -83,7 +112,14 @@ export class StepExecutor {
 
         // abort (or retry exhausted)
         this.context.logger.error(
-          { stepId: step.id, policy },
+          {
+            stepId: step.id,
+            stepName: step.name,
+            type: step.type,
+            policy,
+            durationMs,
+            err,
+          },
           `Step failed — aborting run: ${message}`,
         );
 
@@ -91,10 +127,13 @@ export class StepExecutor {
           try {
             const screenshotPath = await this.browserService.screenshot(`failure_${step.id}`);
             this.context.addArtifact(screenshotPath);
-            this.context.logger.info({ screenshotPath }, 'Failure screenshot captured');
+            this.context.logger.info(
+              { stepId: step.id, screenshotPath },
+              'Failure screenshot captured',
+            );
           } catch (screenshotErr) {
             this.context.logger.warn(
-              { err: String(screenshotErr) },
+              { stepId: step.id, err: screenshotErr },
               'Failed to capture failure screenshot',
             );
           }
@@ -106,6 +145,10 @@ export class StepExecutor {
   }
 
   async execute(step: Step): Promise<void> {
+    this.context.logger.debug(
+      { stepId: step.id, stepName: step.name, type: step.type },
+      'step start',
+    );
     switch (step.type) {
       case 'navigate':
         await this.executeNavigate(step);
@@ -305,8 +348,19 @@ export class StepExecutor {
   private async executeNavigate(step: Step): Promise<void> {
     const action = step.action as NavigateAction;
     const url = this.context.resolveTemplate(action.url);
+    if (url !== action.url) {
+      this.context.logger.debug(
+        { stepId: step.id, rawUrl: action.url, resolvedUrl: url },
+        'navigate template resolved',
+      );
+    }
     this.context.logger.debug({ stepId: step.id, url }, 'Navigating to URL');
+    const t0 = Date.now();
     await this.pageService.navigate(url);
+    this.context.logger.debug(
+      { stepId: step.id, url, durationMs: Date.now() - t0 },
+      'navigate complete',
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -325,6 +379,7 @@ export class StepExecutor {
     );
 
     // Resolve the selector via primary / fallback / AI
+    const resolveStart = Date.now();
     const resolved = await this.elementResolver.resolve(
       resolvedPrimary,
       resolvedFallbacks,
@@ -334,7 +389,13 @@ export class StepExecutor {
 
     const selector = resolved.selector;
     this.context.logger.debug(
-      { stepId: step.id, selector, source: resolved.source, interaction: action.interaction },
+      {
+        stepId: step.id,
+        selector,
+        source: resolved.source,
+        interaction: action.interaction,
+        resolveDurationMs: Date.now() - resolveStart,
+      },
       'Resolved element for interaction',
     );
 
@@ -346,6 +407,7 @@ export class StepExecutor {
       case 'type': {
         // Prefer inputRef (variable lookup) over literal value
         let text: string;
+        let source: 'inputRef' | 'template' | 'empty' = 'empty';
         if (action.inputRef) {
           const varValue = this.context.getVariable(action.inputRef);
           if (varValue === undefined) {
@@ -354,19 +416,36 @@ export class StepExecutor {
             );
           }
           text = varValue;
+          source = 'inputRef';
+        } else if (action.value !== undefined) {
+          text = this.context.resolveTemplate(action.value);
+          source = 'template';
         } else {
-          text = action.value !== undefined
-            ? this.context.resolveTemplate(action.value)
-            : '';
+          text = '';
         }
+        this.context.logger.debug(
+          {
+            stepId: step.id,
+            selector,
+            source,
+            inputRef: action.inputRef ?? null,
+            textLength: text.length,
+          },
+          'type action resolved',
+        );
         await this.pageService.type(selector, text);
         break;
       }
 
       case 'select': {
-        const value = action.value !== undefined
-          ? this.context.resolveTemplate(action.value)
-          : '';
+        const rawValue = action.value !== undefined ? action.value : '';
+        const value = this.context.resolveTemplate(rawValue);
+        if (value !== rawValue) {
+          this.context.logger.debug(
+            { stepId: step.id, selector, rawValue, resolvedValue: value },
+            'select template resolved',
+          );
+        }
         await this.pageService.selectOption(selector, value);
         break;
       }
@@ -505,8 +584,25 @@ export class StepExecutor {
       this.context.setVariable(action.outputName, value);
     }
 
+    // At debug level, log the actual extracted value (capped) so troubleshooters
+    // can see *what* was captured — not just that an extract happened. Large
+    // HTML payloads are truncated to keep log files readable.
+    const PREVIEW_CAP = 500;
+    let preview: unknown = value;
+    let truncated = false;
+    if (typeof value === 'string' && value.length > PREVIEW_CAP) {
+      preview = value.slice(0, PREVIEW_CAP);
+      truncated = true;
+    }
     this.context.logger.debug(
-      { stepId: step.id, outputName: action.outputName },
+      {
+        stepId: step.id,
+        outputName: action.outputName,
+        target: action.target,
+        valuePreview: preview,
+        valueLength: typeof value === 'string' ? value.length : null,
+        truncated,
+      },
       'Extracted value stored in outputs',
     );
   }
@@ -525,11 +621,6 @@ export class StepExecutor {
       );
     }
 
-    this.context.logger.debug(
-      { stepId: step.id, tool: action.tool, command: action.command },
-      'Executing tool call',
-    );
-
     // Resolve template variables in tool call arguments
     const resolvedArgs = action.args
       ? Object.fromEntries(
@@ -537,7 +628,33 @@ export class StepExecutor {
         )
       : {};
 
+    this.context.logger.debug(
+      {
+        stepId: step.id,
+        tool: action.tool,
+        command: action.command,
+        rawArgs: action.args ?? {},
+        resolvedArgs,
+      },
+      'Executing tool call',
+    );
+
+    const t0 = Date.now();
     const result = await tool.execute(action.command, resolvedArgs);
+    const durationMs = Date.now() - t0;
+
+    this.context.logger.debug(
+      {
+        stepId: step.id,
+        tool: action.tool,
+        command: action.command,
+        success: result.success,
+        durationMs,
+        hasFields: !!result.fields,
+        outputLength: result.output?.length ?? 0,
+      },
+      'Tool call returned',
+    );
 
     if (!result.success) {
       throw new Error(

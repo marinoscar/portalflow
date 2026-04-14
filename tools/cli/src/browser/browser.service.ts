@@ -1,5 +1,6 @@
 import { mkdirSync } from 'fs';
 import { join } from 'path';
+import type pino from 'pino';
 import type { Browser, BrowserContext, Page } from 'playwright';
 
 export interface BrowserOptions {
@@ -25,6 +26,11 @@ export class BrowserService {
   private videoDir: string = '.';
   private downloadDir: string = '.';
   private videoEnabled: boolean = false;
+  private logger?: pino.Logger;
+
+  constructor(logger?: pino.Logger) {
+    this.logger = logger;
+  }
 
   async launch(options: BrowserOptions): Promise<void> {
     const { chromium } = await import('playwright');
@@ -73,6 +79,93 @@ export class BrowserService {
 
     this.context = await this.browser.newContext(contextOptions);
     this.page = await this.context.newPage();
+
+    // Wire page lifecycle events to the run logger. Events are logged at
+    // debug level (noisy but useful during troubleshooting); only genuine
+    // errors (page crashes, uncaught exceptions, failed requests) bubble
+    // up to warn. When no logger is injected we skip wiring — the
+    // listeners would otherwise hold references to a no-op logger and
+    // clutter the event loop for every page transition.
+    if (this.logger) {
+      this.attachPageLifecycleListeners(this.page, this.logger);
+    }
+  }
+
+  private attachPageLifecycleListeners(page: Page, logger: pino.Logger): void {
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) {
+        logger.debug({ url: frame.url() }, 'page navigated');
+      }
+    });
+
+    page.on('load', () => {
+      logger.debug({ url: page.url() }, 'page load event');
+    });
+
+    page.on('domcontentloaded', () => {
+      logger.debug({ url: page.url() }, 'page domcontentloaded');
+    });
+
+    page.on('pageerror', (err) => {
+      logger.warn(
+        { err, url: page.url() },
+        'page uncaught exception (JS runtime error)',
+      );
+    });
+
+    page.on('crash', () => {
+      logger.error({ url: page.url() }, 'page crashed');
+    });
+
+    page.on('dialog', (dialog) => {
+      logger.debug(
+        { type: dialog.type(), message: dialog.message(), url: page.url() },
+        'page dialog opened (auto-dismissed by default)',
+      );
+    });
+
+    page.on('console', (msg) => {
+      const type = msg.type();
+      // Only surface error/warning console messages at debug — info/log
+      // messages from the page are noisy and rarely useful for automation
+      // debugging. Users who need full visibility can lift to trace level
+      // by wrapping with a secondary listener externally.
+      if (type === 'error' || type === 'warning') {
+        logger.debug(
+          { type, text: msg.text(), url: page.url() },
+          'page console',
+        );
+      }
+    });
+
+    page.on('requestfailed', (request) => {
+      logger.debug(
+        {
+          url: request.url(),
+          method: request.method(),
+          failure: request.failure()?.errorText ?? null,
+          resourceType: request.resourceType(),
+        },
+        'page request failed',
+      );
+    });
+
+    page.on('response', (response) => {
+      const status = response.status();
+      // Only log non-2xx responses at debug — a full request trail would
+      // drown out everything else. This gives just enough signal to
+      // catch redirects, 4xx/5xx errors, and auth redirects.
+      if (status >= 300) {
+        logger.debug(
+          {
+            url: response.url(),
+            status,
+            method: response.request().method(),
+          },
+          'page response (non-2xx)',
+        );
+      }
+    });
   }
 
   getPage(): Page {

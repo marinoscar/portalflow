@@ -12,7 +12,7 @@ import { VaultcliAdapter } from '../tools/vaultcli.adapter.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext, type RunResult } from './run-context.js';
 import { StepExecutor } from './step-executor.js';
-import { createRunLogger } from './logger.js';
+import { createRunLogger, resolveLoggingConfig } from './logger.js';
 import { ConfigService } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from './paths.js';
 
@@ -25,6 +25,8 @@ export interface RunOptions {
   automationsDir?: string;
   /** CLI-supplied input overrides. Any key present here wins over the input's source. */
   inputs?: Map<string, string>;
+  /** CLI-supplied log level override (--log-level flag). */
+  logLevel?: string;
 }
 
 export class AutomationRunner {
@@ -60,12 +62,25 @@ export class AutomationRunner {
     const automation: Automation = parsed.data;
 
     // ------------------------------------------------------------------
-    // 3. Create a pino logger
+    // 3. Load user config early so the logger picks up logging settings
     // ------------------------------------------------------------------
-    const logger = createRunLogger(automation.name);
+    const configService = new ConfigService();
+    const userConfig = await configService.load();
+    const loggingConfig = resolveLoggingConfig(userConfig.logging, options?.logLevel);
+    const logger = createRunLogger(automation.name, loggingConfig);
 
     logger.info(
-      { id: automation.id, name: automation.name, version: automation.version },
+      {
+        id: automation.id,
+        name: automation.name,
+        version: automation.version,
+        logging: {
+          level: loggingConfig.level,
+          file: loggingConfig.file ?? null,
+          pretty: loggingConfig.pretty,
+          redactSecrets: loggingConfig.redactSecrets,
+        },
+      },
       'Starting automation run',
     );
 
@@ -167,21 +182,23 @@ export class AutomationRunner {
     }
 
     // ------------------------------------------------------------------
-    // 6. Initialize LlmService
+    // 6. Initialize LlmService (passes the run logger through so provider
+    //    calls are logged with latency + token usage at debug level)
     // ------------------------------------------------------------------
-    const llmService = new LlmService();
+    const llmService = new LlmService(logger);
     try {
       await llmService.initialize();
     } catch (err) {
-      logger.warn({ err: String(err) }, 'LLM service initialization failed — AI element resolution will not be available');
+      logger.warn(
+        { err },
+        'LLM service initialization failed — AI element resolution will not be available',
+      );
     }
 
     // ------------------------------------------------------------------
     // 7. Resolve effective paths and video config
     // ------------------------------------------------------------------
     const settings = automation.settings;
-    const configService = new ConfigService();
-    const userConfig = await configService.load();
 
     const effectivePaths = resolvePaths(userConfig, settings, {
       automations: options?.automationsDir,
@@ -204,9 +221,11 @@ export class AutomationRunner {
     );
 
     // ------------------------------------------------------------------
-    // 8. Launch BrowserService
+    // 8. Launch BrowserService (logger is passed so page lifecycle
+    //    events — framenavigated, pageerror, requestfailed, console
+    //    warnings — are captured in the run log at debug level)
     // ------------------------------------------------------------------
-    const browserService = new BrowserService();
+    const browserService = new BrowserService(logger);
 
     const headless = options?.headless ?? settings?.headless ?? false;
 
@@ -265,8 +284,18 @@ export class AutomationRunner {
     // ------------------------------------------------------------------
     const steps = automation.steps;
 
-    for (const step of steps) {
-      logger.info({ stepId: step.id, stepName: step.name, type: step.type }, 'Executing step');
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]!;
+      logger.info(
+        {
+          stepId: step.id,
+          stepName: step.name,
+          type: step.type,
+          index: i + 1,
+          total: steps.length,
+        },
+        'Executing step',
+      );
 
       const success = await stepExecutor.executeWithPolicy(step);
 
@@ -276,7 +305,6 @@ export class AutomationRunner {
       }
 
       context.incrementCompleted();
-      logger.info({ stepId: step.id, stepName: step.name }, 'Step completed');
     }
 
     // ------------------------------------------------------------------
@@ -290,7 +318,7 @@ export class AutomationRunner {
       }
       logger.info('Browser closed');
     } catch (err) {
-      logger.warn({ err: String(err) }, 'Error closing browser (non-fatal)');
+      logger.warn({ err }, 'Error closing browser (non-fatal)');
     }
 
     // ------------------------------------------------------------------

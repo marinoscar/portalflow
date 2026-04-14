@@ -3,7 +3,13 @@ import { Command } from 'commander';
 import { readFile } from 'fs/promises';
 import pino from 'pino';
 import { AutomationSchema } from '@portalflow/schema';
-import { ConfigService, type PathsConfig, type VideoConfig } from './config/config.service.js';
+import {
+  ConfigService,
+  type LogLevel,
+  type LoggingConfig,
+  type PathsConfig,
+  type VideoConfig,
+} from './config/config.service.js';
 import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
 import { resolvePaths, resolveVideo } from './runner/paths.js';
 import * as helpText from './help-text.js';
@@ -29,7 +35,7 @@ program
 program
   .name('portalflow')
   .description('PortalFlow CLI — run and manage browser automations')
-  .version('1.1.8')
+  .version('1.1.9')
   .addHelpText('after', helpText.topLevelHelpText())
   .action(async () => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
@@ -69,6 +75,10 @@ program
     '--inputs-json <json>',
     'Pass multiple input values as a JSON object',
   )
+  .option(
+    '-l, --log-level <level>',
+    'Log verbosity: trace, debug, info, warn, error, fatal, silent (overrides LOG_LEVEL and config)',
+  )
   .addHelpText('after', helpText.runHelpText())
   .action(async (
     file: string | undefined,
@@ -81,6 +91,7 @@ program
       automationsDir?: string;
       input?: string[];
       inputsJson?: string;
+      logLevel?: string;
     },
   ) => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
@@ -137,6 +148,7 @@ program
         downloadDir: options.downloadDir,
         automationsDir: options.automationsDir,
         inputs: inputOverrides.size > 0 ? inputOverrides : undefined,
+        logLevel: options.logLevel,
       });
 
       // Print summary to stdout
@@ -384,6 +396,71 @@ settings
     }
     await config.setPaths(update);
     logger.info(update, 'Paths updated');
+  });
+
+settings
+  .command('logging')
+  .description('Configure logging for automation runs')
+  .option(
+    '-l, --level <level>',
+    'Log level: trace, debug, info, warn, error, fatal, silent',
+  )
+  .option('--file <path>', 'Write logs to this file in addition to stdout')
+  .option('--no-file', 'Disable file logging (stdout only)')
+  .option('--pretty', 'Pretty-print stdout logs (colorized, human-readable)')
+  .option('--no-pretty', 'Disable pretty-printing (raw JSON to stdout)')
+  .option('--redact', 'Redact secrets and sensitive fields in log output')
+  .option('--no-redact', 'Do NOT redact secret values (use with care)')
+  .addHelpText('after', helpText.settingsLoggingHelpText())
+  .action(async (opts: {
+    level?: string;
+    file?: string | false;
+    pretty?: boolean;
+    redact?: boolean;
+  }) => {
+    const { bootstrapDefaults } = await import('./runner/bootstrap.js');
+    await bootstrapDefaults();
+    const config = new ConfigService();
+
+    const VALID: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'];
+    if (opts.level !== undefined && !VALID.includes(opts.level as LogLevel)) {
+      logger.error(
+        { level: opts.level },
+        `Invalid --level value. Must be one of: ${VALID.join(', ')}`,
+      );
+      process.exit(1);
+    }
+
+    const update: Partial<LoggingConfig> = {};
+    if (opts.level !== undefined) update.level = opts.level as LogLevel;
+    if (opts.file === false) update.file = '';
+    if (typeof opts.file === 'string') update.file = opts.file;
+    if (opts.pretty !== undefined) update.pretty = opts.pretty;
+    if (opts.redact !== undefined) update.redactSecrets = opts.redact;
+
+    if (Object.keys(update).length === 0) {
+      const cfg = await config.load();
+      const current = cfg.logging ?? {};
+      logger.info(current, 'Current logging config');
+      return;
+    }
+
+    // Empty string means "clear the file setting".
+    if (update.file === '') {
+      const cfg = await config.load();
+      cfg.logging = { ...(cfg.logging ?? {}) };
+      delete cfg.logging.file;
+      // Also merge any other fields from `update` except `file`.
+      if (update.level !== undefined) cfg.logging.level = update.level;
+      if (update.pretty !== undefined) cfg.logging.pretty = update.pretty;
+      if (update.redactSecrets !== undefined) cfg.logging.redactSecrets = update.redactSecrets;
+      await config.save(cfg);
+      logger.info({ ...cfg.logging, file: null }, 'Logging config updated (file disabled)');
+      return;
+    }
+
+    await config.setLogging(update);
+    logger.info(update, 'Logging config updated');
   });
 
 settings

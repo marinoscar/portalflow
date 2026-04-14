@@ -25,11 +25,25 @@ export interface VideoConfig {
   height?: number;
 }
 
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
+
+export interface LoggingConfig {
+  /** Minimum log level. Default: "info". */
+  level?: LogLevel;
+  /** Optional file path. When set, logs are written to this file IN ADDITION to stdout. */
+  file?: string;
+  /** Prettify stdout output with pino-pretty. Default: true. */
+  pretty?: boolean;
+  /** Redact values of inputs whose type is "secret". Default: true. */
+  redactSecrets?: boolean;
+}
+
 export interface CliConfig {
   activeProvider?: string;
   providers?: Record<string, ProviderConfig>;
   paths?: PathsConfig;
   video?: VideoConfig;
+  logging?: LoggingConfig;
 }
 
 export class ConfigService {
@@ -106,6 +120,17 @@ export class ConfigService {
   async setVideo(video: Partial<VideoConfig>): Promise<void> {
     const config = await this.load();
     config.video = { ...(config.video ?? {}), ...video };
+    await this.save(config);
+  }
+
+  async getLogging(): Promise<LoggingConfig> {
+    const config = await this.load();
+    return config.logging ?? {};
+  }
+
+  async setLogging(logging: Partial<LoggingConfig>): Promise<void> {
+    const config = await this.load();
+    config.logging = { ...(config.logging ?? {}), ...logging };
     await this.save(config);
   }
 }
