@@ -834,7 +834,7 @@ A three-step automation that navigates to a page, types a search query, and extr
 }
 ```
 
-Use `{{inputName}}` template syntax inside `action.url` and other string fields to substitute input values at runtime.
+Use `{{inputName}}` template syntax inside `action.url` and other string fields to substitute input values at runtime. The same syntax also exposes built-in **system functions** via the reserved `$` prefix — `{{$date}}`, `{{$year}}`, `{{$monthName}}`, `{{$uuid}}`, `{{$runId}}`, and ~20 more — for embedding the current date, time, run id, or fresh UUIDs into URLs, filenames, and tool args. See [`docs/AUTOMATION-JSON-SPEC.md#134-system-functions`](../../docs/AUTOMATION-JSON-SPEC.md#134-system-functions) for the full list.
 
 See `examples/demo-search.json` for a complete working example, `examples/phone-bill.json` for a template covering portal login, OTP via smscli, and file download, `examples/att-bills-last-n.json` for the canonical `loop` step example, and `examples/functions-demo.json` for a worked example of the `functions` / `call` feature.
 
