@@ -7,6 +7,10 @@
     "portalflow": "dist/index.js"
   },
   "scripts": {
+    "build:schema": "cd ../schema && npm run build",
+    "prebuild": "npm run build:schema",
+    "predev": "npm run build:schema",
+    "pretest": "npm run build:schema",
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "test": "vitest"
