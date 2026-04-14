@@ -71,7 +71,13 @@ export function ChatPanel({
         )}
       </div>
 
-      <div className="chat-panel-body" ref={scrollRef}>
+      <div
+        className="chat-panel-body"
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-label="AI chat conversation"
+      >
         {messages.length === 0 && (
           <div className="chat-empty">
             <p className="muted">

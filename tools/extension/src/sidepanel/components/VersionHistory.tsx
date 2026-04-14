@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { AutomationVersion, VersionAuthor } from '../../shared/types';
 
 interface VersionHistoryProps {
@@ -42,6 +43,29 @@ export function VersionHistory({
   currentVersionId,
   onCheckout,
 }: VersionHistoryProps) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Close on Escape while the drawer is open.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // Move focus to the close button when the drawer opens so keyboard
+  // users land inside the dialog instead of on the background.
+  useEffect(() => {
+    if (open) {
+      closeButtonRef.current?.focus();
+    }
+  }, [open]);
+
   if (!open) return null;
 
   // Display newest first.
@@ -58,6 +82,7 @@ export function VersionHistory({
         <header className="version-drawer-header">
           <h2>Version history</h2>
           <button
+            ref={closeButtonRef}
             className="version-drawer-close"
             onClick={onClose}
             aria-label="Close version history"
