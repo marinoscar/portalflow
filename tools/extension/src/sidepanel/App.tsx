@@ -11,6 +11,7 @@ import { InputsList } from './components/InputsList';
 import { StepRow } from './components/StepRow';
 import { ExportBar } from './components/ExportBar';
 import { LlmNotConfiguredBanner } from './components/LlmNotConfiguredBanner';
+import { VersionHistory } from './components/VersionHistory';
 import { useUndoRedoShortcuts } from './hooks/useKeyboardShortcuts';
 import './app.css';
 
@@ -145,6 +146,15 @@ export function App() {
   const redo = useCallback(() => dispatch({ type: 'REDO' }), []);
   useUndoRedoShortcuts(undo, redo);
 
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const checkoutVersion = useCallback(
+    (versionId: string) => {
+      dispatch({ type: 'CHECKOUT_VERSION', versionId });
+      setHistoryOpen(false);
+    },
+    [],
+  );
+
   // Determine button enablement for the history controls.
   const headIdx = state.versions.findIndex((v) => v.id === state.currentVersionId);
   const canUndo = headIdx > 0;
@@ -230,6 +240,29 @@ export function App() {
             >
               <polyline points="23 4 23 10 17 10" />
               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+          </button>
+          <button
+            className="app-header-icon-button"
+            onClick={() => setHistoryOpen(true)}
+            disabled={state.versions.length === 0}
+            title="Version history"
+            aria-label="Open version history"
+            type="button"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
             </svg>
           </button>
         <button
@@ -426,6 +459,13 @@ export function App() {
           </>
         )}
       </main>
+      <VersionHistory
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        versions={state.versions}
+        currentVersionId={state.currentVersionId}
+        onCheckout={checkoutVersion}
+      />
     </div>
   );
 }
