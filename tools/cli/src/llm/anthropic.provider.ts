@@ -294,7 +294,6 @@ ${goal}
 
 ## Allowed actions
 ${allowedActions.join(', ')}
-(plus "done" — use when you believe the goal is already satisfied)
 
 ## Recent action history (oldest first)
 ${historyBlock}

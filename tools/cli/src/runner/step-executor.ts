@@ -1023,18 +1023,11 @@ export class StepExecutor {
         'aiscope: decided',
       );
 
-      // 4. Dispatch
-      if (decision.action === 'done') {
-        // Treat as a hint — the top of the next iteration re-runs the
-        // success check. If the model was wrong we keep trying.
-        history.push({
-          iteration,
-          action: 'done',
-          succeeded: true,
-        });
-        continue;
-      }
-
+      // 4. Dispatch — validate against the allowed list FIRST so that a
+      // user who explicitly excludes `done` from `allowedActions` actually
+      // gets the exclusion they asked for. The default list does include
+      // `done`, so the usual behavior (loop re-verifies success check on
+      // the next iteration) is unchanged.
       if (!allowedActions.includes(decision.action)) {
         logger.warn(
           {
