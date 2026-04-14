@@ -111,6 +111,31 @@ export interface AutomationVersion {
   automation: Automation; // full snapshot (not a diff)
 }
 
+/**
+ * A structured proposal attached to an assistant chat message. The user
+ * must explicitly Approve or Reject before it is applied to the working
+ * automation.
+ */
+export interface AutomationProposal {
+  id: string;
+  summary: string;
+  changes: string[];
+  newAutomation: Automation;
+  baseVersionId: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
+/** A single entry in the AI chat thread. */
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+  proposal?: AutomationProposal;
+  /** Set if the assistant response failed to parse into a proposal. */
+  parseError?: string;
+}
+
 /** Serializable state of a recording session, stored in chrome.storage.local. */
 export interface RecordingSession {
   id: string;
@@ -145,4 +170,9 @@ export interface RecordingSession {
   versions?: AutomationVersion[];
   /** Points to the currently checked-out version in `versions`. */
   currentVersionId?: string;
+  /**
+   * Conversational AI chat log for this session. Cleared when a new
+   * recording starts.
+   */
+  chatHistory?: ChatMessage[];
 }
