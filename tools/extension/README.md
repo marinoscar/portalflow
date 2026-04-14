@@ -269,6 +269,32 @@ The first time a user stops a recording, the service worker converts the raw eve
 
 Both buttons are available after any manual edit. Use **Revert to original** when you want to abandon your edits wholesale; use **Reset to recording** when you want to regenerate from a modified event log.
 
+### Version history and undo/redo
+
+Every meaningful change to the automation is checkpointed as a numbered **version** in an append-only history stored on the session. The first entry is always the raw-recording version and is pinned — it is never pruned when the retention cap kicks in.
+
+**When versions are committed:**
+
+| Trigger                                    | Author              |
+|--------------------------------------------|---------------------|
+| First conversion of events to automation   | `raw-recording`     |
+| Any manual edit, 2 seconds after the last change | `user-edit`    |
+| Approved AI chat proposal                  | `ai-chat`           |
+| Legacy "Improve Steps" button              | `ai-improve-legacy` |
+| Import from a session zip                  | `import`            |
+
+The 2-second debounce after manual edits means rapid typing coalesces into a single version — you will not see 20 versions for typing one sentence.
+
+**Undo and redo:**
+
+- **Ctrl/Cmd+Z** — undo to the previous version. Skipped when the keyboard focus is inside a form control so the browser's native undo still works.
+- **Ctrl/Cmd+Shift+Z** — redo to the next version (only valid after an undo, before the next edit).
+- Undo and redo buttons in the header mirror the keyboard shortcuts and are disabled at history endpoints.
+
+**Version history drawer:** clicking the clock icon in the header opens a drawer listing every version in reverse chronological order. Each entry shows the version number, the author badge, a short message, and a relative timestamp. Click **Checkout** on any row to restore that version as the working automation; checkout does not create a new version (it just moves the head pointer).
+
+**Retention:** sessions keep the most recent 100 versions plus the pinned raw-recording entry. When the cap is exceeded, the oldest non-pinned version is dropped. For longer archival, export the session as a zip (covered in a later phase).
+
 ### Selector cascade
 
 For each captured element, the recorder computes a `{ primary, fallbacks[] }` selector using seven strategies in priority order:

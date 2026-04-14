@@ -90,6 +90,27 @@ export type RawEvent =
   | CheckEvent
   | SubmitEvent;
 
+/** Who produced a given automation version. */
+export type VersionAuthor =
+  | 'raw-recording'       // first conversion of recording to automation; pinned
+  | 'user-edit'           // committed after a manual edit
+  | 'ai-chat'             // committed after the user approves an AI chat proposal
+  | 'ai-improve-legacy'   // committed by the legacy "Improve Steps" button
+  | 'import';             // committed when a session zip is imported
+
+/**
+ * A committed version of the automation. The first entry in
+ * `RecordingSession.versions` is always `raw-recording` and is pinned —
+ * it is never pruned when the retention cap is hit.
+ */
+export interface AutomationVersion {
+  id: string;             // uuid or unique string
+  createdAt: number;      // epoch ms
+  author: VersionAuthor;
+  message: string;        // short human-readable description
+  automation: Automation; // full snapshot (not a diff)
+}
+
 /** Serializable state of a recording session, stored in chrome.storage.local. */
 export interface RecordingSession {
   id: string;
@@ -116,4 +137,12 @@ export interface RecordingSession {
    * restores this byte-for-byte.
    */
   original?: Automation;
+  /**
+   * Append-only history of committed automation versions. Index 0 is
+   * always the raw recording and is pinned — retention pruning removes
+   * the oldest non-pinned entry when the cap is exceeded.
+   */
+  versions?: AutomationVersion[];
+  /** Points to the currently checked-out version in `versions`. */
+  currentVersionId?: string;
 }
