@@ -65,7 +65,7 @@ The goal is not to eliminate structure. The goal is to make structure easier to 
 
 ### 2. Reliable browser execution
 
-PortalFlow should use a real browser environment to execute automations in a way that is close to human navigation. [Playwright](https://playwright.dev/) should provide the core mechanism to navigate websites, manipulate pages, inspect application state, interact with elements, and execute browser actions in a controlled and observable way.
+PortalFlow should use a real browser environment to execute automations in a way that is close to human navigation. [Playwright](https://playwright.dev/) should provide the core mechanism to navigate websites, manipulate pages, inspect application state, interact with elements, and execute browser actions in a controlled and observable way. The runtime should support both fresh in-memory Chromium contexts (for deterministic, side-effect-free runs) AND persistent contexts backed by the user's real Chrome / Brave / Chromium / Edge profiles (for runs that need to look like a returning human with cookies, extensions, and saved sign-in state already in place).
 
 This includes handling:
 
@@ -124,6 +124,24 @@ This is a strategic requirement, not a convenience feature.
 PortalFlow should interact with websites in a way that reflects how a human operator would move through the application. The objective is not theatrical imitation, but practical behavioral similarity that improves compatibility with real-world web workflows.
 
 For that reason, PortalFlow should favor desktop execution with a headed browser session. A headless-first model often increases robot checks, compatibility issues, and detection risk, which makes it a poor default for the kinds of websites PortalFlow is meant to automate.
+
+### Real-user browser execution via persistent profiles
+
+Replicating how a human actually works is a core design goal of PortalFlow, not a stretch goal. A real human user does not start every session from a blank, cookie-less, extension-less, freshly-installed browser. They use their daily-driver Chrome, Brave, or Edge profile, with their real cookies, their real saved passwords, their real ad blockers and password managers, and their real long-lived sign-in state. PortalFlow should be able to do the same.
+
+To support this, PortalFlow exposes two browser execution modes:
+
+* **Isolated mode** — Playwright launches a fresh in-memory Chromium context for every run. Cookies, extensions, and sign-in state do not persist between runs. This is fast, deterministic, and side-effect-free, and it remains the default for new users and for runs that do not need long-lived session state.
+
+* **Persistent mode** — Playwright opens a real on-disk Chrome / Brave / Chromium / Edge user data directory via `launchPersistentContext`. Cookies, localStorage, saved logins, extensions, and history all persist between runs. When pointed at one of the user's existing daily-driver profiles, the automation behaves exactly like a returning human user from that browser. This mode is the recommended default for portals that fingerprint bot-like contexts, that depend on long-lived sessions, or that present an unusually friction-heavy login flow.
+
+The user should be able to:
+
+* Choose isolated or persistent mode in the config file (`browser.mode` in `~/.portalflow/config.json`).
+* Pick a real, existing Chrome / Brave / Chromium / Edge profile interactively from the TUI, with the platform discovering installed browsers and reading their profile metadata so the user sees friendly names like `Personal — oscar@marin.cr` instead of `Profile 3`.
+* Override the choice per run via CLI flags (`--browser-mode`, `--browser-channel`, `--browser-user-data-dir`, `--browser-profile-directory`).
+
+Persistent profile execution is what allows PortalFlow to truly replicate human behavior on the web. It is treated as a first-class capability of the platform, not an optional extra. Future iterations of PortalFlow should expand on this foundation — for example, by helping users designate a profile reserved for automation, by surfacing profile state in the web control plane, and by guiding users through the operational tradeoffs of sharing a daily-driver profile with the runtime.
 
 ### Intent-driven automation
 
@@ -324,6 +342,7 @@ This matters because the platform depends on real browser automation, runtime se
 * Desktop-based Chrome or Chromium execution
 * [Playwright](https://playwright.dev/)-based browser control
 * Headed browser sessions rather than headless-first execution
+* Persistent-context launches against the user's real Chrome / Brave / Chromium / Edge profiles, so automations can carry the user's actual cookies, extensions, and sign-in state when the workflow benefits from looking like a returning human user
 * CLI tooling and local execution
 * Gateway hosting
 * File and artifact handling
