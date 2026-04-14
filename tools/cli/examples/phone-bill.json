@@ -2,24 +2,16 @@
   "id": "550e8400-e29b-41d4-a716-446655440002",
   "name": "Retrieve Phone Bill PDF",
   "version": "1.0.0",
-  "description": "Log into a carrier portal, handle OTP, and download the latest bill PDF",
+  "description": "Log into a carrier portal with vaultcli credentials, handle SMS OTP, and download the latest bill PDF",
   "goal": "Retrieve the most recent phone bill PDF from the carrier website",
   "inputs": [
     {
-      "name": "username",
+      "name": "creds",
       "type": "secret",
       "required": true,
       "source": "vaultcli",
-      "value": "carrier/phone-account",
-      "description": "Login username from vault"
-    },
-    {
-      "name": "password",
-      "type": "secret",
-      "required": true,
-      "source": "vaultcli",
-      "value": "carrier/phone-account",
-      "description": "Login password from vault"
+      "value": "carrier-phone-account",
+      "description": "Carrier portal credentials from vault. The vaultcli runner explodes every field of the secret into {{creds_username}}, {{creds_password}}, etc."
     }
   ],
   "steps": [
@@ -37,7 +29,7 @@
       "id": "step-2",
       "name": "Enter username",
       "type": "interact",
-      "action": { "interaction": "type", "inputRef": "username" },
+      "action": { "interaction": "type", "inputRef": "creds_username" },
       "selectors": { "primary": "#username", "fallbacks": ["input[name='username']", "input[type='email']"] },
       "aiGuidance": "Find the username or email input field on the login form",
       "onFailure": "abort",
@@ -48,7 +40,7 @@
       "id": "step-3",
       "name": "Enter password",
       "type": "interact",
-      "action": { "interaction": "type", "inputRef": "password" },
+      "action": { "interaction": "type", "inputRef": "creds_password" },
       "selectors": { "primary": "#password", "fallbacks": ["input[name='password']", "input[type='password']"] },
       "aiGuidance": "Find the password input field",
       "onFailure": "abort",
@@ -79,16 +71,17 @@
     {
       "id": "step-6",
       "name": "Retrieve OTP via smscli",
+      "description": "Calls `smscli otp wait --json --timeout 60 --sender ExampleCarrier`. On OTP_TIMEOUT the adapter automatically retries `smscli otp latest` with the same sender filter, so no separate fallback step is needed.",
       "type": "tool_call",
       "action": {
         "tool": "smscli",
-        "command": "get-otp",
-        "args": { "sender": "ExampleCarrier", "pattern": "\\d{6}" },
+        "command": "otp-wait",
+        "args": { "sender": "ExampleCarrier", "timeout": "60" },
         "outputName": "otpCode"
       },
       "onFailure": "abort",
-      "maxRetries": 1,
-      "timeout": 120000
+      "maxRetries": 0,
+      "timeout": 180000
     },
     {
       "id": "step-7",
@@ -136,7 +129,7 @@
     }
   ],
   "tools": [
-    { "name": "smscli", "config": { "timeout": "120000" } },
+    { "name": "smscli" },
     { "name": "vaultcli" }
   ],
   "outputs": [
