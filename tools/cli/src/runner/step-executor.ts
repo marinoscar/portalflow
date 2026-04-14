@@ -67,6 +67,7 @@ export class StepExecutor {
           },
           'step complete',
         );
+        this.context.recordStepOutcome(step.id, 'success');
         return true; // success
       } catch (err) {
         const durationMs = Date.now() - attemptStart;
@@ -107,6 +108,7 @@ export class StepExecutor {
             },
             `Step failed and will be skipped: ${message}`,
           );
+          this.context.recordStepOutcome(step.id, 'skipped', message);
           return true; // continue to next step
         }
 
@@ -139,6 +141,7 @@ export class StepExecutor {
           }
         }
 
+        this.context.recordStepOutcome(step.id, 'failed', message);
         return false; // stop execution
       }
     }
