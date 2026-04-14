@@ -71,6 +71,8 @@ export interface RunError {
   timestamp: Date;
 }
 
+export type StepStatus = 'success' | 'failed' | 'skipped';
+
 export class RunContext {
   readonly variables: Map<string, string> = new Map();
   readonly outputs: Record<string, unknown> = {};
@@ -83,6 +85,16 @@ export class RunContext {
    */
   readonly runId: string = randomUUID();
   private stepsCompleted = 0;
+  /**
+   * Rolling "last terminal step" pointers. Updated by `recordStepOutcome`
+   * every time a step finishes — whether it succeeded, was skipped, or
+   * failed — so later steps can introspect the previous step's result via
+   * the per-step variables, the shared `last_step_*` variables, or the
+   * `{{$lastStep*}}` system functions.
+   */
+  private lastStepId: string | undefined;
+  private lastStepStatus: StepStatus | undefined;
+  private lastStepError: string | undefined;
   /**
    * Built-in template functions invoked via `{{$name}}` syntax. Stable
    * values close over runId/startedAt/automationName captured at
@@ -163,7 +175,45 @@ export class RunContext {
       // --- Identifier helpers (fresh on each call) ---
       ['$uuid',  () => randomUUID()],
       ['$nonce', () => Math.random().toString(36).slice(2, 10)],
+
+      // --- Previous-step introspection (set by recordStepOutcome) ---
+      // These read mutable instance state via arrow-function closures so
+      // every call returns the up-to-date value after the previous step
+      // has settled. Before any step has run they return safe defaults
+      // so templates don't accidentally resolve to "undefined".
+      ['$lastStepStatus', () => this.lastStepStatus ?? 'none'],
+      ['$lastStepError',  () => this.lastStepError ?? ''],
+      ['$lastStepId',     () => this.lastStepId ?? ''],
     ]);
+  }
+
+  /**
+   * Record the terminal outcome of a step. Called by the step executor
+   * exactly once per step, AFTER retries have been exhausted and the
+   * step has decided its final fate (success, skipped, or failed).
+   *
+   * Sets these context variables:
+   *
+   *   <stepId>_status       — "success" | "failed" | "skipped"
+   *   <stepId>_error        — error message on failure, "" otherwise
+   *   last_step_id          — the just-settled step id
+   *   last_step_status      — same value as <stepId>_status
+   *   last_step_error       — same value as <stepId>_error
+   *
+   * And updates instance fields used by the `$lastStep*` system functions
+   * so `{{$lastStepStatus}}` etc. resolve to the matching values from any
+   * templated field in later steps.
+   */
+  recordStepOutcome(stepId: string, status: StepStatus, error?: string): void {
+    const errorMessage = status === 'failed' ? (error ?? '') : '';
+    this.variables.set(`${stepId}_status`, status);
+    this.variables.set(`${stepId}_error`, errorMessage);
+    this.variables.set('last_step_id', stepId);
+    this.variables.set('last_step_status', status);
+    this.variables.set('last_step_error', errorMessage);
+    this.lastStepId = stepId;
+    this.lastStepStatus = status;
+    this.lastStepError = errorMessage;
   }
 
   setVariable(name: string, value: string): void {
