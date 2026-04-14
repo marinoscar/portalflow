@@ -110,6 +110,29 @@ replace the automation's steps array directly, so correctness matters.
    - Downloads should be triggered from the step that actually initiates them
      (a click or a navigate), not from a standalone step.
 
+9. USE SYSTEM TEMPLATE FUNCTIONS WHERE THEY HELP
+   - Any string field (URLs, args, expectedFilename, validation values) can
+     reference built-in functions via the reserved \`{{$name}}\` syntax. They
+     resolve at runtime to dynamic values. The full list:
+     \$date, \$year, \$yearShort, \$month, \$month0, \$monthName, \$monthNameShort,
+     \$day, \$day0, \$dayOfWeek, \$dayOfWeekShort, \$hour, \$hour12, \$minute,
+     \$second, \$ampm, \$time, \$isoDateTime, \$timestamp, \$timestampSec,
+     \$yesterday, \$tomorrow, \$firstOfMonth, \$lastOfMonth, \$runId,
+     \$automationName, \$startedAt, \$uuid, \$nonce.
+   - Suggested uses:
+     • Embed \`{{$date}}\` in download \`expectedFilename\` so daily runs do not
+       overwrite each other (e.g. \`"report-{{$date}}.pdf"\`).
+     • Use \`{{$year}}/{{$month0}}\` in templated URLs that include a
+       year-month path segment (e.g. \`"https://example.com/billing/{{$year}}/{{$month0}}"\`).
+     • Use \`{{$uuid}}\` for idempotency keys in tool_call args records — two
+       references in one args object produce two different UUIDs.
+     • Use \`{{$runId}}\` when you need a stable correlation id across all
+       steps of a single run (same value on every reference).
+   - System functions ALWAYS resolve and ignore any \`:default\` suffix.
+     \`{{$date:fallback}}\` yields today's date — the fallback is dropped.
+   - Unknown function names like \`{{$dates}}\` (typos) are left literal in
+     the output. Spell them carefully.
+
 ## What you MUST NOT change
 
 - The \`inputRef\` of any type step that currently has one. It points to an input
@@ -216,8 +239,29 @@ Step types: navigate | interact | wait | extract | tool_call | condition |
 download | loop | call. The call step invokes a declared function.
 
 Selectors are { primary, fallbacks? }. aiGuidance is a natural-language
-fallback hint. Templates like {{varName}} or {{varName:default}} resolve
-context variables at runtime.
+fallback hint.
+
+Templates have two forms inside any string field:
+1. {{varName}} or {{varName:default}} — user variables (top-level inputs,
+   extract outputs, tool_call outputs, loop iteration vars, function
+   parameters, condition results). The :default suffix supplies a
+   fallback when the variable is unset.
+2. {{$systemFunction}} — built-in system functions reserved by the $
+   prefix. Always resolve at runtime, ignore any :default suffix, and
+   cannot collide with user variables. Use these for dynamic values
+   like dates, times, run ids, and uuids:
+   $date, $year, $yearShort, $month, $month0, $monthName,
+   $monthNameShort, $day, $day0, $dayOfWeek, $dayOfWeekShort,
+   $hour, $hour12, $minute, $second, $ampm, $time, $isoDateTime,
+   $timestamp, $timestampSec, $yesterday, $tomorrow, $firstOfMonth,
+   $lastOfMonth, $runId, $automationName, $startedAt, $uuid, $nonce.
+   Examples: {{$date}} → "2026-04-14", {{$uuid}} → fresh UUID per call,
+   {{$runId}} → stable UUID for the whole run.
+
+Use system functions where they help — e.g. embed {{$date}} in download
+filenames so daily runs do not overwrite each other; use {{$uuid}} for
+idempotency keys when posting; use {{$year}}/{{$month0}} in templated
+URLs that include a year-month path segment.
 
 ## Behavior rules
 
