@@ -29,7 +29,7 @@ program
 program
   .name('portalflow')
   .description('PortalFlow CLI — run and manage browser automations')
-  .version('1.1.7')
+  .version('1.1.8')
   .addHelpText('after', helpText.topLevelHelpText())
   .action(async () => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
