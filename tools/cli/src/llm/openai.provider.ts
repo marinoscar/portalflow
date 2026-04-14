@@ -153,12 +153,29 @@ ${truncateHtml(pageContext.html)}`;
   async evaluateCondition(query: ConditionQuery): Promise<ConditionEvaluation> {
     const { question, pageContext } = query;
 
-    const userMessage = `Page URL: ${pageContext.url}
+    const userText = `Page URL: ${pageContext.url}
 Page title: ${pageContext.title}
 HTML:
 ${truncateHtml(pageContext.html)}
 
 Question: ${question}`;
+
+    // When the caller passed a base64 screenshot (aiscope sets this via
+    // its `includeScreenshot` flag), send it as an `image_url` data-URI
+    // content block so questions about visual state can actually see
+    // the pixels. Standard condition steps pass no screenshot and stay
+    // text-only.
+    type ContentPart =
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string } };
+    const content: ContentPart[] = [];
+    if (pageContext.screenshot) {
+      content.push({
+        type: 'image_url',
+        image_url: { url: `data:image/png;base64,${pageContext.screenshot}` },
+      });
+    }
+    content.push({ type: 'text', text: userText });
 
     const t0 = Date.now();
     try {
@@ -168,11 +185,17 @@ Question: ${question}`;
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPTS.conditionEvaluator },
-          { role: 'user', content: userMessage },
+          // Cast: the SDK's union type is permissive but TypeScript
+          // can't narrow it without a per-model type. Same pattern as
+          // decideNextAction below.
+          { role: 'user', content: content as unknown as string },
         ],
       });
 
-      this.logCall('evaluateCondition', t0, response.usage, { question });
+      this.logCall('evaluateCondition', t0, response.usage, {
+        question,
+        withScreenshot: !!pageContext.screenshot,
+      });
 
       const text = response.choices[0]?.message?.content ?? '';
       return parseJsonResponse<ConditionEvaluation>(text, 'evaluateCondition');
