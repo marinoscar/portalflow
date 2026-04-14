@@ -5,6 +5,7 @@ import type {
   InteractAction,
   WaitAction,
   ToolCallAction,
+  GotoAction,
   Selectors,
 } from '@portalflow/schema';
 import { useHasActiveProvider, useLlmCall } from '../hooks/useLlm';
@@ -165,6 +166,9 @@ function StepEditor({
       {step.type === 'tool_call' && (
         <ToolCallEditor action={step.action as ToolCallAction} onUpdate={onUpdate} />
       )}
+      {step.type === 'goto' && (
+        <GotoEditor action={step.action as GotoAction} onUpdate={onUpdate} />
+      )}
 
       <SelectorsEditor step={step} onUpdate={onUpdate} />
       <AdvancedEditor step={step} onUpdate={onUpdate} />
@@ -188,6 +192,35 @@ function NavigateEditor({
         onChange={(e) => onUpdate({ action: { ...action, url: e.target.value } })}
       />
     </label>
+  );
+}
+
+function GotoEditor({
+  action,
+  onUpdate,
+}: {
+  action: GotoAction;
+  onUpdate: (changes: Partial<Step>) => void;
+}) {
+  return (
+    <>
+      <label className="field">
+        <span>Jump to step id</span>
+        <input
+          type="text"
+          value={action.targetStepId}
+          onChange={(e) =>
+            onUpdate({ action: { ...action, targetStepId: e.target.value } })
+          }
+          placeholder="step-1"
+        />
+      </label>
+      <p className="hint-small">
+        Resets the runner's instruction pointer to the named top-level step. Templates
+        like <code>{'{{varName}}'}</code> are allowed. Jumps are scoped to the top level
+        only — you cannot target steps inside a loop or function body.
+      </p>
+    </>
   );
 }
 
@@ -492,7 +525,8 @@ function SelectorsEditor({
     step.type === 'navigate' ||
     step.type === 'wait' ||
     step.type === 'tool_call' ||
-    step.type === 'condition'
+    step.type === 'condition' ||
+    step.type === 'goto'
   ) {
     return null;
   }

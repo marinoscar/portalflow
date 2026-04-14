@@ -703,6 +703,44 @@ This is exactly the surface that makes persistent mode feel like a returning hum
 
 ---
 
+## Control Flow and Recovery
+
+PortalFlow supports step-level error inspection and step-to-step jumps for building recovery flows. After every step settles (success, skip, or failed-then-abort), the runtime records these context variables:
+
+- `<stepId>_status` — `"success"` / `"failed"` / `"skipped"`, keyed by step id
+- `<stepId>_error` — error message (only set when status is `failed`)
+- `last_step_id`, `last_step_status`, `last_step_error` — rolling pointers to the most recently settled step
+
+The same data is exposed as system functions — `{{$lastStepStatus}}`, `{{$lastStepError}}`, `{{$lastStepId}}` — so you can read step state from any templated URL, tool_call arg, or other templated field.
+
+**Conditional jumps:** `condition` steps now honor `thenStep` / `elseStep` fields that name a top-level step to jump to when the check evaluates true/false. Combined with the `last_step_status` variable, you can fork into a recovery handler and then use a `goto` step to jump back and retry:
+
+```json
+[
+  { "id": "step-login", "type": "navigate", "action": { "url": "..." }, "onFailure": "skip", ... },
+  { "id": "check", "type": "condition",
+    "action": {
+      "check": "variable_equals",
+      "value": "last_step_status=failed",
+      "thenStep": "step-recover",
+      "elseStep": "step-continue"
+    } },
+  { "id": "step-recover", "type": "interact", "action": { "interaction": "click" }, ... },
+  { "id": "jump-back", "type": "goto", "action": { "targetStepId": "step-login" } },
+  { "id": "step-continue", "type": "navigate", "action": { "url": "..." }, ... }
+]
+```
+
+**Goto step:** The new `goto` step type unconditionally resets the runner's instruction pointer to a named top-level step. `action.targetStepId` supports template syntax.
+
+**Safety net:** A hard cap of **1000 step executions per run** catches runaway goto loops. A broken retry pattern aborts in under a second with a clear error instead of hanging the process.
+
+**Jump scope:** Jumps only work at the top level. Targets inside loop substeps or function bodies are rejected at schema validation time — the iteration / parameter scope would be lost. For retry-from-earlier inside a loop, put the retry logic in a function and invoke it via `call`.
+
+See `docs/AUTOMATION-JSON-SPEC.md` §6.10 for the full semantics, the worked recovery pattern, and the list of validation errors you may encounter. See `tools/cli/examples/retry-with-goto.json` for a runnable example.
+
+---
+
 ## Logging and Troubleshooting
 
 PortalFlow uses [pino](https://getpino.io) for structured, JSON-native logging. Every automation run produces a detailed event stream you can grep, pipe through `jq`, or follow live in a terminal.

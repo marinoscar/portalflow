@@ -82,6 +82,7 @@ automations are resilient to minor UI changes without requiring manual updates t
   - [6.7 download](#67-download)
   - [6.8 loop](#68-loop)
   - [6.9 call](#69-call)
+  - [6.10 goto](#610-goto)
 - [7. Selectors](#7-selectors)
 - [8. AI Guidance](#8-ai-guidance)
 - [9. Validation Blocks](#9-validation-blocks)
@@ -978,10 +979,10 @@ rejected by `portalflow validate` before the automation runs.
 | `check`    | `ConditionCheck` | Conditional  | Deterministic check type. Required when `ai` is not set. |
 | `value`    | `string`         | Conditional  | Value the `check` evaluates against. Required whenever `check` is set. Supports template syntax. |
 | `ai`       | `string`         | Conditional  | Plain-English question about the page. Required when `check` is not set. Must be non-empty. Supports template syntax. |
-| `thenStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to true. **Not yet implemented** — see the branching limitation below. |
-| `elseStep` | `string`         | Optional     | Step ID to jump to when the condition evaluates to false. **Not yet implemented**. |
-| `thenCall` | `string`         | Optional     | Name of a function to invoke when the condition evaluates to true. The function must be declared in the top-level `functions` array. Takes no args — the function reads shared context. **Implemented.** |
-| `elseCall` | `string`         | Optional     | Name of a function to invoke when the condition evaluates to false. Same rules as `thenCall`. **Implemented.** |
+| `thenStep` | `string`         | Optional     | Top-level step id to jump to when the condition evaluates to true. The runtime resets its instruction pointer to the target. Template syntax supported. Mutually exclusive with `thenCall`. |
+| `elseStep` | `string`         | Optional     | Top-level step id to jump to when the condition evaluates to false. Template syntax supported. Mutually exclusive with `elseCall`. |
+| `thenCall` | `string`         | Optional     | Name of a function to invoke when the condition evaluates to true. The function must be declared in the top-level `functions` array. Takes no args — the function reads shared context. Mutually exclusive with `thenStep`. |
+| `elseCall` | `string`         | Optional     | Name of a function to invoke when the condition evaluates to false. Same rules as `thenCall`. Mutually exclusive with `elseStep`. |
 
 **Deterministic check types:**
 
@@ -1006,25 +1007,37 @@ The AI is instructed to base its answer only on evidence visible in the provided
 hidden/off-screen elements unless the question asks about them, and to keep reasoning short while
 citing specific evidence from the page.
 
-**Branching via function calls (supported):** The condition step supports branching into a
-named function declared in the top-level `functions` section. After the boolean is computed
-and written to `<stepId>_result`:
+**Branching options:** The condition step supports two kinds of branching, which are mutually
+exclusive on each side. After the boolean is computed and written to `<stepId>_result`:
 
-- If the result is `true` and `thenCall` is set, the runtime invokes that function via the
-  shared `invokeFunction` pathway (same depth tracking and shared-context semantics as a
-  regular `call` step). No args are passed; the function reads shared context.
-- If the result is `false` and `elseCall` is set, the runtime invokes that function instead.
-- If neither branch is set, execution continues to the next step as before.
+1. **Jump to another top-level step** via `thenStep` / `elseStep`. The runtime resets its
+   instruction pointer to the named target step, which must be another top-level step id.
+   Use this to retry from earlier in the automation, fork into a recovery handler, or skip
+   forward past steps that are no longer relevant. See §6.10 for the full goto semantics.
 
-Because `thenCall` / `elseCall` take no args, they are ideal for "handle this situation" style
-branches where the function doesn't need parameters — for example, a `handleCaptcha` function,
-a `logoutAndRetry` function, or a `skipToCheckout` function. For parametrized branching, put a
-regular `call` step after the condition and read `<stepId>_result` from its templates to decide
-what to do.
+2. **Invoke a function** via `thenCall` / `elseCall`. The named function is invoked via the
+   shared `invokeFunction` pathway (same depth tracking and shared-context semantics as a
+   regular `call` step). No args are passed; the function reads shared context. After the
+   function returns, execution continues on the next top-level step (the condition step
+   does not jump). Use this for "handle this situation" branches that stay local.
 
-**Known limitation (step jumping):** The schema also has `thenStep` and `elseStep` fields that
-name step IDs to jump to, but step jumping is not yet implemented in the runner. They parse
-cleanly but have no runtime effect today. Prefer `thenCall` / `elseCall` for branching.
+If neither branch is set, execution continues to the next step as before. Mixing `thenStep`
+with `thenCall` on the same condition is rejected by schema validation; same for `elseStep`
+with `elseCall`. The classic "did the previous step fail?" pattern looks like:
+
+```json
+{
+  "type": "condition",
+  "action": {
+    "check": "variable_equals",
+    "value": "last_step_status=failed",
+    "thenStep": "step-recover",
+    "elseStep": "step-continue"
+  }
+}
+```
+
+See §6.10 for the full retry-from-earlier recipe using `thenStep` + a `goto` step.
 
 **Deterministic example:**
 
@@ -1100,7 +1113,8 @@ can read `{{step-cond-captcha_reasoning}}` to see why the AI decided the page ha
 - An empty or whitespace-only `ai` string is rejected at validation time.
 - `thenCall` / `elseCall` don't accept args. If you need to pass data to the branch, set a
   shared-context variable before the condition or use a regular `call` step afterwards.
-- `thenStep` / `elseStep` are NOT yet implemented. Use `thenCall` / `elseCall` for branching.
+- `thenStep` / `elseStep` jump targets must be TOP-LEVEL step ids. Substep ids inside loop
+  bodies or function bodies are rejected at schema-validation time.
 
 ---
 
@@ -1293,6 +1307,156 @@ and `"abort"` will halt the automation.
 - Warning-only behavior for unknown args: if you pass an arg whose name doesn't match any
   declared parameter, the runtime logs a warning but proceeds. This is deliberate, but watch
   for these warnings in your run logs when debugging.
+
+---
+
+### 6.10 goto
+
+**Purpose:** Jump the runner's instruction pointer to a named top-level step. Used in
+combination with `condition` steps to build "step X failed, run a recovery handler, then
+try from the top" patterns without duplicating steps, and as a standalone tool to skip
+forward past steps that are no longer relevant.
+
+**Action shape:**
+
+| Field          | Type     | Required | Description |
+|----------------|----------|----------|-------------|
+| `targetStepId` | `string` | Required | The top-level step id to jump to. Template syntax supported — `{{varName}}` resolves at runtime, literal values are validated at schema time. |
+
+**Minimal example:**
+
+```json
+{
+  "id": "jump-back-to-login",
+  "name": "Retry the login flow",
+  "type": "goto",
+  "action": { "targetStepId": "step-login" },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 1000
+}
+```
+
+**Templated target:**
+
+```json
+{
+  "id": "dynamic-goto",
+  "name": "Jump based on runtime variable",
+  "type": "goto",
+  "action": { "targetStepId": "{{nextStep}}" },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 1000
+}
+```
+
+**Scope — top-level only:** Jump targets must be TOP-LEVEL step ids. Substep ids inside a
+`loop`'s body or a function body are rejected at schema-validation time. The reason is
+scope safety: jumping into the middle of a loop would skip the iteration setup (the
+`indexVar` and `itemVar` bindings), and jumping into a function body would bypass the
+parameter save-and-restore wrapper. If you need retry-from-earlier inside a loop, put the
+retry logic in a function and invoke it via `call`.
+
+**Step outcome tracking:** A goto step records its own outcome as `success` (the jump
+itself succeeded — whether the jump target eventually works is a separate question). The
+`<stepId>_status` / `last_step_status` variables reflect this, so if you care about
+distinguishing "the goto fired" from "the goto target completed successfully", check the
+target step's own variables after it runs.
+
+**Execution cap — infinite loop safety:** Every automation run has a hard cap of **1000
+total step executions**. A runaway goto (e.g. `step-B → goto step-A` with no exit
+condition) will trip the cap within a few dozen milliseconds and abort the run with a
+clear error:
+
+```
+Step execution cap (1000) exceeded — likely a goto loop.
+Add a condition that breaks the cycle or raise the cap.
+```
+
+1000 is a generous ceiling for real automations (the biggest worked example in this
+document has ~25 top-level steps) but is tight enough to catch foot-guns immediately. If
+you hit the cap on a legitimate workflow, add a `condition` step that breaks the cycle
+based on a counter or a page-state check.
+
+**Worked recovery pattern — "step X failed, recover, then retry from the top":**
+
+```json
+[
+  {
+    "id": "step-login",
+    "type": "navigate",
+    "action": { "url": "https://portal.example.com/login" },
+    "onFailure": "skip",
+    "maxRetries": 0,
+    "timeout": 15000
+  },
+  {
+    "id": "check-login",
+    "type": "condition",
+    "action": {
+      "check": "variable_equals",
+      "value": "step-login_status=failed",
+      "thenStep": "step-recover",
+      "elseStep": "step-after-login"
+    },
+    "onFailure": "abort",
+    "maxRetries": 0,
+    "timeout": 1000
+  },
+  {
+    "id": "step-recover",
+    "name": "Clear stale cookies and refresh state",
+    "type": "interact",
+    "action": { "interaction": "click" },
+    "selectors": { "primary": "button.clear-session" },
+    "onFailure": "skip",
+    "maxRetries": 0,
+    "timeout": 5000
+  },
+  {
+    "id": "goto-retry",
+    "type": "goto",
+    "action": { "targetStepId": "step-login" },
+    "onFailure": "abort",
+    "maxRetries": 0,
+    "timeout": 1000
+  },
+  {
+    "id": "step-after-login",
+    "type": "navigate",
+    "action": { "url": "https://portal.example.com/dashboard" },
+    "onFailure": "abort",
+    "maxRetries": 2,
+    "timeout": 15000
+  }
+]
+```
+
+The flow:
+
+1. `step-login` runs with `onFailure: "skip"` so a failure does NOT abort the automation.
+2. `check-login` reads `step-login_status` (or equivalently `last_step_status`). If the
+   login failed, it jumps to `step-recover`. If it succeeded, it jumps past the recovery
+   handler to `step-after-login`.
+3. `step-recover` runs its recovery action (clear cookies, close a modal, whatever the
+   portal needs). It also uses `onFailure: "skip"` so a recovery failure doesn't trap us.
+4. `goto-retry` unconditionally jumps back to `step-login` to try the whole login flow
+   again. The execution cap will catch it if the recovery never succeeds.
+
+If the recovery DOES succeed, the second attempt at `step-login` completes normally,
+`check-login` jumps to `step-after-login`, and the automation carries on.
+
+**Validation errors you may see:**
+
+- `Duplicate top-level step id "<id>"` — two top-level steps share the same id, which
+  would make jump targets ambiguous.
+- `Step "<id>" goto target "<target>" is not a known top-level step id` — the literal
+  `targetStepId` doesn't match any top-level step.
+- `Step "<id>" goto target "<target>" points at a nested step` — the target matches a
+  loop substep or function body step id. Jump targets must be top-level.
+- `Step "<id>" requested a jump to "<target>", but no top-level step with that id exists`
+  — runtime error when a templated `targetStepId` resolves to an unknown id.
 
 ---
 
@@ -1929,7 +2093,58 @@ YYYY-MM-DD string with no time component.
 | `$uuid`  | `8a3c2e1f-4b6d-4f8a-9c1d-7e2b3f5a6c8d`  | Fresh UUID v4 on every reference. Two `{{$uuid}}` calls in the same step produce different ids — use for idempotency keys, request ids, or unique filename suffixes when collisions matter. |
 | `$nonce` | `k9m3p7q2`                              | 8-character random alphanumeric string. Cheaper than a UUID for filenames where collision-resistance is not critical. |
 
-#### 13.4.6 Examples
+#### 13.4.6 Previous-step introspection (set after each terminal step)
+
+These functions return information about the most recent step that settled — whether it
+succeeded, was skipped after failure, or failed terminally. Use them inside `condition.value`
+fields (via the `variable_equals` check), inside any templated URL / args / `value` field,
+or anywhere else the template resolver runs. Values update live as the automation progresses.
+
+| Function          | Output (example)         | Notes |
+|-------------------|--------------------------|-------|
+| `$lastStepStatus` | `success`                | `success` / `failed` / `skipped` for the most recent step that settled. Returns `"none"` before any step has run. |
+| `$lastStepError`  | `Element not found: #login` | The error message of the most recent step, or the empty string if the most recent step succeeded, is a goto / condition, or no step has run yet. |
+| `$lastStepId`     | `step-login`             | The id of the most recent step that settled, or the empty string before any step runs. |
+
+The same information is ALSO exposed as regular context variables so it composes with the
+existing `condition.check = "variable_equals"` check (no new check type required):
+
+| Variable              | Values                                           |
+|-----------------------|--------------------------------------------------|
+| `<stepId>_status`     | `success` / `failed` / `skipped`, keyed by step id |
+| `<stepId>_error`      | error message string, or empty on success      |
+| `last_step_id`        | id of the most recently settled step           |
+| `last_step_status`    | same values as `<stepId>_status`                |
+| `last_step_error`     | same values as `<stepId>_error`                 |
+
+**The "did previous step fail?" idiom:**
+
+```json
+{
+  "id": "check-login",
+  "type": "condition",
+  "action": {
+    "check": "variable_equals",
+    "value": "last_step_status=failed",
+    "thenStep": "step-recover",
+    "elseStep": "step-continue"
+  }
+}
+```
+
+You can also pipe the error message directly into a URL or a tool_call arg:
+
+```json
+{
+  "type": "navigate",
+  "action": { "url": "https://example.com/debug?reason={{$lastStepError:ok}}" }
+}
+```
+
+See §6.10 for the full retry-from-earlier recipe that combines `last_step_status`, a
+condition with `thenStep`, and a `goto` back to the original step.
+
+#### 13.4.7 Examples
 
 **Dated download filename** so daily runs do not overwrite each other:
 
@@ -3591,7 +3806,7 @@ interface Step {
 }
 
 type StepType = 'navigate' | 'interact' | 'wait' | 'extract'
-              | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
+              | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
 
 type OnFailure = 'retry' | 'skip' | 'abort';
 ```
@@ -3661,14 +3876,27 @@ interface ConditionAction {
   check?: ConditionCheck;   // deterministic check type
   value?: string;           // required when `check` is set; supports templates
   ai?: string;              // plain-English question sent to the LLM; supports templates
-  thenStep?: string;        // step ID — not yet implemented in the runner
-  elseStep?: string;        // step ID — not yet implemented in the runner
+  // Branching (mutually exclusive per side): jump to a top-level step
+  // OR invoke a function, never both.
+  thenStep?: string;        // top-level step id to jump to when result is true
+  elseStep?: string;        // top-level step id to jump to when result is false
   thenCall?: string;        // name of a function to invoke when result is true
   elseCall?: string;        // name of a function to invoke when result is false
 }
 
 type ConditionCheck = 'element_exists' | 'url_matches' | 'text_contains' | 'variable_equals';
 ```
+
+### `GotoAction`
+
+```typescript
+interface GotoAction {
+  targetStepId: string;     // top-level step id; template syntax supported
+}
+```
+
+The step type is `"goto"` and the runner resets its instruction pointer to the named
+top-level step. See §6.10 for the full semantics and the execution-cap safety net.
 
 Schema refinements enforce:
 
@@ -3829,7 +4057,7 @@ interface Settings {
 
 type InputType       = 'string' | 'secret' | 'number' | 'boolean';
 type InputSource     = 'env' | 'vaultcli' | 'cli_arg' | 'literal';
-type StepType        = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
+type StepType        = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
 type OnFailure       = 'retry' | 'skip' | 'abort';
 type InteractionType = 'click' | 'type' | 'select' | 'check' | 'uncheck' | 'hover' | 'focus';
 type WaitCondition   = 'selector' | 'navigation' | 'delay' | 'network_idle';

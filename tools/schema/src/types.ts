@@ -7,6 +7,7 @@ import {
   ExtractActionSchema,
   FunctionDefinitionSchema,
   FunctionParameterSchema,
+  GotoActionSchema,
   InputSchema,
   InteractActionSchema,
   LoopActionSchema,
@@ -45,6 +46,7 @@ export type LoopAction = z.infer<typeof LoopActionSchema>;
 export type LoopItems = z.infer<typeof LoopItemsSchema>;
 export type LoopExitWhen = z.infer<typeof LoopExitWhenSchema>;
 export type CallAction = z.infer<typeof CallActionSchema>;
+export type GotoAction = z.infer<typeof GotoActionSchema>;
 
 // Function-related types
 export type FunctionParameter = z.infer<typeof FunctionParameterSchema>;
@@ -59,12 +61,13 @@ export type Action =
   | ConditionAction
   | DownloadAction
   | LoopAction
-  | CallAction;
+  | CallAction
+  | GotoAction;
 
 // Convenience enums derived from the schema literals
 export type InputType = Input['type'];
 export type InputSource = NonNullable<Input['source']>;
-export type StepType = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
+export type StepType = 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
 export type OnFailure = 'retry' | 'skip' | 'abort';
 export type InteractionType = InteractAction['interaction'];
 export type WaitCondition = WaitAction['condition'];

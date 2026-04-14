@@ -4,6 +4,7 @@ import type {
   DownloadAction,
   ExtractAction,
   FunctionDefinition,
+  GotoAction,
   InteractAction,
   LoopAction,
   LoopExitWhen,
@@ -24,12 +25,50 @@ import { RunContext } from './run-context.js';
 const RETRY_BASE_DELAY_MS = 1_000;
 const MAX_CALL_DEPTH = 16;
 
+/**
+ * Result of `executeWithPolicy`. Extends the old boolean shape to carry
+ * jump requests emitted by a condition step's `thenStep` / `elseStep`
+ * or by a `goto` step's `targetStepId`. The top-level runner loop is
+ * the only place that actually applies the jump; internal callers (loops
+ * and function bodies) propagate a jump outward by re-throwing it as a
+ * tagged error so the outcome can be honored at the top level.
+ */
+export type StepOutcome =
+  | 'continue'
+  | 'abort'
+  | { kind: 'jump'; targetStepId: string };
+
+/**
+ * Tagged error used to propagate a jump outcome out of a nested executor
+ * (a loop's substep runner or a function body). The top-level runner
+ * loop catches this via executeWithPolicy's normal failure path when a
+ * jump bubbles out of a block it cannot satisfy. Inside the top-level
+ * loop the jump never becomes an error — executeWithPolicy returns the
+ * `{kind:'jump'}` variant directly.
+ */
+export class JumpOutOfBlockError extends Error {
+  constructor(public readonly targetStepId: string) {
+    super(
+      `Cannot jump to step "${targetStepId}" from inside a loop substep or function body. Jumps are only supported at the top level of the automation.`,
+    );
+    this.name = 'JumpOutOfBlockError';
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class StepExecutor {
   private callDepth = 0;
+  /**
+   * Set by `executeCondition` (when a thenStep/elseStep fires) or by
+   * `executeGoto` (unconditionally). Consumed and cleared by
+   * `executeWithPolicy` at the top of the wrapper, so every step gets a
+   * clean slate and a single jump request never bleeds into the next
+   * step's outcome.
+   */
+  private pendingJump: string | null = null;
 
   constructor(
     private readonly pageService: PageService,
@@ -45,9 +84,19 @@ export class StepExecutor {
 
   /**
    * Executes a step with its retry/skip/abort policy.
-   * Returns true if execution should continue to the next step, false to abort.
+   *
+   * Returns a `StepOutcome`:
+   *   - `'continue'` — step ran (or was skipped after failure); run the next step.
+   *   - `'abort'`    — step failed with abort policy; stop the whole run.
+   *   - `{kind:'jump', targetStepId}` — step requested a jump (goto / condition.thenStep / etc).
+   *     The top-level runner loop applies the jump by resetting its instruction pointer.
    */
-  async executeWithPolicy(step: Step): Promise<boolean> {
+  async executeWithPolicy(step: Step): Promise<StepOutcome> {
+    // Clear any stale pending jump from a prior step. The field is set
+    // from inside `execute(step)` (by executeCondition / executeGoto) and
+    // consumed here at the end of the wrapper.
+    this.pendingJump = null;
+
     const policy = step.onFailure;
     const maxRetries = step.maxRetries;
     let attempts = 0;
@@ -67,7 +116,15 @@ export class StepExecutor {
           },
           'step complete',
         );
-        return true; // success
+        this.context.recordStepOutcome(step.id, 'success');
+        // If the step set a pending jump (condition.thenStep or goto),
+        // honor it here instead of returning plain 'continue'.
+        if (this.pendingJump !== null) {
+          const target = this.pendingJump;
+          this.pendingJump = null;
+          return { kind: 'jump', targetStepId: target };
+        }
+        return 'continue';
       } catch (err) {
         const durationMs = Date.now() - attemptStart;
         const message = err instanceof Error ? err.message : String(err);
@@ -107,7 +164,16 @@ export class StepExecutor {
             },
             `Step failed and will be skipped: ${message}`,
           );
-          return true; // continue to next step
+          this.context.recordStepOutcome(step.id, 'skipped', message);
+          // If the failed step had already set a pending jump before
+          // throwing (unusual but possible for composite handlers),
+          // honor it even on the skip path. Clear otherwise.
+          if (this.pendingJump !== null) {
+            const target = this.pendingJump;
+            this.pendingJump = null;
+            return { kind: 'jump', targetStepId: target };
+          }
+          return 'continue';
         }
 
         // abort (or retry exhausted)
@@ -139,7 +205,9 @@ export class StepExecutor {
           }
         }
 
-        return false; // stop execution
+        this.context.recordStepOutcome(step.id, 'failed', message);
+        this.pendingJump = null;
+        return 'abort';
       }
     }
   }
@@ -176,6 +244,9 @@ export class StepExecutor {
         break;
       case 'call':
         await this.executeCall(step);
+        break;
+      case 'goto':
+        await this.executeGoto(step);
         break;
       default: {
         const exhaustive: never = step.type;
@@ -232,10 +303,17 @@ export class StepExecutor {
 
       let substepAborted = false;
       for (const substep of substeps) {
-        const success = await this.executeWithPolicy(substep);
-        if (!success) {
+        const outcome = await this.executeWithPolicy(substep);
+        if (outcome === 'abort') {
           substepAborted = true;
           break;
+        }
+        if (typeof outcome === 'object' && outcome.kind === 'jump') {
+          // Jumps are not valid from inside a loop substep — the loop's
+          // iteration state would be lost. Surface the attempt as a hard
+          // failure of the iteration so the enclosing loop step respects
+          // its own onFailure policy (retry / skip / abort).
+          throw new JumpOutOfBlockError(outcome.targetStepId);
         }
         this.context.incrementCompleted();
       }
@@ -695,6 +773,31 @@ export class StepExecutor {
     await this.invokeFunction(fnName, action.args ?? {}, step.id);
   }
 
+  // ---------------------------------------------------------------------------
+  // Goto — request an unconditional jump to a named top-level step
+  // ---------------------------------------------------------------------------
+  //
+  // Sets `pendingJump` on the executor. `executeWithPolicy` reads and clears
+  // the field after this step returns and surfaces the jump as a
+  // `{kind:'jump', targetStepId}` outcome. The top-level runner loop applies
+  // the jump by resetting its instruction pointer. `targetStepId` supports
+  // template resolution so the jump target can be variable-driven.
+
+  private async executeGoto(step: Step): Promise<void> {
+    const action = step.action as GotoAction;
+    const target = this.context.resolveTemplate(action.targetStepId).trim();
+    if (target.length === 0) {
+      throw new Error(
+        `Step "${step.id}": goto action has an empty targetStepId (resolved from "${action.targetStepId}").`,
+      );
+    }
+    this.pendingJump = target;
+    this.context.logger.debug(
+      { stepId: step.id, targetStepId: target },
+      'goto step set pending jump',
+    );
+  }
+
   /**
    * Shared entry point used by executeCall AND by executeCondition's
    * thenCall/elseCall. Resolves args through templating, shadows the
@@ -764,9 +867,15 @@ export class StepExecutor {
 
     try {
       for (const innerStep of fn.steps) {
-        const ok = await this.executeWithPolicy(innerStep);
-        if (!ok) {
+        const outcome = await this.executeWithPolicy(innerStep);
+        if (outcome === 'abort') {
           throw new Error(`Function "${name}" aborted at step "${innerStep.id}"`);
+        }
+        if (typeof outcome === 'object' && outcome.kind === 'jump') {
+          // Jumps inside a function body would escape the function's
+          // parameter-scope save/restore. Reject them as a hard failure
+          // of the call step; the caller's onFailure policy kicks in.
+          throw new JumpOutOfBlockError(outcome.targetStepId);
         }
         this.context.incrementCompleted();
       }
@@ -886,7 +995,7 @@ export class StepExecutor {
           thenStep: action.thenStep ?? null,
           elseStep: action.elseStep ?? null,
         },
-        `Condition evaluated to ${result} (step jumping is not yet implemented)`,
+        `Condition evaluated to ${result}`,
       );
     }
 
@@ -897,16 +1006,33 @@ export class StepExecutor {
       this.context.setVariable(`${step.id}_reasoning`, reasoning);
     }
 
-    // Branch into a named function based on the boolean result. No args are
-    // passed — the function reads shared context. Schema refinement has
-    // already validated that the referenced function exists.
-    if (result && action.thenCall) {
+    // Branching: thenStep/elseStep jumps take precedence over thenCall/elseCall.
+    // Jumps set a pendingJump that executeWithPolicy reads out after this step
+    // returns. Function calls execute inline (existing behavior).
+    //
+    // Schema refinement guarantees thenStep+thenCall are mutually exclusive —
+    // same for elseStep+elseCall — so the if/else-if cascade is unambiguous.
+    if (result && action.thenStep) {
+      const targetId = this.context.resolveTemplate(action.thenStep);
+      this.context.logger.info(
+        { stepId: step.id, thenStep: targetId },
+        `Condition true — jumping to step "${targetId}"`,
+      );
+      this.pendingJump = targetId;
+    } else if (result && action.thenCall) {
       const fnName = this.context.resolveTemplate(action.thenCall);
       this.context.logger.info(
         { stepId: step.id, thenCall: fnName },
         `Condition true — invoking thenCall function "${fnName}"`,
       );
       await this.invokeFunction(fnName, {}, step.id);
+    } else if (!result && action.elseStep) {
+      const targetId = this.context.resolveTemplate(action.elseStep);
+      this.context.logger.info(
+        { stepId: step.id, elseStep: targetId },
+        `Condition false — jumping to step "${targetId}"`,
+      );
+      this.pendingJump = targetId;
     } else if (!result && action.elseCall) {
       const fnName = this.context.resolveTemplate(action.elseCall);
       this.context.logger.info(

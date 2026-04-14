@@ -122,6 +122,16 @@ export const CallActionSchema = z.object({
   args: z.record(z.string()).optional(),
 });
 
+// A goto step jumps the runner's instruction pointer to a named top-level
+// step. Useful for retry-from-earlier patterns (e.g. a condition detects
+// that a login failed and falls back to a handler that re-attempts from
+// step 1). Template syntax is allowed on targetStepId so the jump target
+// can be variable-driven; non-templated values are schema-validated to
+// point at a known top-level step id.
+export const GotoActionSchema = z.object({
+  targetStepId: z.string().min(1),
+});
+
 // ---------------------------------------------------------------------------
 // Step
 // ---------------------------------------------------------------------------
@@ -146,13 +156,14 @@ type ConditionActionOutput = z.output<typeof ConditionActionSchema>;
 type DownloadActionOutput = z.output<typeof DownloadActionSchema>;
 type LoopActionOutput = z.output<typeof LoopActionSchema>;
 type CallActionOutput = z.output<typeof CallActionSchema>;
+type GotoActionOutput = z.output<typeof GotoActionSchema>;
 
 // Forward-declare the Step interface so TypeScript can resolve z.lazy() recursion.
 export interface Step {
   id: string;
   name: string;
   description?: string;
-  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call';
+  type: 'navigate' | 'interact' | 'wait' | 'extract' | 'tool_call' | 'condition' | 'download' | 'loop' | 'call' | 'goto';
   action: NavigateActionOutput
     | InteractActionOutput
     | WaitActionOutput
@@ -161,7 +172,8 @@ export interface Step {
     | ConditionActionOutput
     | DownloadActionOutput
     | LoopActionOutput
-    | CallActionOutput;
+    | CallActionOutput
+    | GotoActionOutput;
   aiGuidance?: string;
   selectors?: z.output<typeof SelectorsSchema>;
   validation?: z.output<typeof ValidationSchema>;
@@ -183,7 +195,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
     description: z.string().optional(),
     type: z.enum([
       'navigate', 'interact', 'wait', 'extract',
-      'tool_call', 'condition', 'download', 'loop', 'call',
+      'tool_call', 'condition', 'download', 'loop', 'call', 'goto',
     ]),
     action: z.union([
       NavigateActionSchema,
@@ -195,6 +207,7 @@ export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
       DownloadActionSchema,
       LoopActionSchema,
       CallActionSchema,
+      GotoActionSchema,
     ]),
     aiGuidance: z.string().optional(),
     selectors: SelectorsSchema.optional(),
@@ -353,5 +366,130 @@ export const AutomationSchema = z
     walkSteps(automation.steps, ['steps']);
     (automation.functions ?? []).forEach((fn, i) => {
       walkSteps(fn.steps, ['functions', i, 'steps']);
+    });
+
+    // 3. Top-level step ids must be unique. Jump targets (goto.targetStepId /
+    //    condition.thenStep / condition.elseStep) resolve against the
+    //    top-level step map, so duplicates would make jumps ambiguous.
+    const topLevelIds = new Set<string>();
+    const duplicateTopLevelIds = new Set<string>();
+    automation.steps.forEach((step, idx) => {
+      if (topLevelIds.has(step.id)) {
+        duplicateTopLevelIds.add(step.id);
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate top-level step id "${step.id}". Top-level step ids must be unique for jump targets to be unambiguous.`,
+          path: ['steps', idx, 'id'],
+        });
+      }
+      topLevelIds.add(step.id);
+    });
+
+    // 4. Collect the set of NESTED step ids (loop substeps and function
+    //    body steps) so we can reject jump targets that reference them.
+    //    Jumps only make sense at the top level — mid-block targets lose
+    //    iteration context and function parameter scope.
+    const nestedStepIds = new Set<string>();
+    const collectNestedIds = (steps: Step[]): void => {
+      steps.forEach((s) => {
+        if (s.substeps && s.substeps.length > 0) {
+          s.substeps.forEach((sub) => {
+            nestedStepIds.add(sub.id);
+          });
+          collectNestedIds(s.substeps);
+        }
+      });
+    };
+    collectNestedIds(automation.steps);
+    (automation.functions ?? []).forEach((fn) => {
+      fn.steps.forEach((s) => {
+        nestedStepIds.add(s.id);
+      });
+      collectNestedIds(fn.steps);
+    });
+
+    // 5. Validate jump target references (literal values only — templated
+    //    values resolve at runtime and are checked there). Also reject
+    //    mixing thenStep+thenCall and elseStep+elseCall on a condition.
+    const validateJumpTarget = (
+      target: string,
+      stepId: string,
+      path: (string | number)[],
+      fieldName: string,
+    ): void => {
+      if (isTemplate(target)) return;
+      if (duplicateTopLevelIds.has(target)) {
+        // Already flagged as a dup — don't double-report.
+        return;
+      }
+      if (nestedStepIds.has(target) && !topLevelIds.has(target)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Step "${stepId}" ${fieldName} "${target}" points at a nested step (loop substep or function body). Jump targets must be top-level step ids.`,
+          path,
+        });
+        return;
+      }
+      if (!topLevelIds.has(target)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Step "${stepId}" ${fieldName} "${target}" is not a known top-level step id.`,
+          path,
+        });
+      }
+    };
+
+    // Walk top-level steps to find jump references (goto.targetStepId +
+    // condition.thenStep / elseStep). Nested substeps' jumps are caught
+    // by walkSteps below for the mutual-exclusion check only; their
+    // jump targets would already fail the nested-id refinement above.
+    automation.steps.forEach((step, idx) => {
+      if (step.type === 'goto') {
+        const action = step.action as { targetStepId: string };
+        validateJumpTarget(
+          action.targetStepId,
+          step.id,
+          ['steps', idx, 'action', 'targetStepId'],
+          'goto target',
+        );
+      }
+      if (step.type === 'condition') {
+        const action = step.action as {
+          thenStep?: string;
+          elseStep?: string;
+          thenCall?: string;
+          elseCall?: string;
+        };
+        if (action.thenStep && action.thenCall) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `condition step "${step.id}" has both "thenStep" and "thenCall" — pick exactly one`,
+            path: ['steps', idx, 'action'],
+          });
+        }
+        if (action.elseStep && action.elseCall) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `condition step "${step.id}" has both "elseStep" and "elseCall" — pick exactly one`,
+            path: ['steps', idx, 'action'],
+          });
+        }
+        if (action.thenStep) {
+          validateJumpTarget(
+            action.thenStep,
+            step.id,
+            ['steps', idx, 'action', 'thenStep'],
+            'thenStep target',
+          );
+        }
+        if (action.elseStep) {
+          validateJumpTarget(
+            action.elseStep,
+            step.id,
+            ['steps', idx, 'action', 'elseStep'],
+            'elseStep target',
+          );
+        }
+      }
     });
   });

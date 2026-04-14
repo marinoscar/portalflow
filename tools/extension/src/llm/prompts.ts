@@ -221,6 +221,70 @@ replace the automation's steps array directly, so correctness matters.
    - Unknown function names like \`{{$dates}}\` (typos) are left literal in
      the output. Spell them carefully.
 
+12. USE STEP OUTCOME VARIABLES AND JUMPS FOR RECOVERY FLOWS (mandatory when present)
+    Every automation can observe whether its previous steps succeeded,
+    were skipped, or failed — via BOTH per-step variables AND system
+    functions AND a runtime loop that supports jumping backwards. Use
+    these primitives whenever a user asks for retry-from-earlier, "if
+    step X fails run step Y", fallback paths, or recovery handlers.
+
+    a) AFTER each step runs, the runner sets these variables:
+       - \`<stepId>_status\`   — "success" | "failed" | "skipped"
+       - \`<stepId>_error\`    — error message string (empty on success)
+       - \`last_step_id\`      — id of most recently settled step
+       - \`last_step_status\`  — same three values
+       - \`last_step_error\`   — same error string
+       And these three system functions, which read the same state:
+       - \`{{$lastStepStatus}}\` / \`{{$lastStepError}}\` / \`{{$lastStepId}}\`
+
+    b) The condition step's \`thenStep\` and \`elseStep\` fields are FULLY
+       IMPLEMENTED. When the check evaluates, the runtime resets its
+       instruction pointer to the named top-level step id. They are
+       mutually exclusive with \`thenCall\` / \`elseCall\` — pick one per
+       side. Use \`thenStep\` for "jump to recovery handler", use
+       \`thenCall\` for "invoke a function inline and continue".
+
+    c) A new \`goto\` step type does an unconditional jump:
+       \`{ "type": "goto", "action": { "targetStepId": "step-1" }, ... }\`.
+       Template syntax is supported on \`targetStepId\`.
+
+    d) BOTH thenStep/elseStep targets AND goto targets must be
+       TOP-LEVEL step ids. Loop substep ids and function body step
+       ids are rejected at schema validation time.
+
+    e) The runtime enforces a hard cap of 1000 total step executions
+       per run. Runaway goto loops abort fast with a clear error. Make
+       sure every jump path has an exit condition — never produce an
+       automation with a goto that jumps backward without an enclosing
+       condition that can break the cycle.
+
+    f) THE WORKED PATTERN for "if step-X fails, run step-Y to recover,
+       then retry from step-1":
+
+       1. Set \`onFailure: "skip"\` on step-X so a failure doesn't abort
+          the run — the condition check needs to fire.
+       2. Add a condition step right after that reads
+          \`variable_equals\` with \`value: "last_step_status=failed"\`
+          (or \`"step-X_status=failed"\` for precision) and:
+          - \`thenStep: "step-Y"\` to jump to the recovery handler
+          - \`elseStep: "step-after-x"\` to skip past the handler on success
+       3. The step-Y handler runs whatever recovery action is needed.
+       4. Add a \`goto\` step immediately after step-Y that jumps back to
+          "step-1" (or step-X, depending on what needs to be retried).
+       5. The step after the goto is the normal path — it only runs
+          when the condition's elseStep fires, i.e. when step-X succeeded.
+
+    g) When the user describes any of these phrasings, use the pattern:
+       "if step X fails, ..." / "retry the whole thing if ..." /
+       "fall back to a recovery flow" / "check whether the previous
+       step worked" / "go back and try again" / "jump to step Z".
+
+    h) Do NOT add failure handlers as additional retries. The \`maxRetries\`
+       field already handles in-place retries with exponential backoff.
+       The jump mechanism is for HUMAN-GUIDED recovery flows where the
+       handler needs to DO something (close a modal, clear a cookie,
+       switch profiles) before retrying.
+
 ## What you MUST NOT change
 
 - The \`inputRef\` of any type step that currently has one. It points to an input
@@ -461,6 +525,91 @@ these rules automatically:
    in the context.
 5. Do not add a fallback otp-latest step — the adapter already handles
    OTP_TIMEOUT internally.
+
+## Step outcome variables, condition jumps, and goto
+
+The runtime records the outcome of every step that settles and exposes
+it to later steps via context variables and system functions. You can
+compose these with the condition step's newly-working jump fields to
+build retry-from-earlier recovery flows without duplicating steps.
+
+### The primitives
+
+After each step completes (success, skip, or failed-before-abort), the
+runtime sets these variables:
+
+  <stepId>_status      "success" | "failed" | "skipped"
+  <stepId>_error       error message string, or "" on success
+  last_step_id         id of the most recently settled step
+  last_step_status     same three values
+  last_step_error      same error string
+
+These system functions read the same state:
+
+  {{$lastStepStatus}}  {{$lastStepError}}  {{$lastStepId}}
+
+The condition step's \`thenStep\` and \`elseStep\` fields are now fully
+implemented. They name a top-level step id to jump to when the check
+fires. They are mutually exclusive with \`thenCall\` / \`elseCall\`:
+
+  thenStep   — jump to this top-level step id when condition is true
+  elseStep   — jump to this top-level step id when condition is false
+  thenCall   — invoke this function when condition is true (no args)
+  elseCall   — invoke this function when condition is false (no args)
+
+The new \`goto\` step type does an unconditional jump:
+
+\`\`\`json
+{
+  "id": "jump-back",
+  "type": "goto",
+  "action": { "targetStepId": "step-login" },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 1000
+}
+\`\`\`
+
+Jumps only work at the top level. Targets inside loop substeps or
+function bodies are rejected by schema validation. The runtime enforces
+a 1000-step execution cap per run so broken goto loops fail fast.
+
+### The retry-from-earlier pattern
+
+When the user asks for anything like "if step X fails, run step Y then
+try step X again" / "retry the login flow if it didn't work" / "fall
+back to a recovery handler", compose the primitives like this:
+
+1. Set \`onFailure: "skip"\` on the step that might fail, so the
+   automation continues past the failure and the condition check can
+   run.
+2. Add a condition step right after it that reads the last step's
+   status via \`variable_equals\`:
+   \`\`\`json
+   {
+     "type": "condition",
+     "action": {
+       "check": "variable_equals",
+       "value": "last_step_status=failed",
+       "thenStep": "step-recover",
+       "elseStep": "step-continue"
+     }
+   }
+   \`\`\`
+3. step-recover runs whatever recovery action is needed (clear cookies,
+   close a modal, re-request an OTP, switch profiles).
+4. Right after step-recover, add a \`goto\` step that jumps back to the
+   step that originally failed (or step-1, depending on what needs to
+   be retried).
+5. step-continue is the normal path — it only runs when the condition's
+   elseStep fires (i.e. the step succeeded).
+
+### Don't confuse this with maxRetries
+
+The \`maxRetries\` field handles in-place retries with exponential
+backoff. Use it when the step is flaky and a simple wait + retry will
+likely fix it. Use the jump mechanism when the recovery needs to DO
+something different before retrying (not just wait longer).
 
 ## Behavior rules
 
