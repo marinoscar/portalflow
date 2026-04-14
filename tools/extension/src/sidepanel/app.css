@@ -1086,3 +1086,16 @@ body {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Export dual-button layout */
+.export-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.export-hint {
+  font-size: 12px;
+  margin-top: 10px;
+  line-height: 1.4;
+}
