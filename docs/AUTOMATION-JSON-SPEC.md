@@ -72,6 +72,7 @@ automations are resilient to minor UI changes without requiring manual updates t
 - [4. Inputs](#4-inputs)
 - [4.5 Functions](#45-functions)
 - [5. Steps — Common Fields](#5-steps--common-fields)
+  - [5.1 Timeout enforcement](#51-timeout-enforcement)
 - [6. Step Types](#6-step-types)
   - [6.1 navigate](#61-navigate)
   - [6.2 interact](#62-interact)
@@ -547,7 +548,7 @@ and is covered in [section 6](#6-step-types).
 | `validation` | `Validation`  | Optional  | —         | Post-step assertion. See [section 9](#9-validation-blocks). |
 | `onFailure`  | `OnFailure`   | Optional  | `"abort"` | What to do when the step fails: `"retry"`, `"skip"`, or `"abort"`. |
 | `maxRetries` | `number`      | Optional  | `3`       | Number of retry attempts when `onFailure` is `"retry"`. Zero means one attempt, no retries. |
-| `timeout`    | `number`      | Optional  | `30000`   | Per-attempt timeout in milliseconds. |
+| `timeout`    | `number`      | Optional  | `30000`   | Per-attempt timeout in milliseconds. Enforced as a hard ceiling on leaf steps; composite steps (`loop`, `call`, `aiscope`) are exempt. See [§5.1 Timeout enforcement](#51-timeout-enforcement). |
 | `substeps`   | `Step[]`      | Optional  | —         | Child steps. Only used by the `loop` type, but the schema accepts it on any step for flexibility. |
 
 **Defaults to be aware of:**
@@ -563,6 +564,55 @@ and is covered in [section 6](#6-step-types).
 **Note on `substeps`:** The `substeps` field is only functionally meaningful on `loop` type steps.
 The schema accepts it on any step type to avoid needing a separate schema variant for loops. For
 all non-loop steps, any `substeps` value is present in the parsed object but never executed.
+
+### 5.1 Timeout enforcement
+
+The `timeout` field is enforced in two layered ways:
+
+1. **Race ceiling (leaf steps).** When a leaf step executes, the runner wraps the step body in a
+   `Promise.race` against a `setTimeout(step.timeout)` timer. If the body is still running when
+   the timer fires, the step throws:
+
+   ```
+   Step "<id>" (<type>) exceeded step timeout of <N>ms
+   ```
+
+   The error is then subject to the step's `onFailure` policy (retry / skip / abort). The race
+   cannot cancel the in-flight Playwright / LLM / tool operation — it only surfaces a clear
+   failure so the run stops waiting. The underlying operation keeps running until it settles,
+   but the browser is reset or closed shortly after on abort.
+
+2. **Plumbed timeout (wait steps specifically).** For a `wait` step, the effective timeout
+   passed into Playwright's `waitForSelector` / `waitForNavigation` / `waitForNetworkIdle` is
+   `action.timeout ?? step.timeout`. This means:
+
+   ```json
+   { "type": "wait",
+     "action": { "condition": "selector", "value": "#login" },
+     "timeout": 60000 }
+   ```
+
+   will wait up to 60 seconds on the Playwright side, even though `action.timeout` is absent.
+   If `action.timeout` is set, it takes precedence (consistent with it being a per-action
+   override).
+
+**Exempt step types.** The race ceiling is **not** applied to composite step types that carry
+their own internal budgets:
+
+| Step type | Why exempt |
+|-----------|------------|
+| `loop`    | The iteration cap (and optional `exitWhen`) is the budget. Wrapping it here would silently cap long loops at 30 seconds regardless of how many iterations they declared. |
+| `call`    | A `call` step delegates to a function whose nested steps each carry their own `timeout`. The outer `call` wrapper would double-count. |
+| `aiscope` | The agent loop enforces `maxDurationSec` and `maxIterations` internally. A 30-second outer ceiling would break the 5-minute default budget. |
+
+For these step types, set the budget using the step-type-specific field (`maxIterations` /
+`exitWhen` / `maxDurationSec` / `maxIterations`) instead of `step.timeout`. The `timeout` field
+is still parsed and stored on these steps but has no runtime effect.
+
+**Gotcha: `timeout: 0`.** A value of `0` disables the race wrapper entirely (the step runs without
+a ceiling). Playwright still applies its own internal defaults (~30 seconds) to individual
+operations like `click` / `type`, so "no timeout at all" is not actually possible at the engine
+level — only at the step-wrapper level.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "@portalflow/cli",
-  "version": "1.1.13",
+  "version": "1.1.14",
   "description": "PortalFlow CLI for running and managing browser automations",
   "type": "module",
   "bin": {
