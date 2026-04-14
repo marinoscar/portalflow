@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { sendMessage } from '../shared/messaging';
-import type { RecordingSession } from '../shared/types';
+import type { ChatMessage, HtmlSnapshot, RecordingSession } from '../shared/types';
 import type { Message } from '../shared/messaging';
 import type { Input, Step } from '@portalflow/schema';
 import { automationReducer, initialAutomationState } from './state/automation-state';
@@ -12,7 +12,9 @@ import { StepRow } from './components/StepRow';
 import { ExportBar } from './components/ExportBar';
 import { LlmNotConfiguredBanner } from './components/LlmNotConfiguredBanner';
 import { VersionHistory } from './components/VersionHistory';
+import { ChatPanel } from './components/ChatPanel';
 import { useUndoRedoShortcuts } from './hooks/useKeyboardShortcuts';
+import { useHasActiveProvider } from './hooks/useLlm';
 import './app.css';
 
 const AUTO_COMMIT_DEBOUNCE_MS = 2000;
@@ -159,6 +161,121 @@ export function App() {
   const headIdx = state.versions.findIndex((v) => v.id === state.currentVersionId);
   const canUndo = headIdx > 0;
   const canRedo = headIdx >= 0 && headIdx < state.versions.length - 1;
+
+  // --- chat helpers ---
+
+  const hasProvider = useHasActiveProvider();
+  const [isChatSending, setIsChatSending] = useState(false);
+
+  const pickRecentSnapshots = useCallback((): HtmlSnapshot[] => {
+    if (!session?.snapshots) return [];
+    // Walk events from the end, collect the most recent unique snapshotIds,
+    // and return their HtmlSnapshot entries. Cap at 3.
+    const seen = new Set<string>();
+    const picked: HtmlSnapshot[] = [];
+    for (let i = session.events.length - 1; i >= 0 && picked.length < 3; i--) {
+      const id = session.events[i]?.snapshotId;
+      if (!id || seen.has(id)) continue;
+      const snap = session.snapshots[id];
+      if (snap) {
+        seen.add(id);
+        picked.unshift(snap);
+      }
+    }
+    return picked;
+  }, [session]);
+
+  const sendChatMessage = useCallback(
+    async (text: string) => {
+      if (!state.automation || isChatSending) return;
+
+      const userMessage: ChatMessage = {
+        id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'user',
+        content: text,
+        createdAt: Date.now(),
+      };
+      dispatch({ type: 'APPEND_CHAT_MESSAGE', message: userMessage });
+
+      setIsChatSending(true);
+      try {
+        const resp = (await sendMessage({
+          type: 'LLM_CHAT_EDIT',
+          request: {
+            userMessage: text,
+            currentAutomation: state.automation,
+            baseVersionId: state.currentVersionId,
+            recentSnapshots: pickRecentSnapshots(),
+            chatHistory: state.chatHistory.slice(-10),
+          },
+        })) as
+          | { type: 'LLM_RESULT'; ok: true; data: { reply: string; proposal: unknown } }
+          | { type: 'LLM_ERROR'; ok: false; error: string };
+
+        if (resp && 'ok' in resp && resp.ok) {
+          const parsed = resp.data;
+          const rawProposal = (parsed as { proposal: unknown }).proposal;
+          const assistant: ChatMessage = {
+            id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            role: 'assistant',
+            content: parsed.reply,
+            createdAt: Date.now(),
+            proposal: rawProposal
+              ? {
+                  id: `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+                  summary: (rawProposal as { summary: string }).summary,
+                  changes: (rawProposal as { changes: string[] }).changes,
+                  newAutomation: (rawProposal as { newAutomation: typeof state.automation })
+                    .newAutomation!,
+                  baseVersionId: state.currentVersionId,
+                  status: 'pending',
+                }
+              : undefined,
+          };
+          dispatch({ type: 'APPEND_CHAT_MESSAGE', message: assistant });
+        } else {
+          const errText = resp && 'error' in resp ? resp.error : 'Unknown error';
+          const assistant: ChatMessage = {
+            id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            role: 'assistant',
+            content: 'Sorry, I could not process that request.',
+            createdAt: Date.now(),
+            parseError: errText,
+          };
+          dispatch({ type: 'APPEND_CHAT_MESSAGE', message: assistant });
+        }
+      } finally {
+        setIsChatSending(false);
+      }
+    },
+    [state.automation, state.currentVersionId, state.chatHistory, isChatSending, pickRecentSnapshots],
+  );
+
+  const approveProposal = useCallback(
+    (messageId: string) => {
+      const msg = state.chatHistory.find((m) => m.id === messageId);
+      if (!msg?.proposal) return;
+      dispatch({ type: 'UPDATE_PROPOSAL_STATUS', messageId, status: 'approved' });
+      dispatch({ type: 'SET_AUTOMATION', automation: msg.proposal.newAutomation });
+      dispatch({
+        type: 'COMMIT_VERSION',
+        author: 'ai-chat',
+        message: msg.proposal.summary,
+      });
+    },
+    [state.chatHistory],
+  );
+
+  const rejectProposal = useCallback(
+    (messageId: string) => {
+      dispatch({ type: 'UPDATE_PROPOSAL_STATUS', messageId, status: 'rejected' });
+    },
+    [],
+  );
+
+  const clearChat = useCallback(() => {
+    dispatch({ type: 'CLEAR_CHAT' });
+  }, []);
 
   // --- edit helpers ---
 
@@ -456,6 +573,16 @@ export function App() {
             </section>
 
             <ExportBar automation={automation} />
+
+            <ChatPanel
+              messages={state.chatHistory}
+              isSending={isChatSending}
+              hasProvider={hasProvider}
+              onSend={sendChatMessage}
+              onApprove={approveProposal}
+              onReject={rejectProposal}
+              onClear={clearChat}
+            />
           </>
         )}
       </main>
