@@ -3,19 +3,34 @@ import { ToolExecutor } from './tool-executor.js';
 
 const BINARY = 'vaultcli';
 
-/**
- * Shape of the JSON that vaultcli writes to stdout.
- *
- * Single-field response:   { "value": "..." }
- * Multi-field response:    { "username": "...", "password": "...", ... }
- */
-type VaultPayload = Record<string, string>;
+// Envelope returned by `vaultcli secrets get <name> --json`.
+//
+//   { "success": true,
+//     "data": {
+//       "id": "…", "name": "att", "updatedAt": "…",
+//       "values": { "username": "…", "password": "…", "url": "…" }
+//     } }
+//
+// On failure:
+//
+//   { "success": false, "error": "Secret not found", "code": "NOT_FOUND" }
+interface VaultEnvelope {
+  success: boolean;
+  data?: {
+    id?: string;
+    name?: string;
+    updatedAt?: string;
+    values?: Record<string, unknown>;
+  };
+  error?: string;
+  code?: string;
+}
 
-function parseVaultOutput(raw: string): VaultPayload | null {
+function parseEnvelope(raw: string): VaultEnvelope | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as VaultPayload;
+      return parsed as VaultEnvelope;
     }
     return null;
   } catch {
@@ -23,150 +38,137 @@ function parseVaultOutput(raw: string): VaultPayload | null {
   }
 }
 
+function normalizeCommand(command: string): 'secrets-get' | null {
+  const c = command.trim().toLowerCase();
+  if (c === 'secrets-get' || c === 'secrets get' || c === 'get' || c === 'secrets_get') {
+    return 'secrets-get';
+  }
+  return null;
+}
+
+function stringifyValues(values: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) {
+    out[k] = v === null || v === undefined ? '' : String(v);
+  }
+  return out;
+}
+
 export class VaultcliAdapter implements Tool {
   readonly name = 'vaultcli';
 
   constructor(
     private readonly executor: ToolExecutor,
-    private readonly config?: Record<string, string>,
-  ) {}
+    // Reserved for future per-adapter config (server URL, etc.). Unused today
+    // but kept in the signature so callers can pass config without breaking.
+    _config?: Record<string, string>,
+  ) {
+    void _config;
+  }
 
   /**
-   * Generic dispatch:
-   *   execute("get", { key: "portal/acme-login" })
-   *     → vaultcli get "portal/acme-login"
+   * Only one command is supported:
    *
-   *   execute("get", { key: "portal/acme-login", field: "password" })
-   *     → vaultcli get "portal/acme-login" --field password
+   *   execute("secrets-get", { name: "att" })
+   *     → vaultcli secrets get "att" --json
+   *     → returns { success, output: JSON(values), fields: values }
+   *
+   *   execute("secrets-get", { name: "att", field: "password" })
+   *     → vaultcli secrets get "att" --json
+   *     → returns { success, output: values.password }   (no fields)
    */
   async execute(
     command: string,
     args: Record<string, string>,
     options?: ToolExecutionOptions,
   ): Promise<ToolResult> {
-    const argv = buildArgv(command, args);
-    let result: Awaited<ReturnType<ToolExecutor['run']>>;
+    const normalized = normalizeCommand(command);
+    if (normalized !== 'secrets-get') {
+      return {
+        success: false,
+        output: '',
+        error: `Unknown vaultcli command "${command}". Valid: secrets-get`,
+      };
+    }
 
+    const name = args['name'];
+    if (!name || name.trim().length === 0) {
+      return {
+        success: false,
+        output: '',
+        error: 'vaultcli secrets-get requires an "name" arg (the secret name).',
+      };
+    }
+
+    const argv = ['secrets', 'get', name, '--json'];
+
+    let result: Awaited<ReturnType<ToolExecutor['run']>>;
     try {
       result = await this.executor.run(BINARY, argv, options);
     } catch (err) {
       const msg = (err as Error).message;
-      // Surface a friendly message when vaultcli is simply not installed.
-      const error = msg.includes('not found')
-        ? `vaultcli is not installed or not available on PATH. ${msg}`
-        : msg;
-      return { success: false, output: '', error };
+      return { success: false, output: '', error: msg };
     }
 
     const raw = result.stdout.trim();
+    const envelope = parseEnvelope(raw);
 
-    if (result.exitCode !== 0) {
-      const errText = result.stderr.trim() || raw || `vaultcli exited with code ${result.exitCode}`;
-      return { success: false, output: '', raw, error: errText };
+    if (!envelope) {
+      const stderr = result.stderr.trim();
+      return {
+        success: false,
+        output: '',
+        raw,
+        error:
+          stderr ||
+          `vaultcli did not return valid JSON for secret "${name}" (exit=${result.exitCode}).`,
+      };
     }
 
-    // Parse the JSON payload returned by vaultcli.
-    const payload = parseVaultOutput(raw);
-
-    if (!payload) {
-      // vaultcli succeeded but the output is not valid JSON — return raw.
-      return { success: true, output: raw, raw };
+    if (envelope.success === false) {
+      const errorText = envelope.error ?? 'unknown vaultcli error';
+      const code = envelope.code ? ` (${envelope.code})` : '';
+      return {
+        success: false,
+        output: '',
+        raw,
+        error: `vaultcli: ${errorText}${code}`,
+      };
     }
 
-    // If a specific field was requested, extract just that field.
+    const values = envelope.data?.values;
+    if (!values || typeof values !== 'object') {
+      return {
+        success: false,
+        output: '',
+        raw,
+        error: `vaultcli secret "${name}" returned no values object.`,
+      };
+    }
+
+    const fields = stringifyValues(values);
+
+    // Single-field mode — caller asked for just one value.
     const field = args['field'];
-    if (field) {
-      const value = payload[field];
-      if (value === undefined) {
+    if (field && field.trim().length > 0) {
+      if (!(field in fields)) {
         return {
           success: false,
           output: '',
           raw,
-          error: `Field '${field}' not found in vaultcli response.`,
+          error: `vaultcli: field "${field}" not in secret "${name}". Available: ${Object.keys(fields).join(', ') || '(none)'}`,
         };
       }
-      return { success: true, output: value, raw };
+      return { success: true, output: fields[field]!, raw };
     }
 
-    // Default: return the canonical "value" field when it exists, otherwise
-    // the full JSON so callers can parse further.
-    const output = payload['value'] ?? raw;
-    return { success: true, output, raw };
+    // Multi-field mode — return the whole values map so the runner can
+    // explode every key into its own context variable.
+    return {
+      success: true,
+      output: JSON.stringify(fields),
+      fields,
+      raw,
+    };
   }
-
-  /**
-   * Retrieve a single secret value.
-   *   getSecret("portal/acme-login") → ToolResult whose .output is the value
-   */
-  async getSecret(key: string, options?: ToolExecutionOptions): Promise<ToolResult> {
-    return this.execute('get', { key }, options);
-  }
-
-  /**
-   * Retrieve specific fields from a secret and return them as a plain object.
-   *   getSecretFields("portal/acme-login", ["username", "password"])
-   *     → { username: "alice", password: "s3cr3t" }
-   *
-   * Throws if any field is missing or if vaultcli returns an error.
-   */
-  async getSecretFields(
-    key: string,
-    fields: string[],
-    options?: ToolExecutionOptions,
-  ): Promise<Record<string, string>> {
-    // Fetch the full secret once (no --field flag) to avoid N round-trips.
-    const result = await this.execute('get', { key }, options);
-
-    if (!result.success) {
-      throw new Error(
-        `Failed to retrieve secret '${key}': ${result.error ?? 'unknown error'}`,
-      );
-    }
-
-    const payload = result.raw ? parseVaultOutput(result.raw) : null;
-    if (!payload) {
-      throw new Error(
-        `vaultcli response for '${key}' is not valid JSON; cannot extract fields.`,
-      );
-    }
-
-    const output: Record<string, string> = {};
-    const missing: string[] = [];
-
-    for (const field of fields) {
-      const value = payload[field];
-      if (value === undefined) {
-        missing.push(field);
-      } else {
-        output[field] = value;
-      }
-    }
-
-    if (missing.length > 0) {
-      throw new Error(
-        `Missing field(s) in vaultcli response for '${key}': ${missing.join(', ')}.`,
-      );
-    }
-
-    return output;
-  }
-}
-
-/**
- * Build the argv array for a vaultcli invocation.
- *
- * The `key` argument is always positional; every other entry becomes
- * a `--flag value` pair.
- */
-function buildArgv(command: string, args: Record<string, string>): string[] {
-  const { key, ...flags } = args;
-  const argv: string[] = [command];
-
-  if (key !== undefined) argv.push(key);
-
-  for (const [name, value] of Object.entries(flags)) {
-    argv.push(`--${name}`, value);
-  }
-
-  return argv;
 }

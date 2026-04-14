@@ -98,17 +98,32 @@ export class AutomationRunner {
             break;
           }
           if (!input.value) {
-            logger.warn({ input: input.name }, 'vaultcli source requires a value (secret key); skipping');
+            logger.warn(
+              { input: input.name },
+              'vaultcli source requires a value (secret name); skipping',
+            );
             break;
           }
           try {
-            const vaultResult = await vaultAdapter.getSecret(input.value);
-            if (vaultResult.success) {
-              resolved = vaultResult.output;
-            } else {
+            const vaultResult = await vaultAdapter.execute('secrets-get', { name: input.value });
+            if (!vaultResult.success) {
               logger.warn(
                 { input: input.name, error: vaultResult.error },
                 'Failed to retrieve secret from vaultcli',
+              );
+              break;
+            }
+            // Primary variable: the JSON envelope so templates can still
+            // reference `{{creds}}` for inspection.
+            resolved = vaultResult.output;
+            // Explode every field into <inputName>_<key> context variables.
+            if (vaultResult.fields) {
+              for (const [k, v] of Object.entries(vaultResult.fields)) {
+                context.setVariable(`${input.name}_${k}`, v);
+              }
+              logger.info(
+                { input: input.name, fields: Object.keys(vaultResult.fields) },
+                'Resolved vaultcli secret with multi-field exploding',
               );
             }
           } catch (err) {
