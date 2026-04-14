@@ -803,7 +803,7 @@ export function App() {
       )}
       {showSessionsManager && (
         <SessionsManagerModal
-          currentSessionId={session?.id ?? null}
+          currentSession={session}
           onOpen={handleOpenArchivedSession}
           onClose={() => setShowSessionsManager(false)}
         />
