@@ -2,6 +2,7 @@ import { mkdirSync } from 'fs';
 import { join } from 'path';
 import type pino from 'pino';
 import type { Browser, BrowserContext, Page } from 'playwright';
+import type { BrowserChannel, BrowserMode } from '../config/config.service.js';
 
 export interface BrowserOptions {
   headless?: boolean;
@@ -16,6 +17,16 @@ export interface BrowserOptions {
   videoSize?: { width: number; height: number };
   // Legacy (kept for backward compat, falls back to screenshotDir)
   artifactDir?: string;
+
+  // ---- Browser profile (added for persistent-context mode) ----
+  /** "isolated" (default) or "persistent". */
+  mode?: BrowserMode;
+  /** Which Chromium-family binary to launch. Only used in persistent mode. */
+  channel?: BrowserChannel;
+  /** Path to the user data directory. Required when mode === "persistent". */
+  userDataDir?: string;
+  /** Sub-profile name inside the user data dir, e.g. "Default" or "Profile 1". */
+  profileDirectory?: string;
 }
 
 export class BrowserService {
@@ -49,6 +60,33 @@ export class BrowserService {
       }
     }
 
+    const mode: BrowserMode = options.mode ?? 'isolated';
+
+    if (mode === 'persistent') {
+      await this.launchPersistent(chromium, options);
+    } else {
+      await this.launchIsolated(chromium, options);
+    }
+
+    // Wire page lifecycle events to the run logger. Events are logged at
+    // debug level (noisy but useful during troubleshooting); only genuine
+    // errors (page crashes, uncaught exceptions, failed requests) bubble
+    // up to warn. When no logger is injected we skip wiring — the
+    // listeners would otherwise hold references to a no-op logger and
+    // clutter the event loop for every page transition.
+    if (this.logger && this.page) {
+      this.attachPageLifecycleListeners(this.page, this.logger);
+    }
+  }
+
+  /**
+   * Launch a fresh in-memory Chromium context. No on-disk profile, no
+   * cookies persist between runs. Matches the original CLI behavior.
+   */
+  private async launchIsolated(
+    chromium: typeof import('playwright').chromium,
+    options: BrowserOptions,
+  ): Promise<void> {
     this.browser = await chromium.launch({
       headless: options.headless ?? false,
     });
@@ -62,14 +100,8 @@ export class BrowserService {
       acceptDownloads: true,
     };
 
-    if (options.viewport) {
-      contextOptions.viewport = options.viewport;
-    }
-
-    if (options.userAgent) {
-      contextOptions.userAgent = options.userAgent;
-    }
-
+    if (options.viewport) contextOptions.viewport = options.viewport;
+    if (options.userAgent) contextOptions.userAgent = options.userAgent;
     if (this.videoEnabled) {
       contextOptions.recordVideo = {
         dir: this.videoDir,
@@ -80,15 +112,120 @@ export class BrowserService {
     this.context = await this.browser.newContext(contextOptions);
     this.page = await this.context.newPage();
 
-    // Wire page lifecycle events to the run logger. Events are logged at
-    // debug level (noisy but useful during troubleshooting); only genuine
-    // errors (page crashes, uncaught exceptions, failed requests) bubble
-    // up to warn. When no logger is injected we skip wiring — the
-    // listeners would otherwise hold references to a no-op logger and
-    // clutter the event loop for every page transition.
-    if (this.logger) {
-      this.attachPageLifecycleListeners(this.page, this.logger);
+    this.logger?.info(
+      { mode: 'isolated', channel: 'chromium' },
+      'browser launched (fresh in-memory context)',
+    );
+  }
+
+  /**
+   * Launch a real on-disk Chrome / Brave / Edge profile via Playwright's
+   * launchPersistentContext. The user data dir holds cookies, localStorage,
+   * extensions, saved logins, and history — all of which carry over from
+   * the previous run. This makes automations behave exactly like a returning
+   * human user from their normal browser.
+   *
+   * Two important caveats are handled here:
+   *
+   * 1. **Profile lock**: Chrome refuses to open the same user data
+   *    directory from two processes simultaneously. If the user has their
+   *    normal browser open with this profile, Playwright will fail with
+   *    a "ProcessSingleton" / lock-related error. We catch that error and
+   *    re-throw with a clear message telling the user to close their
+   *    browser or pick a different profile.
+   *
+   * 2. **Sub-profile selection**: a user data directory can contain many
+   *    profiles ("Default", "Profile 1", etc). Playwright's
+   *    launchPersistentContext only takes the user data dir, not the
+   *    sub-profile, so we forward the choice via the standard Chromium
+   *    `--profile-directory=<name>` command-line argument.
+   */
+  private async launchPersistent(
+    chromium: typeof import('playwright').chromium,
+    options: BrowserOptions,
+  ): Promise<void> {
+    if (!options.userDataDir) {
+      throw new Error(
+        'browser.mode is "persistent" but no userDataDir was provided. ' +
+          'Run `portalflow settings browser` to pick a profile, or pass --browser-user-data-dir on the command line.',
+      );
     }
+
+    const launchArgs: string[] = [];
+    if (options.profileDirectory) {
+      launchArgs.push(`--profile-directory=${options.profileDirectory}`);
+    }
+
+    const persistentOptions: {
+      headless: boolean;
+      acceptDownloads: boolean;
+      channel?: BrowserChannel;
+      args: string[];
+      viewport?: { width: number; height: number };
+      userAgent?: string;
+      recordVideo?: { dir: string; size?: { width: number; height: number } };
+    } = {
+      headless: options.headless ?? false,
+      acceptDownloads: true,
+      args: launchArgs,
+    };
+
+    if (options.channel && options.channel !== 'chromium') {
+      persistentOptions.channel = options.channel;
+    }
+    if (options.viewport) persistentOptions.viewport = options.viewport;
+    if (options.userAgent) persistentOptions.userAgent = options.userAgent;
+    if (this.videoEnabled) {
+      persistentOptions.recordVideo = {
+        dir: this.videoDir,
+        size: options.videoSize ?? { width: 1280, height: 720 },
+      };
+    }
+
+    let context: BrowserContext;
+    try {
+      context = await chromium.launchPersistentContext(
+        options.userDataDir,
+        persistentOptions,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Detect the most common lock error and translate it.
+      if (
+        message.includes('SingletonLock') ||
+        message.includes('ProcessSingleton') ||
+        message.includes('user data directory is already in use') ||
+        message.toLowerCase().includes('profile directory is in use')
+      ) {
+        throw new Error(
+          `Cannot open the browser profile at "${options.userDataDir}"${
+            options.profileDirectory ? ` (profile "${options.profileDirectory}")` : ''
+          } — it is already in use by another browser process. Close your browser windows that use this profile and try again, or pick a different profile via \`portalflow settings browser\`.\n\nUnderlying error: ${message}`,
+        );
+      }
+      throw err;
+    }
+
+    this.context = context;
+    // Persistent context comes with a default page already open. Reuse it
+    // when present; otherwise create a fresh one. This matters because some
+    // browsers restore the previous tab on launch and we want to act on it.
+    const existingPages = context.pages();
+    if (existingPages.length > 0 && !existingPages[0]!.isClosed()) {
+      this.page = existingPages[0]!;
+    } else {
+      this.page = await context.newPage();
+    }
+
+    this.logger?.info(
+      {
+        mode: 'persistent',
+        channel: options.channel ?? 'chromium',
+        userDataDir: options.userDataDir,
+        profileDirectory: options.profileDirectory ?? 'Default',
+      },
+      'browser launched (persistent context — real profile)',
+    );
   }
 
   private attachPageLifecycleListeners(page: Page, logger: pino.Logger): void {
