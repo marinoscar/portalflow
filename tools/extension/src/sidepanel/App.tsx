@@ -3,7 +3,7 @@ import { sendMessage } from '../shared/messaging';
 import type { RecordingSession } from '../shared/types';
 import type { Message } from '../shared/messaging';
 import type { Input, Step } from '@portalflow/schema';
-import { automationReducer, type AutomationState } from './state/automation-state';
+import { automationReducer, initialAutomationState } from './state/automation-state';
 import { eventsToAutomation } from '../converter/events-to-automation';
 import { AiAssistant } from './components/AiAssistant';
 import { MetadataForm } from './components/MetadataForm';
@@ -13,13 +13,11 @@ import { ExportBar } from './components/ExportBar';
 import { LlmNotConfiguredBanner } from './components/LlmNotConfiguredBanner';
 import './app.css';
 
-const initialState: AutomationState = { automation: null };
-
 export function App() {
   const [session, setSession] = useState<RecordingSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [state, dispatch] = useReducer(automationReducer, initialState);
+  const [state, dispatch] = useReducer(automationReducer, initialAutomationState);
 
   // Load current session on mount
   useEffect(() => {
