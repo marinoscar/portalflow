@@ -13,8 +13,12 @@ import { LlmService } from '../llm/llm.service';
 import { PROMPTS } from '../llm/prompts';
 import { parseChatEditResponse } from '../llm/chat-edit';
 import { eventsToAutomation } from '../converter/events-to-automation';
+import { bootstrapRunner } from './runner-bootstrap';
 
 const llmService = new LlmService();
+
+// Bootstrap the offscreen runner for WebSocket transport to the CLI.
+bootstrapRunner();
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[PortalFlow] Extension installed');
