@@ -1028,28 +1028,89 @@ export class StepExecutor {
         includeScreenshot: action.includeScreenshot,
       });
 
-      // 2. Success check
-      if (await this.evaluateSuccessCheck(action.successCheck, pageContext)) {
-        const durationMs = Date.now() - startedAt;
-        logger.info(
-          {
-            stepId: step.id,
-            iteration,
-            durationMs,
-          },
-          'aiscope: goal achieved',
-        );
-        this.presenter.aiscopeGoalReached(durationMs, iteration - 1);
-        return;
-      }
+      // 2. Success check + next-action strategy:
+      //
+      // When `successCheck` is deterministic ({check, value}), the check
+      // is a cheap DOM query — run it first so we can short-circuit
+      // without paying for the LLM call when the goal is already reached.
+      //
+      // When `successCheck.ai` is set, the check is itself a full LLM
+      // round-trip (with vision when includeScreenshot is true). Running
+      // the check and the next-action decision sequentially means every
+      // iteration pays TWO vision round-trips — 6–10 seconds for a
+      // model like Claude Opus. We speculatively run both in parallel
+      // via Promise.allSettled:
+      //
+      //   - If the check wins (goal reached), we discard the decision.
+      //     One LLM call is wasted on the final iteration — negligible
+      //     cost compared to the ~50% latency reduction on every other
+      //     iteration.
+      //   - If the check fails, we already have the decision ready and
+      //     proceed straight to dispatch.
+      //
+      // Either the check or the decideNextAction call can legitimately
+      // fail (provider error, JSON parse error, etc.). The sequential
+      // path propagates whichever error fires; the parallel path uses
+      // allSettled so a decideNextAction failure doesn't mask a
+      // successful check.
+      const isAiSuccessCheck = action.successCheck.ai !== undefined;
+      let decision: NextActionResult;
 
-      // 3. Ask the LLM for the next action
-      const decision = await this.llmService.decideNextAction({
-        goal: resolvedGoal,
-        pageContext,
-        allowedActions,
-        recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
-      });
+      if (!isAiSuccessCheck) {
+        if (await this.evaluateSuccessCheck(action.successCheck, pageContext)) {
+          const durationMs = Date.now() - startedAt;
+          logger.info(
+            { stepId: step.id, iteration, durationMs },
+            'aiscope: goal achieved',
+          );
+          this.presenter.aiscopeGoalReached(durationMs, iteration - 1);
+          return;
+        }
+
+        decision = await this.llmService.decideNextAction({
+          goal: resolvedGoal,
+          pageContext,
+          allowedActions,
+          recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
+        });
+      } else {
+        const t0 = Date.now();
+        const [checkResult, decideResult] = await Promise.allSettled([
+          this.evaluateSuccessCheck(action.successCheck, pageContext),
+          this.llmService.decideNextAction({
+            goal: resolvedGoal,
+            pageContext,
+            allowedActions,
+            recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
+          }),
+        ]);
+
+        if (checkResult.status === 'rejected') {
+          throw checkResult.reason;
+        }
+
+        if (checkResult.value === true) {
+          const durationMs = Date.now() - startedAt;
+          logger.info(
+            {
+              stepId: step.id,
+              iteration,
+              durationMs,
+              speculativeLatencyMs: Date.now() - t0,
+              speculativeDecisionDiscarded: decideResult.status === 'fulfilled',
+            },
+            'aiscope: goal achieved (speculative decideNextAction result discarded)',
+          );
+          this.presenter.aiscopeGoalReached(durationMs, iteration - 1);
+          return;
+        }
+
+        if (decideResult.status === 'rejected') {
+          throw decideResult.reason;
+        }
+
+        decision = decideResult.value;
+      }
 
       logger.info(
         {
