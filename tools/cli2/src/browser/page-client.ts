@@ -405,18 +405,59 @@ export class PageClient {
   // ---------------------------------------------------------------------------
 
   /**
-   * Wait for a download triggered by the given action.
+   * Download a file by sending a DownloadCommand to the extension.
    *
-   * TODO(task-7): Full orchestration requires the extension to pre-register a
-   * download listener before the trigger fires. This is wired up in task 7.
-   * For now we throw so callers get an actionable error rather than a hang.
+   * The extension pre-registers a download listener before triggering the
+   * download action, so the event is never missed. The trigger can be:
+   *   - 'click': click the element identified by `selectors.primary`
+   *   - 'navigation': navigate to `url`
+   *
+   * Returns the actual filename chosen by Chrome (in the user's download dir).
+   * The CLI is responsible for moving/renaming the file if `saveDir` was set.
+   *
+   * Note: Chrome controls download destination. `saveDir` is passed through
+   * to the extension but cannot be enforced at the extension layer — Chrome
+   * always saves to the user's configured download directory.
+   */
+  async download(opts: {
+    trigger: 'click' | 'navigation';
+    selectors?: { primary: string; fallbacks?: string[] };
+    url?: string;
+    saveDir?: string;
+    timeoutMs?: number;
+  }): Promise<string> {
+    const saveDir = opts.saveDir ?? this.getDownloadDir?.() ?? '.';
+    const cmd: DownloadCommand = {
+      type: 'download',
+      commandId: this.newId(),
+      timeoutMs: opts.timeoutMs ?? this.defaultTimeoutMs,
+      tab: ACTIVE_TAB,
+      trigger: opts.trigger,
+      selectors: opts.selectors,
+      url: opts.url,
+      saveDir,
+    };
+    try {
+      const result = await this.host.sendCommand<{ filename: string; downloadId: number; bytesReceived: number }>(cmd);
+      return result.filename;
+    } catch (err) {
+      throw this.wrapError('download', `trigger:${opts.trigger}`, err);
+    }
+  }
+
+  /**
+   * @deprecated Use download() instead. This shim is kept for backward
+   * compatibility with step-executor callers that pass a closure trigger.
+   * The closure is NOT executed — the extension handles the trigger side.
+   * @internal
    */
   async waitForDownload(
     _triggerAction: () => Promise<void>,
     _timeout?: number,
   ): Promise<string> {
     throw new Error(
-      'waitForDownload not implemented in task 5 — wired up in task 7',
+      'waitForDownload is not supported in the extension-backed runtime. ' +
+      'Use pageClient.download({ trigger, selectors, url }) instead.',
     );
   }
 
@@ -456,7 +497,15 @@ export class PageClient {
       filenameHint,
     };
     try {
-      return await this.host.sendCommand<string>(cmd);
+      // The extension returns {dataUrl: 'data:image/png;base64,...'}.
+      // The CLI side writes it to disk and returns the file path.
+      // For now, return the dataUrl itself — the step executor stores it as
+      // an artifact path. The runner can decode it if it needs the bytes.
+      const result = await this.host.sendCommand<{ dataUrl: string } | string>(cmd);
+      if (typeof result === 'object' && result !== null && 'dataUrl' in result) {
+        return result.dataUrl;
+      }
+      return String(result);
     } catch (err) {
       throw this.wrapError('screenshot', filenameHint ? `"${filenameHint}"` : '', err);
     }

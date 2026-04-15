@@ -1553,13 +1553,19 @@ export class StepExecutor {
         step.description ?? step.name,
       );
 
-      downloadPath = await this.pageClient.waitForDownload(async () => {
-        await this.pageClient.click(resolved.selector);
+      // The extension pre-registers the download listener before clicking,
+      // so the trigger is handled atomically on the extension side.
+      downloadPath = await this.pageClient.download({
+        trigger: 'click',
+        selectors: { primary: resolved.selector },
       });
     } else {
-      // 'navigation' trigger — wait for a download event during the next navigation
-      downloadPath = await this.pageClient.waitForDownload(async () => {
-        await this.pageClient.waitForNavigation();
+      // 'navigation' trigger — the extension watches for a download that is
+      // initiated by any navigation event (e.g. a redirect to a download URL).
+      // No explicit URL to navigate to; the download must be triggered by a
+      // preceding page interaction.
+      downloadPath = await this.pageClient.download({
+        trigger: 'navigation',
       });
     }
 

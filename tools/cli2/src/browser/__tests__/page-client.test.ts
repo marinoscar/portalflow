@@ -304,9 +304,9 @@ describe('PageClient', () => {
   // waitForDownload
   // ---------------------------------------------------------------------------
 
-  it('waitForDownload throws not-implemented error', async () => {
+  it('waitForDownload throws deprecated shim error', async () => {
     await expect(client.waitForDownload(async () => {})).rejects.toThrow(
-      'waitForDownload not implemented in task 5',
+      'Use pageClient.download',
     );
   });
 
@@ -314,13 +314,20 @@ describe('PageClient', () => {
   // countMatching
   // ---------------------------------------------------------------------------
 
-  it('countMatching → CountMatchingCommand with selectors', async () => {
-    spy.mockResolvedValue(3);
+  it('countMatching → CountMatchingCommand with selectors, unwraps {count}', async () => {
+    // Extension returns {count: N} object
+    spy.mockResolvedValue({ count: 3 });
     const count = await client.countMatching('li.item');
     const cmd = capturedCommand(spy);
     expect(cmd.type).toBe('countMatching');
     expect((cmd as any).selectors).toEqual({ primary: 'li.item' });
     expect(count).toBe(3);
+  });
+
+  it('countMatching → also handles raw number for backward compat', async () => {
+    spy.mockResolvedValue(7);
+    const count = await client.countMatching('span');
+    expect(count).toBe(7);
   });
 
   // ---------------------------------------------------------------------------
@@ -348,5 +355,43 @@ describe('PageClient', () => {
     await client.screenshot();
     const cmd = spy.mock.calls[0][0] as RunnerCommand;
     expect((cmd as any).saveDir).toBe('.');
+  });
+
+  it('screenshot → unwraps {dataUrl} from extension response', async () => {
+    spy.mockResolvedValue({ dataUrl: 'data:image/png;base64,abc123' });
+    const result = await client.screenshot('snap');
+    expect(result).toBe('data:image/png;base64,abc123');
+  });
+
+  // ---------------------------------------------------------------------------
+  // download
+  // ---------------------------------------------------------------------------
+
+  it('download (click) → DownloadCommand with selectors, returns filename', async () => {
+    spy.mockResolvedValue({ filename: '/home/user/Downloads/report.pdf', downloadId: 42, bytesReceived: 1024 });
+    const downloadClient = new PageClient({
+      host,
+      logger,
+      getDownloadDir: () => '/home/user/Downloads',
+      defaultTimeoutMs: 30_000,
+    });
+    const filename = await downloadClient.download({
+      trigger: 'click',
+      selectors: { primary: 'a#download-btn' },
+    });
+    const cmd = capturedCommand(spy);
+    expect(cmd.type).toBe('download');
+    expect((cmd as any).trigger).toBe('click');
+    expect((cmd as any).selectors).toEqual({ primary: 'a#download-btn' });
+    expect(filename).toBe('/home/user/Downloads/report.pdf');
+  });
+
+  it('download (navigation) → DownloadCommand without selectors', async () => {
+    spy.mockResolvedValue({ filename: '/home/user/Downloads/data.csv', downloadId: 99, bytesReceived: 512 });
+    const filename = await client.download({ trigger: 'navigation' });
+    const cmd = capturedCommand(spy);
+    expect(cmd.type).toBe('download');
+    expect((cmd as any).trigger).toBe('navigation');
+    expect(filename).toBe('/home/user/Downloads/data.csv');
   });
 });

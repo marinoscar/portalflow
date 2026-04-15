@@ -8,6 +8,8 @@ import { wait } from './wait';
 import { countMatching } from './count-matching';
 import { anyMatch } from './any-match';
 import { scroll } from './scroll';
+import { download } from './download';
+import { screenshot } from './screenshot';
 import {
   select,
   check,
@@ -187,9 +189,26 @@ export async function handleRunnerCommand(
         recoverable: false,
       }));
 
-    // download and screenshot implemented in commit 3
     case 'download':
+      return withActiveTab((tabId) => download(command, tabId)).catch((err) => ({
+        kind: 'result' as const,
+        commandId: command.commandId,
+        ok: false as const,
+        message: err instanceof Error ? err.message : String(err),
+        code: 'tab_not_found',
+        recoverable: false,
+      }));
+
     case 'screenshot':
+      return withActiveTab((tabId) => screenshot(command, tabId)).catch((err) => ({
+        kind: 'result' as const,
+        commandId: command.commandId,
+        ok: false as const,
+        message: err instanceof Error ? err.message : String(err),
+        code: 'tab_not_found',
+        recoverable: false,
+      }));
+
     // openWindow and closeWindow deferred to task 9
     case 'openWindow':
     case 'closeWindow':

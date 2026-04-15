@@ -1,4 +1,5 @@
-import type { ExtractCommand, RunnerResponse } from '../../shared/runner-protocol';
+import type { ExtractCommand, ScreenshotCommand, RunnerResponse } from '../../shared/runner-protocol';
+import { screenshot as screenshotHandler } from './screenshot';
 
 interface DomReply {
   ok: boolean;
@@ -9,8 +10,10 @@ interface DomReply {
 
 /**
  * Delegates an extract operation to the runner content script.
- * Supports targets: text, attribute, html, url, title.
- * The 'screenshot' target is deferred to task 8.
+ * Supports targets: text, attribute, html, url, title, screenshot.
+ *
+ * For 'screenshot', delegates to the screenshot handler which calls
+ * chrome.tabs.captureVisibleTab and returns {dataUrl: string}.
  *
  * Times out after command.timeoutMs milliseconds.
  */
@@ -19,14 +22,15 @@ export async function extract(
   tabId: number,
 ): Promise<RunnerResponse> {
   if (command.target === 'screenshot') {
-    return {
-      kind: 'result',
+    // Build a ScreenshotCommand from the extract command
+    const screenshotCmd: ScreenshotCommand = {
+      type: 'screenshot',
       commandId: command.commandId,
-      ok: false,
-      message: 'not_implemented',
-      code: 'not_implemented',
-      recoverable: false,
+      timeoutMs: command.timeoutMs,
+      tab: command.tab,
+      saveDir: '', // CLI side handles saving; extension returns the dataUrl
     };
+    return screenshotHandler(screenshotCmd, tabId);
   }
 
   const domOp = (): Promise<DomReply> =>
