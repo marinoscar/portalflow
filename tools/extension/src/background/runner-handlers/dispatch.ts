@@ -17,20 +17,37 @@ import {
   hover,
   focus,
 } from './interact-extended';
+import { handleOpenWindow } from './open-window';
+import { handleCloseWindow } from './close-window';
+import { getRunTabId } from '../run-window';
 
 // ---------------------------------------------------------------------------
-// Active-tab helper (task-6 simplification)
+// Active-tab helper
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the active tab in the current focused window.
+ * Resolves the tab id to use for the current command.
  *
- * TASK-6 SIMPLIFICATION: This queries whatever tab is active in the user's
- * focused window. Task 9 will replace this with dedicated run-window
- * bookkeeping (a stored windowId returned by openWindow) so that automation
- * targets the correct window even when the user focuses another.
+ * Priority order:
+ *  1. If a dedicated run window is active (`getRunTabId()` returns non-null),
+ *     use that tab — this is the correct path for all production runs.
+ *  2. Fall back to querying the active tab in the focused window. This path
+ *     supports bare-bones runs that never call `openWindow` (e.g. the
+ *     task-6/7 integration tests). A debug-level warning is logged when the
+ *     fallback is taken so it is visible in verbose mode.
  */
 async function withActiveTab<T>(cb: (tabId: number) => Promise<T>): Promise<T> {
+  const runTabId = getRunTabId();
+  if (runTabId !== null) {
+    return cb(runTabId);
+  }
+
+  // Fallback: no run window is open — query the focused window's active tab.
+  console.debug(
+    '[dispatch] withActiveTab: no run window active, falling back to chrome.tabs.query — ' +
+    'call openWindow before running automation steps for reliable tab targeting',
+  );
+
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
   if (!tab?.id) {
@@ -209,10 +226,13 @@ export async function handleRunnerCommand(
         recoverable: false,
       }));
 
-    // openWindow and closeWindow deferred to task 9
     case 'openWindow':
+      return handleOpenWindow(command);
+
     case 'closeWindow':
+      return handleCloseWindow(command);
+
     default:
-      return notImplemented(command.commandId);
+      return notImplemented((command as { commandId: string }).commandId);
   }
 }

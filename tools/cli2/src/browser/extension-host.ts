@@ -13,6 +13,8 @@ import type {
   RunnerSession,
   RunnerEvent,
   RunnerError,
+  OpenWindowCommand,
+  CloseWindowCommand,
 } from './protocol.js';
 
 // ---------------------------------------------------------------------------
@@ -297,6 +299,41 @@ export class ExtensionHost extends EventEmitter {
         }
       });
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Run-window lifecycle helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Opens a new dedicated run window in the extension-managed Chrome instance.
+   * Returns the windowId and tabId of the new window.
+   */
+  async openRunWindow(timeoutMs = 30_000): Promise<{ windowId: number; tabId: number }> {
+    const command: OpenWindowCommand = {
+      type: 'openWindow',
+      commandId: randomUUID(),
+      timeoutMs,
+    };
+    return this.sendCommand<{ windowId: number; tabId: number }>(command);
+  }
+
+  /**
+   * Closes the run window identified by `windowId`.
+   * Swallows errors — the window may already be closed.
+   */
+  async closeRunWindow(windowId: number, timeoutMs = 10_000): Promise<void> {
+    const command: CloseWindowCommand = {
+      type: 'closeWindow',
+      commandId: randomUUID(),
+      timeoutMs,
+      windowId,
+    };
+    try {
+      await this.sendCommand<null>(command);
+    } catch (err) {
+      this.logger.warn({ err, windowId }, 'closeRunWindow: command failed (window may already be closed)');
+    }
   }
 
   async close(): Promise<void> {

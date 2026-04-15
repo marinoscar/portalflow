@@ -311,6 +311,7 @@ export class AutomationRunner {
 
     let ownedHost = false;
     let extensionHost: ExtensionHost;
+    let runWindowInfo: { windowId: number; tabId: number } | null = null;
 
     if (options?.extensionHost) {
       extensionHost = options.extensionHost;
@@ -330,8 +331,6 @@ export class AutomationRunner {
         { port: extensionHost.port },
         `ExtensionHost listening — launching Chrome with profileMode=${extensionCfg.profileMode}`,
       );
-
-      // TODO(task 9b): openWindow here — after Chrome connects, open the automation window.
 
       // Only launch Chrome automatically when profileMode is 'dedicated' or 'real'.
       // If profileMode is 'unset', fall back to the legacy wait-for-manual-connect path
@@ -357,6 +356,19 @@ export class AutomationRunner {
         );
         await waitForExtensionConnection(extensionHost, connectTimeoutMs);
         logger.info({ port: extensionHost.port }, 'Chrome extension connected (manual mode)');
+      }
+
+      // Open the dedicated automation window now that Chrome is connected.
+      try {
+        runWindowInfo = await extensionHost.openRunWindow();
+        logger.info(runWindowInfo, 'Automation run window opened');
+      } catch (err) {
+        await extensionHost.close().catch((closeErr) => {
+          logger.warn({ err: closeErr }, 'Error closing ExtensionHost after openWindow failure (non-fatal)');
+        });
+        throw new Error(
+          `Failed to open automation run window: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
@@ -422,12 +434,40 @@ export class AutomationRunner {
 
     presenter.runStart(automation.name, steps.length);
 
+    // ------------------------------------------------------------------
+    // Run-window abort signal
+    //
+    // If the user closes the dedicated run window or its tab during the run,
+    // we abort the step loop with a clear error rather than continuing to send
+    // commands to a non-existent window.
+    // ------------------------------------------------------------------
+    let runWindowClosedError: Error | null = null;
+
+    function onWindowClosed(event: { windowId?: number }): void {
+      logger.warn({ windowId: event.windowId }, 'Run window closed by user — aborting run');
+      runWindowClosedError = new Error('Run window closed by user');
+    }
+
+    function onTabClosed(event: { tabId?: number }): void {
+      logger.warn({ tabId: event.tabId }, 'Run tab closed by user — aborting run');
+      runWindowClosedError = new Error('Run window closed by user');
+    }
+
+    if (runWindowInfo !== null) {
+      extensionHost.on('windowClosed', onWindowClosed);
+      extensionHost.on('tabClosed', onTabClosed);
+    }
+
     const MAX_STEP_EXECUTIONS = 1000;
     let executionsRemaining = MAX_STEP_EXECUTIONS;
     let i = 0;
 
     try {
       while (i < steps.length) {
+        // Check if the run window was closed by the user.
+        if (runWindowClosedError !== null) {
+          throw runWindowClosedError;
+        }
         if (executionsRemaining-- <= 0) {
           throw new Error(
             `Step execution cap (${MAX_STEP_EXECUTIONS}) exceeded — likely a goto loop. ` +
@@ -496,9 +536,30 @@ export class AutomationRunner {
       }
     } finally {
       // ------------------------------------------------------------------
-      // 12. Close the ExtensionHost (only if we started it)
+      // 12. Tear down run window listeners and close the host
       // ------------------------------------------------------------------
+
+      // Remove window lifecycle listeners so they don't fire after the run.
+      if (runWindowInfo !== null) {
+        extensionHost.off('windowClosed', onWindowClosed);
+        extensionHost.off('tabClosed', onTabClosed);
+      }
+
       if (ownedHost) {
+        // Conditionally close the run window based on config.
+        if (runWindowInfo !== null) {
+          const closeWindowOnFinish = extensionCfg.closeWindowOnFinish ?? true;
+          if (closeWindowOnFinish) {
+            await extensionHost.closeRunWindow(runWindowInfo.windowId);
+            logger.info({ windowId: runWindowInfo.windowId }, 'Run window closed on finish');
+          } else {
+            logger.info(
+              { windowId: runWindowInfo.windowId },
+              'Run window left open for inspection (closeWindowOnFinish: false)',
+            );
+          }
+        }
+
         try {
           await extensionHost.close();
           logger.info('ExtensionHost closed');

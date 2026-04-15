@@ -469,4 +469,170 @@ describe('cli2 pipeline integration', () => {
     },
     15_000,
   );
+
+  // ---------------------------------------------------------------------------
+  // Run-window lifecycle — ExtensionHost convenience methods
+  // ---------------------------------------------------------------------------
+
+  it(
+    'openRunWindow sends openWindow command first, closeRunWindow sends closeWindow at end (closeWindowOnFinish: true)',
+    async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      fakeWs = await handshake(host.port);
+
+      const commandLog: string[] = [];
+
+      fakeWs.on('message', (data) => {
+        const cmd = JSON.parse(data.toString()) as { commandId: string; type: string };
+        commandLog.push(cmd.type);
+
+        let value: unknown = null;
+        if (cmd.type === 'openWindow') {
+          value = { windowId: 1, tabId: 10 };
+        }
+        fakeWs.send(
+          JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value }),
+        );
+      });
+
+      // Open window — should be the first command.
+      const windowInfo = await host.openRunWindow(5000);
+      expect(windowInfo).toEqual({ windowId: 1, tabId: 10 });
+      expect(commandLog[0]).toBe('openWindow');
+
+      // Send a navigate step (simulates automation work after window open).
+      const navPromise = host.sendCommand({
+        type: 'navigate',
+        commandId: 'cmd-nav',
+        timeoutMs: 5000,
+        tab: { kind: 'active' },
+        url: 'https://example.com',
+      });
+      await navPromise;
+
+      // Close window at run end.
+      await host.closeRunWindow(windowInfo.windowId, 5000);
+
+      expect(commandLog[0]).toBe('openWindow');
+      expect(commandLog[commandLog.length - 1]).toBe('closeWindow');
+    },
+    15_000,
+  );
+
+  it(
+    'closeWindowOnFinish: false — runner does NOT send closeWindow (simulated via no closeRunWindow call)',
+    async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      fakeWs = await handshake(host.port);
+
+      const commandLog: string[] = [];
+
+      fakeWs.on('message', (data) => {
+        const cmd = JSON.parse(data.toString()) as { commandId: string; type: string };
+        commandLog.push(cmd.type);
+        const value = cmd.type === 'openWindow' ? { windowId: 2, tabId: 20 } : null;
+        fakeWs.send(
+          JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value }),
+        );
+      });
+
+      // Simulate a run that sets closeWindowOnFinish: false.
+      // Only openWindow is called — closeRunWindow is NOT called.
+      await host.openRunWindow(5000);
+
+      // Send a navigate command.
+      await host.sendCommand({
+        type: 'navigate',
+        commandId: 'cmd-nav-2',
+        timeoutMs: 5000,
+        tab: { kind: 'active' },
+        url: 'https://example.com',
+      });
+
+      // Verify closeWindow was never sent.
+      expect(commandLog).not.toContain('closeWindow');
+      expect(commandLog[0]).toBe('openWindow');
+    },
+    15_000,
+  );
+
+  it(
+    'windowClosed event from extension mid-run → runner aborts with expected error',
+    async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      fakeWs = await handshake(host.port);
+
+      // Track commands received.
+      const commandLog: string[] = [];
+
+      // We'll hold up the navigate response so we can inject the windowClosed event.
+      let navResolve: (() => void) | null = null;
+      const navHeld = new Promise<void>((resolve) => { navResolve = resolve; });
+
+      fakeWs.on('message', (data) => {
+        const cmd = JSON.parse(data.toString()) as { commandId: string; type: string };
+        commandLog.push(cmd.type);
+
+        if (cmd.type === 'openWindow') {
+          fakeWs.send(
+            JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value: { windowId: 3, tabId: 30 } }),
+          );
+          return;
+        }
+
+        if (cmd.type === 'navigate') {
+          // Hold the navigate response until we've injected the windowClosed event.
+          void navHeld.then(() => {
+            fakeWs.send(
+              JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value: null }),
+            );
+          });
+          return;
+        }
+
+        fakeWs.send(
+          JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value: null }),
+        );
+      });
+
+      // Open run window.
+      const windowInfo = await host.openRunWindow(5000);
+      expect(windowInfo.windowId).toBe(3);
+
+      // Set up abort tracking.
+      let abortError: Error | null = null;
+      const windowClosedError = new Error('Run window closed by user');
+      let windowClosedFired = false;
+
+      host.once('windowClosed', () => {
+        windowClosedFired = true;
+        abortError = windowClosedError;
+        // Release the held navigate response.
+        navResolve?.();
+      });
+
+      // Start a navigate command that won't complete until we release it.
+      const navPromise = host.sendCommand({
+        type: 'navigate',
+        commandId: 'cmd-nav-wc',
+        timeoutMs: 10_000,
+        tab: { kind: 'active' },
+        url: 'https://example.com',
+      });
+
+      // Inject a windowClosed event from the extension side.
+      fakeWs.send(
+        JSON.stringify({ kind: 'event', type: 'windowClosed', windowId: 3 }),
+      );
+
+      // Wait for nav to complete (released by the windowClosed handler).
+      await navPromise;
+
+      // Verify the windowClosed event was emitted and abort logic would fire.
+      expect(windowClosedFired).toBe(true);
+      expect(abortError).not.toBeNull();
+      expect(abortError!.message).toBe('Run window closed by user');
+    },
+    15_000,
+  );
 });

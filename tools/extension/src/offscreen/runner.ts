@@ -1,4 +1,4 @@
-import type { RunnerCommand, RunnerResponse, RunnerSession } from '../shared/runner-protocol';
+import type { RunnerCommand, RunnerResponse, RunnerSession, RunnerEvent } from '../shared/runner-protocol';
 import { RUNNER_PROTOCOL_VERSION } from '../shared/runner-protocol';
 
 const WS_URL = 'ws://127.0.0.1:7667';
@@ -104,6 +104,32 @@ window.addEventListener('beforeunload', () => {
     currentSocket.close(1000, 'offscreen unloading');
   }
 });
+
+// ---------------------------------------------------------------------------
+// Unsolicited event bridge: service worker → offscreen → CLI over WebSocket
+// ---------------------------------------------------------------------------
+
+/**
+ * The service worker (background) cannot hold an open WebSocket, so when it
+ * needs to send an unsolicited event (e.g. windowClosed / tabClosed) it posts
+ * a runtime message here and we forward it on the current WebSocket.
+ */
+chrome.runtime.onMessage.addListener(
+  (msg: { channel?: string; event?: RunnerEvent }): boolean => {
+    if (msg.channel !== 'runner-event' || !msg.event) {
+      return false; // not our message
+    }
+
+    if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
+      currentSocket.send(JSON.stringify(msg.event));
+      log('forwarded_runner_event', { type: msg.event.type });
+    } else {
+      log('runner_event_dropped_no_socket', { type: msg.event.type });
+    }
+
+    return false; // synchronous — no sendResponse needed
+  },
+);
 
 // Start connecting immediately
 connect();

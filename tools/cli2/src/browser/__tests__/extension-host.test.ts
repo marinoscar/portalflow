@@ -268,4 +268,59 @@ describe('ExtensionHost', () => {
       }),
     ).rejects.toThrow('Extension not connected');
   });
+
+  // ---------------------------------------------------------------------------
+  // Run-window lifecycle helpers
+  // ---------------------------------------------------------------------------
+
+  it('openRunWindow — fake extension replies with windowId/tabId → resolves with correct shape', async () => {
+    host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+    const { client } = await connectAndHandshake(host.port);
+
+    // Fake extension: respond to the openWindow command with windowId/tabId.
+    client.on('message', (data) => {
+      const cmd = JSON.parse(data.toString()) as { commandId: string; type: string };
+      if (cmd.type === 'openWindow') {
+        client.send(
+          JSON.stringify({
+            kind: 'result',
+            commandId: cmd.commandId,
+            ok: true,
+            value: { windowId: 5, tabId: 42 },
+          }),
+        );
+      }
+    });
+
+    const result = await host.openRunWindow(5000);
+    expect(result).toEqual({ windowId: 5, tabId: 42 });
+
+    client.close();
+  });
+
+  it('closeRunWindow — fake extension replies ok:true → resolves void without throwing', async () => {
+    host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+    const { client } = await connectAndHandshake(host.port);
+
+    client.on('message', (data) => {
+      const cmd = JSON.parse(data.toString()) as { commandId: string; type: string };
+      if (cmd.type === 'closeWindow') {
+        client.send(
+          JSON.stringify({
+            kind: 'result',
+            commandId: cmd.commandId,
+            ok: true,
+            value: null,
+          }),
+        );
+      }
+    });
+
+    // Should resolve without throwing.
+    await expect(host.closeRunWindow(5, 5000)).resolves.toBeUndefined();
+
+    client.close();
+  });
 });
