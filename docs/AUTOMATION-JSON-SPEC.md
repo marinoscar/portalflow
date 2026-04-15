@@ -1591,6 +1591,16 @@ The step-level `onFailure` policy applies to the whole aiscope step. On budget e
 - `skip` — swallows the failure and continues past the aiscope step without having reached the goal.
 - `retry` — restarts the loop from iteration 0 with a fresh budget. Expensive. Prefer raising `maxDurationSec` or `maxIterations` over retrying.
 
+> **Important: `step.timeout` is ignored for aiscope.** The per-step `timeout` field at the bottom of every step object is a **no-op** on aiscope, loop, and call steps — see [§5.1 Timeout enforcement](#51-timeout-enforcement). The only budgets that govern an aiscope step are `action.maxDurationSec` and `action.maxIterations`. If your aiscope step is hitting a budget and you're surprised, raise `maxDurationSec` on the action (not `timeout` on the step).
+
+**Performance: speculative LLM parallelism**
+
+When `successCheck` is an AI check (`{ ai: "..." }`), each iteration fires the success check AND the next-action decision as **two parallel LLM calls** with the same observation. If the success check wins the race (goal reached), the decision is discarded and the loop returns. If the check fails, the decision is already available for dispatch. This cuts per-iteration latency roughly in half on the common case where every iteration needs both calls.
+
+Cost trade-off: on the **final** iteration (the one where the check finally returns true) one LLM call is wasted. Over a 15-iteration run that's a ~7% overhead, which is far outweighed by the latency savings on the preceding 14 iterations.
+
+When `successCheck` is deterministic (`{ check, value }`), the check is a cheap DOM query and runs **first** — sequential is strictly better because a successful check skips the LLM call entirely. The parallelism optimization is AI-check-specific.
+
 **Worked example:**
 
 ```json
@@ -1617,8 +1627,8 @@ On a page with a typical cookie wall, the LLM sees the banner in the screenshot 
 
 **Cost and safety notes:**
 
-- Each iteration makes **one LLM call**. At debug log level, the per-call `inputTokens` / `outputTokens` / `latencyMs` are captured via the existing observability pipeline (see §19.3 Troubleshooting).
-- Screenshots are sent as base64 PNGs in a single vision content block per iteration. A viewport screenshot at default resolution is roughly 1,500–3,000 tokens on Anthropic / OpenAI vision models. Budget your `maxIterations` accordingly if cost matters.
+- Each iteration makes **one LLM call for a deterministic `successCheck`** (the check itself is a DOM query), and **two parallel LLM calls for an AI `successCheck`** (one for the check, one speculatively for the next action — see "Performance" above). The `inputTokens` / `outputTokens` / `latencyMs` are captured per call via the existing observability pipeline (see §19.3 Troubleshooting).
+- Screenshots are sent as base64 PNGs in a single vision content block per call. A viewport screenshot at default resolution is roughly 1,500–3,000 tokens on Anthropic / OpenAI vision models. Budget your `maxIterations` accordingly if cost matters.
 - Set `includeScreenshot: false` when using models without vision or when you want a pure-HTML observation path.
 - The action vocabulary is intentionally bounded. There is no `eval` or raw JavaScript escape hatch. If you need something outside the list, drop out of aiscope and use explicit `extract` / `interact` steps after it.
 - Top-level jumps (`condition.thenStep`, `goto.targetStepId`) **cannot** target a step inside an aiscope. The aiscope's inner iteration is opaque to the top-level instruction pointer.
