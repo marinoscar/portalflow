@@ -98,6 +98,11 @@ program
     '--browser-profile-directory <name>',
     'Sub-profile inside the user data directory (e.g. "Default", "Profile 1").',
   )
+  .option(
+    '-v, --verbose',
+    'Print the full pino log stream to stdout (disables the clean presenter view). Useful for debugging the runner itself.',
+    false,
+  )
   .addHelpText('after', helpText.runHelpText())
   .action(async (
     file: string | undefined,
@@ -115,6 +120,7 @@ program
       browserChannel?: string;
       browserUserDataDir?: string;
       browserProfileDirectory?: string;
+      verbose?: boolean;
     },
   ) => {
     const { bootstrapDefaults } = await import('./runner/bootstrap.js');
@@ -185,32 +191,50 @@ program
         browserChannel: options.browserChannel,
         browserUserDataDir: options.browserUserDataDir,
         browserProfileDirectory: options.browserProfileDirectory,
+        verbose: options.verbose,
       });
 
-      // Print summary to stdout
-      if (result.success) {
-        logger.info(
-          {
-            stepsCompleted: result.stepsCompleted,
-            stepsTotal: result.stepsTotal,
-            artifacts: result.artifacts.length,
-            durationMs: result.completedAt.getTime() - result.startedAt.getTime(),
-          },
-          'Automation completed successfully',
-        );
-      } else {
-        logger.error(
-          {
-            stepsCompleted: result.stepsCompleted,
-            stepsTotal: result.stepsTotal,
-            errors: result.errors,
-          },
-          'Automation completed with errors',
-        );
-        process.exitCode = 1;
+      // In the default presenter view the runner already printed a
+      // clean summary to stdout via RunPresenter.runEnd. Only print
+      // an additional pino line when --verbose is on so the user
+      // still sees a structured final event in the log stream.
+      if (options.verbose) {
+        if (result.success) {
+          logger.info(
+            {
+              stepsCompleted: result.stepsCompleted,
+              stepsTotal: result.stepsTotal,
+              artifacts: result.artifacts.length,
+              durationMs: result.completedAt.getTime() - result.startedAt.getTime(),
+            },
+            'Automation completed successfully',
+          );
+        } else {
+          logger.error(
+            {
+              stepsCompleted: result.stepsCompleted,
+              stepsTotal: result.stepsTotal,
+              errors: result.errors,
+            },
+            'Automation completed with errors',
+          );
+        }
       }
+
+      if (!result.success) process.exitCode = 1;
     } catch (err) {
-      logger.error({ err }, 'Automation run failed');
+      // In presenter mode the RunPresenter has already shown a clean
+      // failure line via runEnd/runFatal; in verbose mode pino will
+      // print the structured error. Either way, set exit 1.
+      if (options.verbose) {
+        logger.error({ err }, 'Automation run failed');
+      } else {
+        // The runner may have failed before it constructed a presenter
+        // (e.g. file read / schema validation). Print a minimal
+        // human-readable line so the user isn't left with nothing.
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`\n✗ run failed: ${msg}\n\n`);
+      }
       process.exit(1);
     }
   });
