@@ -18,6 +18,7 @@ import { RunPresenter } from './run-presenter.js';
 import { ConfigService } from '../config/config.service.js';
 import { defaultExtensionConfig } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from './paths.js';
+import { launchChromeAndWaitForExtension } from '../browser/chrome-launcher.js';
 
 export interface RunOptions {
   video?: boolean;
@@ -317,7 +318,7 @@ export class AutomationRunner {
     } else {
       logger.info(
         { host: extensionCfg.host, port: extensionCfg.port },
-        'Starting ExtensionHost — waiting for Chrome extension to connect...',
+        'Starting ExtensionHost — launching Chrome and waiting for extension to connect...',
       );
       extensionHost = await ExtensionHost.start({
         host: extensionCfg.host,
@@ -327,10 +328,36 @@ export class AutomationRunner {
       ownedHost = true;
       logger.info(
         { port: extensionHost.port },
-        `ExtensionHost listening — waiting up to ${connectTimeoutMs}ms for extension`,
+        `ExtensionHost listening — launching Chrome with profileMode=${extensionCfg.profileMode}`,
       );
-      await waitForExtensionConnection(extensionHost, connectTimeoutMs);
-      logger.info({ port: extensionHost.port }, 'Chrome extension connected');
+
+      // TODO(task 9b): openWindow here — after Chrome connects, open the automation window.
+
+      // Only launch Chrome automatically when profileMode is 'dedicated' or 'real'.
+      // If profileMode is 'unset', fall back to the legacy wait-for-manual-connect path
+      // so existing users aren't broken. The first-run prompt (ensureProfileChoice) sets
+      // this to a real value before production runs.
+      if (extensionCfg.profileMode === 'dedicated' || extensionCfg.profileMode === 'real') {
+        try {
+          await launchChromeAndWaitForExtension(extensionHost, extensionCfg, logger);
+          logger.info({ port: extensionHost.port }, 'Chrome launched and extension connected');
+        } catch (err) {
+          await extensionHost.close().catch((closeErr) => {
+            logger.warn({ err: closeErr }, 'Error closing ExtensionHost after launch failure (non-fatal)');
+          });
+          throw new Error(
+            `Chrome / extension handshake failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      } else {
+        // profileMode === 'unset' — legacy behaviour: wait for manual Chrome+extension connection.
+        logger.info(
+          { port: extensionHost.port },
+          `ExtensionHost listening — waiting up to ${connectTimeoutMs}ms for extension (manual connection mode)`,
+        );
+        await waitForExtensionConnection(extensionHost, connectTimeoutMs);
+        logger.info({ port: extensionHost.port }, 'Chrome extension connected (manual mode)');
+      }
     }
 
     const pageClient = new PageClient({

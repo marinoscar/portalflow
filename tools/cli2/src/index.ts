@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import * as helpText from './help-text.js';
+import {
+  ConfigService,
+  type LogLevel,
+  type LoggingConfig,
+  type PathsConfig,
+  type VideoConfig,
+} from './config/config.service.js';
+import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
+import { resolvePaths, resolveVideo } from './runner/paths.js';
 
 function parseIntArg(v: string): number {
   const n = parseInt(v, 10);
@@ -24,15 +33,14 @@ program
   .description('PortalFlow CLI v2 — executes browser automations via Chrome extension transport')
   .version('0.1.0')
   .addHelpText('after', helpText.topLevelHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nportalflow2: interactive TUI not yet implemented (Task 2 of the cli2 rollout).\n' +
-      'Run portalflow2 --help to see available subcommands.\n\n',
-    );
-    process.exit(0);
+  .action(async () => {
+    const { runMainTui } = await import('./tui/main-tui.js');
+    await runMainTui();
   });
 
+// ---------------------------------------------------------------------------
 // run [file]
+// ---------------------------------------------------------------------------
 program
   .command('run [file]')
   .description('Execute an automation from a JSON file (omit file to use interactive TUI)')
@@ -77,11 +85,9 @@ program
     verbose?: boolean;
   }) => {
     if (!file) {
-      process.stdout.write(
-        '\nportalflow2 run: interactive TUI not yet implemented.\n' +
-        'Usage: portalflow2 run <automation.json>\n\n',
-      );
-      process.exit(0);
+      const { runRunFlow } = await import('./tui/flows/run.js');
+      await runRunFlow();
+      return;
     }
 
     // Parse --input key=value flags into a Map
@@ -104,6 +110,18 @@ program
         process.stderr.write(`portalflow2: --inputs-json is not valid JSON\n`);
         process.exit(1);
       }
+    }
+
+    // Ensure profile choice before running non-interactively
+    const configService = new ConfigService();
+    const config = await configService.load();
+    const extension = config.extension;
+    if (!extension || extension.profileMode === 'unset') {
+      process.stderr.write(
+        '\nportalflow2: Chrome profile mode is not configured.\n' +
+        'Run `portalflow2` (interactive TUI) or `portalflow2 settings extension` to configure it first.\n\n',
+      );
+      process.exit(1);
     }
 
     const { AutomationRunner } = await import('./runner/automation-runner.js');
@@ -131,50 +149,87 @@ program
     }
   });
 
+// ---------------------------------------------------------------------------
 // validate [file]
+// ---------------------------------------------------------------------------
 program
   .command('validate [file]')
   .description('Validate an automation JSON file against the schema (omit file to use interactive TUI)')
   .addHelpText('after', helpText.validateHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nvalidate is not yet implemented in portalflow2 (task 3 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (file: string | undefined) => {
+    if (!file) {
+      const { runValidateFlow } = await import('./tui/flows/validate.js');
+      await runValidateFlow();
+      return;
+    }
+
+    const { readFile } = await import('node:fs/promises');
+    const { AutomationSchema } = await import('@portalflow/schema');
+
+    try {
+      const raw = await readFile(file, 'utf-8');
+      const json = JSON.parse(raw);
+      const result = AutomationSchema.safeParse(json);
+      if (!result.success) {
+        process.stderr.write(
+          `portalflow2 validate: schema validation failed\n${JSON.stringify(result.error.flatten(), null, 2)}\n`,
+        );
+        process.exitCode = 1;
+      } else {
+        process.stdout.write(
+          `portalflow2 validate: OK — ${result.data.name} (${result.data.steps.length} steps)\n`,
+        );
+      }
+    } catch (err) {
+      process.stderr.write(`portalflow2 validate: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
   });
 
+// ---------------------------------------------------------------------------
 // provider
+// ---------------------------------------------------------------------------
 const provider = program
   .command('provider')
   .description('Manage LLM provider configuration (interactive TUI when run without subcommand)')
   .addHelpText('after', helpText.providerHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nprovider is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async () => {
+    const { runProviderTui } = await import('./tui/provider-tui.js');
+    await runProviderTui();
   });
 
 provider
   .command('list')
   .description('List configured LLM providers')
   .addHelpText('after', helpText.providerListHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nprovider list is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async () => {
+    const config = new ConfigService();
+    const cfg = await config.load();
+    const providers = Object.keys(cfg.providers ?? {});
+    if (providers.length === 0) {
+      process.stdout.write('No providers configured\n');
+    } else {
+      const active = cfg.activeProvider ?? '(none)';
+      for (const name of providers) {
+        const prov = cfg.providers?.[name];
+        const marker = name === active ? ' [active]' : '';
+        const kind = inferKind(name, prov?.kind);
+        const model = prov?.model ?? '(no model)';
+        const baseUrlPart =
+          kind === 'openai-compatible' && prov?.baseUrl ? `   baseUrl: ${prov.baseUrl}` : '';
+        process.stdout.write(`  ${name}${marker}   kind: ${kind}   model: ${model}${baseUrlPart}\n`);
+      }
+    }
   });
 
 provider
   .command('set <name>')
   .description('Set the active LLM provider')
   .addHelpText('after', helpText.providerSetHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nprovider set is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (name: string) => {
+    const config = new ConfigService();
+    await config.setActiveProvider(name);
+    process.stdout.write(`Active provider set to: ${name}\n`);
   });
 
 provider
@@ -185,11 +240,32 @@ provider
   .option('--base-url <url>', 'Base URL for the provider API')
   .option('--kind <kind>', 'Provider kind: anthropic or openai-compatible')
   .addHelpText('after', helpText.providerConfigHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nprovider config is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (
+    name: string,
+    options: { apiKey?: string; model?: string; baseUrl?: string; kind?: string },
+  ) => {
+    const VALID_KINDS: ProviderKind[] = ['anthropic', 'openai-compatible'];
+    if (options.kind !== undefined && !VALID_KINDS.includes(options.kind as ProviderKind)) {
+      process.stderr.write(
+        `portalflow2: invalid --kind value. Must be one of: ${VALID_KINDS.join(', ')}\n`,
+      );
+      process.exit(1);
+    }
+
+    const config = new ConfigService();
+    const cfg = await config.load();
+    const existing = cfg.providers?.[name];
+
+    const resolvedKind: ProviderKind = options.kind
+      ? (options.kind as ProviderKind)
+      : inferKind(name, existing?.kind);
+
+    const providerConfig: Record<string, string> = { kind: resolvedKind };
+    if (options.apiKey) providerConfig['apiKey'] = options.apiKey;
+    if (options.model) providerConfig['model'] = options.model;
+    if (options.baseUrl) providerConfig['baseUrl'] = options.baseUrl;
+    await config.setProviderConfig(name, providerConfig);
+    process.stdout.write(`Provider ${name} configured (kind: ${resolvedKind})\n`);
   });
 
 provider
@@ -197,34 +273,74 @@ provider
   .description('Remove all providers and the active selection (destructive)')
   .option('--yes', 'Skip confirmation prompt (required for non-interactive use)', false)
   .addHelpText('after', helpText.providerResetHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nprovider reset is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (options: { yes: boolean }) => {
+    const config = new ConfigService();
+    const cfg = await config.load();
+    const providerCount = Object.keys(cfg.providers ?? {}).length;
+
+    if (providerCount === 0 && !cfg.activeProvider) {
+      process.stdout.write('Nothing to reset — no configuration exists yet\n');
+      return;
+    }
+
+    if (!options.yes) {
+      process.stderr.write(
+        'Refusing to reset without confirmation. Pass --yes to proceed, or run ' +
+        '`portalflow2 provider` for the interactive TUI with a safer confirmation flow.\n',
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    await config.reset();
+    process.stdout.write(`All configurations removed (${providerCount} provider(s))\n`);
   });
 
+// ---------------------------------------------------------------------------
 // settings
+// ---------------------------------------------------------------------------
 const settings = program
   .command('settings')
-  .description('Manage storage paths and video recording (interactive TUI when run without subcommand)')
+  .description('Manage storage paths, video recording, and extension config (interactive TUI when run without subcommand)')
   .addHelpText('after', helpText.settingsHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nsettings is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async () => {
+    const { runSettingsTui } = await import('./tui/settings-tui.js');
+    await runSettingsTui();
   });
 
 settings
   .command('list')
-  .description('Show current storage paths and video recording settings')
+  .description('Show current settings (paths, video, logging, extension)')
   .addHelpText('after', helpText.settingsListHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nsettings list is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async () => {
+    const config = new ConfigService();
+    const cfg = await config.load();
+    const paths = resolvePaths(cfg);
+    const video = resolveVideo(cfg);
+    const logging = cfg.logging ?? {};
+    const extension = cfg.extension;
+
+    process.stdout.write('Paths:\n');
+    process.stdout.write(`  automations:  ${paths.automations}\n`);
+    process.stdout.write(`  screenshots:  ${paths.screenshots}\n`);
+    process.stdout.write(`  videos:       ${paths.videos}\n`);
+    process.stdout.write(`  downloads:    ${paths.downloads}\n`);
+    process.stdout.write('\nVideo:\n');
+    process.stdout.write(`  enabled: ${video.enabled}\n`);
+    process.stdout.write(`  width:   ${video.width}\n`);
+    process.stdout.write(`  height:  ${video.height}\n`);
+    process.stdout.write('\nLogging:\n');
+    process.stdout.write(`  level:          ${logging.level ?? 'info (default)'}\n`);
+    process.stdout.write(`  file:           ${logging.file ?? '(none — stdout only)'}\n`);
+    process.stdout.write(`  pretty:         ${logging.pretty ?? true ? 'yes' : 'no'}\n`);
+    process.stdout.write(`  redactSecrets:  ${logging.redactSecrets ?? true ? 'yes' : 'no'}\n`);
+    process.stdout.write('\nExtension:\n');
+    process.stdout.write(`  host:               ${extension?.host ?? '127.0.0.1'}\n`);
+    process.stdout.write(`  port:               ${extension?.port ?? 7667}\n`);
+    process.stdout.write(`  profileMode:        ${extension?.profileMode ?? 'unset'}\n`);
+    process.stdout.write(`  profileDir:         ${extension?.profileDir ?? '(n/a)'}\n`);
+    process.stdout.write(`  closeOnFinish:      ${extension?.closeWindowOnFinish ? 'yes' : 'no'}\n`);
+    process.stdout.write(`  chromeBinary:       ${extension?.chromeBinary ?? '(auto-detect)'}\n`);
   });
 
 settings
@@ -235,11 +351,29 @@ settings
   .option('--videos <dir>', 'Directory to store recorded videos')
   .option('--downloads <dir>', 'Directory to store downloaded files')
   .addHelpText('after', helpText.settingsPathsHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nsettings paths is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (opts: {
+    automations?: string;
+    screenshots?: string;
+    videos?: string;
+    downloads?: string;
+  }) => {
+    const config = new ConfigService();
+    const update: Partial<PathsConfig> = {};
+    if (opts.automations) update.automations = opts.automations;
+    if (opts.screenshots) update.screenshots = opts.screenshots;
+    if (opts.videos) update.videos = opts.videos;
+    if (opts.downloads) update.downloads = opts.downloads;
+    if (Object.keys(update).length === 0) {
+      const cfg = await config.load();
+      const current = resolvePaths(cfg);
+      process.stdout.write(`automations:  ${current.automations}\n`);
+      process.stdout.write(`screenshots:  ${current.screenshots}\n`);
+      process.stdout.write(`videos:       ${current.videos}\n`);
+      process.stdout.write(`downloads:    ${current.downloads}\n`);
+      return;
+    }
+    await config.setPaths(update);
+    process.stdout.write(`Paths updated: ${JSON.stringify(update)}\n`);
   });
 
 settings
@@ -253,27 +387,61 @@ settings
   .option('--redact', 'Redact secrets and sensitive fields in log output')
   .option('--no-redact', 'Do NOT redact secret values (use with care)')
   .addHelpText('after', helpText.settingsLoggingHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nsettings logging is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (opts: {
+    level?: string;
+    file?: string | false;
+    pretty?: boolean;
+    redact?: boolean;
+  }) => {
+    const config = new ConfigService();
+
+    const VALID: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'];
+    if (opts.level !== undefined && !VALID.includes(opts.level as LogLevel)) {
+      process.stderr.write(
+        `portalflow2: invalid --level value. Must be one of: ${VALID.join(', ')}\n`,
+      );
+      process.exit(1);
+    }
+
+    const update: Partial<LoggingConfig> = {};
+    if (opts.level !== undefined) update.level = opts.level as LogLevel;
+    if (opts.file === false) update.file = '';
+    if (typeof opts.file === 'string') update.file = opts.file;
+    if (opts.pretty !== undefined) update.pretty = opts.pretty;
+    if (opts.redact !== undefined) update.redactSecrets = opts.redact;
+
+    if (Object.keys(update).length === 0) {
+      const cfg = await config.load();
+      const current = cfg.logging ?? {};
+      process.stdout.write(JSON.stringify(current, null, 2) + '\n');
+      return;
+    }
+
+    // Empty string means "clear the file setting".
+    if (update.file === '') {
+      const cfg = await config.load();
+      cfg.logging = { ...(cfg.logging ?? {}) };
+      delete cfg.logging.file;
+      if (update.level !== undefined) cfg.logging.level = update.level;
+      if (update.pretty !== undefined) cfg.logging.pretty = update.pretty;
+      if (update.redactSecrets !== undefined) cfg.logging.redactSecrets = update.redactSecrets;
+      await config.save(cfg);
+      process.stdout.write('Logging config updated (file disabled)\n');
+      return;
+    }
+
+    await config.setLogging(update);
+    process.stdout.write(`Logging config updated: ${JSON.stringify(update)}\n`);
   });
 
 settings
-  .command('browser')
-  .description('Configure the browser profile used for automation runs')
-  .option('--mode <mode>', '"isolated" or "persistent"')
-  .option('--channel <channel>', 'Chromium-family channel: chromium, chrome, chrome-beta, chrome-dev, msedge, msedge-beta, msedge-dev')
-  .option('--user-data-dir <path>', 'Path to the user data directory')
-  .option('--profile-directory <name>', 'Sub-profile name (e.g. "Default", "Profile 1")')
-  .option('--list', 'List installed Chromium-family browser profiles on this machine and exit')
+  .command('extension')
+  .description('Configure the Chrome extension transport (profile mode, host, port)')
   .addHelpText('after', helpText.settingsBrowserHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nsettings browser is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async () => {
+    const config = new ConfigService();
+    const { runExtensionSettings } = await import('./tui/flows/settings-extension.js');
+    await runExtensionSettings(config);
   });
 
 settings
@@ -284,11 +452,26 @@ settings
   .option('--width <n>', 'Video width in pixels', parseIntArg)
   .option('--height <n>', 'Video height in pixels', parseIntArg)
   .addHelpText('after', helpText.settingsVideoHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nsettings video is not yet implemented in portalflow2 (task 4 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (opts: {
+    enable?: boolean;
+    disable?: boolean;
+    width?: number;
+    height?: number;
+  }) => {
+    const config = new ConfigService();
+    const update: Partial<VideoConfig> = {};
+    if (opts.enable) update.enabled = true;
+    if (opts.disable) update.enabled = false;
+    if (opts.width !== undefined) update.width = opts.width;
+    if (opts.height !== undefined) update.height = opts.height;
+    if (Object.keys(update).length === 0) {
+      const cfg = await config.load();
+      const current = resolveVideo(cfg);
+      process.stdout.write(JSON.stringify(current, null, 2) + '\n');
+      return;
+    }
+    await config.setVideo(update);
+    process.stdout.write(`Video config updated: ${JSON.stringify(update)}\n`);
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

@@ -6,14 +6,6 @@ import { runSettingsPathsFlow } from './flows/settings-paths.js';
 import { runSettingsVideoFlow } from './flows/settings-video.js';
 import { runSettingsLoggingFlow } from './flows/settings-logging.js';
 
-/**
- * Stub for the browser/extension settings flow — real implementation comes
- * in task 9 when the extension transport wiring is complete.
- */
-async function runBrowserSettingsStub(_configService: ConfigService): Promise<void> {
-  console.log('browser settings not yet implemented — task 9');
-}
-
 type SettingsAction =
   | 'view'
   | 'paths'
@@ -62,7 +54,7 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         },
         {
           value: 'browser' as SettingsAction,
-          label: 'Configure extension settings',
+          label: 'Extension settings',
           hint: 'Chrome profile, host, port, close-on-finish',
         },
         {
@@ -137,9 +129,11 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         await runSettingsLoggingFlow(configService);
         break;
 
-      case 'browser':
-        await runBrowserSettingsStub(configService);
+      case 'browser': {
+        const { runExtensionSettings } = await import('./flows/settings-extension.js');
+        await runExtensionSettings(configService);
         break;
+      }
 
       case 'reset': {
         const confirm = await p.confirm({

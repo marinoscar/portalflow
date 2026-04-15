@@ -5,14 +5,6 @@ import { providerDisplayName } from './helpers.js';
 
 type MainAction = 'run' | 'validate' | 'provider' | 'settings' | 'exit';
 
-/**
- * Stub for the run flow — real implementation comes in task 9 when the
- * extension transport wiring is complete.
- */
-async function runRunFlowStub(_options: { nested: boolean }): Promise<void> {
-  console.log('run flow not yet implemented — task 9');
-}
-
 export async function runMainTui(): Promise<void> {
   p.intro(pc.bgCyan(pc.black(' PortalFlow ')));
 
@@ -50,7 +42,8 @@ export async function runMainTui(): Promise<void> {
 
     switch (action) {
       case 'run': {
-        await runRunFlowStub({ nested: true });
+        const { runRunFlow } = await import('./flows/run.js');
+        await runRunFlow({ nested: true });
         break;
       }
       case 'validate': {
