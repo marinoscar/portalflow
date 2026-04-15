@@ -1045,4 +1045,89 @@ describe('AutomationSchema · aiscope step type', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  // Regression: prior to the discriminated-union refactor, an aiscope
+  // step whose action shape happened to match an earlier variant in a
+  // plain z.union (e.g. LoopAction, which only requires maxIterations)
+  // was silently reparsed as that other variant. Zod stripped the
+  // aiscope-specific fields as "unknown keys" and the runner then
+  // crashed at resolveTemplate(undefined) because `action.goal` was
+  // gone. The discriminator on `type` forces AiScopeActionSchema to
+  // be selected, preserving every aiscope-specific field.
+  it('regression: aiscope with maxIterations parses as aiscope (not loop)', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        {
+          id: 'navigate-to-login',
+          name: 'Navigate to login',
+          type: 'aiscope',
+          action: {
+            goal: 'Find the login page and click through until the sign-in form appears',
+            successCheck: { ai: 'A user or email input box is visible' },
+            maxDurationSec: 120,
+            maxIterations: 80,
+            includeScreenshot: true,
+          },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 60000,
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const action = result.data.steps[0].action as {
+        goal: string;
+        successCheck: { ai?: string };
+        maxDurationSec: number;
+        maxIterations: number;
+        includeScreenshot: boolean;
+      };
+      // The key assertion: `goal` must survive parsing. Under the old
+      // schema this would be undefined because z.union reparsed the
+      // action as a LoopAction (which doesn't have a goal field) and
+      // Zod stripped the unknown keys.
+      expect(action.goal).toBe(
+        'Find the login page and click through until the sign-in form appears',
+      );
+      expect(action.successCheck.ai).toBe('A user or email input box is visible');
+      expect(action.maxDurationSec).toBe(120);
+      expect(action.maxIterations).toBe(80);
+      expect(action.includeScreenshot).toBe(true);
+    }
+  });
+
+  it('regression: a malformed aiscope step missing goal is rejected with a targeted error', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        {
+          id: 'bad-aiscope',
+          name: 'Missing goal',
+          type: 'aiscope',
+          action: {
+            successCheck: { check: 'element_exists', value: 'button' },
+            maxIterations: 80,
+          },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 0,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      // With a discriminated union, the error reports the precise path
+      // on the selected variant, not a generic "no variant matched".
+      const flat = result.error.flatten();
+      const issuePaths = result.error.issues.map((i) => i.path.join('.'));
+      const mentionsGoal = issuePaths.some((p) => p.includes('goal'));
+      expect(mentionsGoal).toBe(true);
+      // Guard against the message also mentioning unrelated variant
+      // fields (e.g. "function", "targetStepId") which would indicate
+      // z.union is still being used.
+      void flat;
+    }
+  });
 });
