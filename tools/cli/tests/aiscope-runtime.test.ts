@@ -324,11 +324,15 @@ describe('StepExecutor · executeAiScope', () => {
   it('treats LLM "done" as a hint — loop continues until successCheck agrees', async () => {
     // Iteration 1: LLM says "done", check still false.
     // Iteration 2: LLM says "click", check still false.
-    // Iteration 3: check finally passes.
+    // Iteration 3: check finally passes. Because successCheck is AI,
+    // decideNextAction runs speculatively on every iteration — including
+    // the third — and its result is discarded when the check wins. So
+    // the mock needs three decision entries and three calls are observed.
     const env = buildEnv({
       decideSequence: [
         { action: 'done', reasoning: 'I think we are done' },
         { action: 'click', selector: 'button.final', reasoning: 'last click' },
+        { action: 'click', selector: 'button.speculative', reasoning: 'discarded' },
       ],
       successCheckResults: [false, false, true],
     });
@@ -341,7 +345,9 @@ describe('StepExecutor · executeAiScope', () => {
 
     expect(outcome).toBe('continue');
     expect(env.ctx.getVariable('step-aiscope_status')).toBe('success');
-    expect(env.llmService.decideNextAction).toHaveBeenCalledTimes(2);
+    // Three iterations → three speculative decideNextAction calls. The
+    // last one is thrown away because the success check won the race.
+    expect(env.llmService.decideNextAction).toHaveBeenCalledTimes(3);
   });
 
   it('rejects LLM actions outside allowedActions and keeps looping', async () => {
@@ -412,8 +418,12 @@ describe('StepExecutor · executeAiScope', () => {
   });
 
   it('evaluates an AI successCheck via llmService.evaluateCondition', async () => {
+    // AI successCheck path now runs evaluateCondition and
+    // decideNextAction speculatively in parallel. When the check wins
+    // on the first iteration, decideNextAction's result is discarded —
+    // but the call was still made.
     const env = buildEnv({
-      decideSequence: [{ action: 'click', selector: 'button', reasoning: '' }],
+      decideSequence: [{ action: 'click', selector: 'button', reasoning: 'speculative' }],
       successCheckResults: [true],
     });
     const step = aiscopeStep({
@@ -426,12 +436,19 @@ describe('StepExecutor · executeAiScope', () => {
     expect(env.llmService.evaluateCondition).toHaveBeenCalledTimes(1);
     const callArg = env.llmService.evaluateCondition.mock.calls[0][0];
     expect(callArg.question).toBe('Is the login form visible?');
-    expect(env.llmService.decideNextAction).not.toHaveBeenCalled();
+    // Speculative: decideNextAction was called in parallel with the
+    // success check. Its result was discarded when the check won.
+    expect(env.llmService.decideNextAction).toHaveBeenCalledTimes(1);
   });
 
   it('resolves {{var}} references in the goal before sending to the LLM', async () => {
+    // Parallel AI successCheck path: each iteration calls decideNextAction
+    // speculatively alongside evaluateCondition. Two iterations → two calls.
     const env = buildEnv({
-      decideSequence: [{ action: 'done', reasoning: 'trivial' }],
+      decideSequence: [
+        { action: 'done', reasoning: 'trivial' },
+        { action: 'done', reasoning: 'speculative discarded' },
+      ],
       successCheckResults: [false, true], // iter1 check false → decide → iter2 check true
     });
     env.ctx.setVariable('banner_type', 'cookie');
@@ -454,7 +471,7 @@ describe('StepExecutor · executeAiScope', () => {
 
     await env.exec.executeWithPolicy(step);
 
-    expect(env.llmService.decideNextAction).toHaveBeenCalledTimes(1);
+    expect(env.llmService.decideNextAction).toHaveBeenCalledTimes(2);
     const sentGoal = env.llmService.decideNextAction.mock.calls[0][0].goal;
     expect(sentGoal).toBe('Dismiss the cookie banner');
     expect(sentGoal).not.toContain('{{');
@@ -528,7 +545,7 @@ describe('StepExecutor · executeAiScope', () => {
 
   it('forwards the screenshot to evaluateCondition on AI successCheck when includeScreenshot is true', async () => {
     const env = buildEnv({
-      decideSequence: [{ action: 'click', selector: 'button', reasoning: '' }],
+      decideSequence: [{ action: 'click', selector: 'button', reasoning: 'speculative' }],
       successCheckResults: [true],
     });
     const step = aiscopeStep({
@@ -541,5 +558,133 @@ describe('StepExecutor · executeAiScope', () => {
     expect(env.llmService.evaluateCondition).toHaveBeenCalledTimes(1);
     const callArg = env.llmService.evaluateCondition.mock.calls[0][0];
     expect(callArg.pageContext.screenshot).toBe('base64-screenshot-data');
+  });
+
+  // ---------------------------------------------------------------------
+  // Parallel speculative execution for AI successCheck
+  // ---------------------------------------------------------------------
+
+  it('runs evaluateCondition and decideNextAction in parallel when successCheck is AI', async () => {
+    // Measure timing: if the calls ran sequentially, total latency would
+    // be ~400ms (2 x 200ms). If parallel, ~200ms. Give the assertion a
+    // generous cushion to avoid flakes on slow CI.
+    const env = buildEnv({
+      decideSequence: [{ action: 'click', selector: 'button', reasoning: 'speculative' }],
+      successCheckResults: [true],
+    });
+
+    const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+    // Wrap the mocks to add 200ms latency each.
+    const origEval = env.llmService.evaluateCondition;
+    env.llmService.evaluateCondition = vi.fn(async (q: unknown) => {
+      await delay(200);
+      return origEval(q);
+    });
+    const origDecide = env.llmService.decideNextAction;
+    env.llmService.decideNextAction = vi.fn(async (q: unknown) => {
+      await delay(200);
+      return origDecide(q);
+    });
+
+    const step = aiscopeStep({
+      ai: 'Is the login form visible?',
+    });
+
+    const t0 = Date.now();
+    await env.exec.executeWithPolicy(step);
+    const elapsed = Date.now() - t0;
+
+    // Sequential would be ~400ms+; parallel should be ~200-300ms. Assert
+    // an upper bound that's clearly below the sequential floor.
+    expect(elapsed).toBeLessThan(350);
+    expect(env.llmService.evaluateCondition).toHaveBeenCalledTimes(1);
+    expect(env.llmService.decideNextAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards the speculative decideNextAction result when the AI check wins', async () => {
+    // Iteration 1: check true immediately, decideNextAction speculatively
+    // returns a click action. If the runner honored that action instead
+    // of discarding it, the stubbed click would throw and fail the step.
+    const env = buildEnv({
+      decideSequence: [
+        { action: 'click', selector: 'button.forbidden', reasoning: 'speculative' },
+      ],
+      successCheckResults: [true],
+      pageServiceOverrides: {
+        click: async () => {
+          throw new Error(
+            'pageService.click was called — the speculative decision should have been discarded',
+          );
+        },
+      },
+    });
+    const step = aiscopeStep({
+      ai: 'Is the login form visible?',
+    });
+
+    const outcome = await env.exec.executeWithPolicy(step);
+
+    expect(outcome).toBe('continue');
+    expect(env.ctx.getVariable('step-aiscope_status')).toBe('success');
+  });
+
+  it('does not parallelize when successCheck is deterministic', async () => {
+    // Deterministic checks are cheap (DOM query), so the parallel path
+    // would waste a real LLM call on goal-reached iterations. Verify
+    // that decideNextAction is NOT called when an element_exists check
+    // wins on the first iteration.
+    const env = buildEnv({
+      decideSequence: [
+        { action: 'click', selector: 'button', reasoning: 'should-not-run' },
+      ],
+      successCheckResults: [],
+      pageServiceOverrides: {
+        // The check wins immediately — the element exists.
+        elementExists: async () => true,
+      },
+    });
+    const step = aiscopeStep({
+      check: 'element_exists',
+      checkValue: 'button#accept',
+    });
+
+    await env.exec.executeWithPolicy(step);
+
+    expect(env.ctx.getVariable('step-aiscope_status')).toBe('success');
+    // Key assertion: no speculative decision call because the check is
+    // synchronous and cheap — sequential is strictly better here.
+    expect(env.llmService.decideNextAction).not.toHaveBeenCalled();
+  });
+
+  it('propagates a decideNextAction error only when the AI check fails', async () => {
+    // Scenario A: check true → decide rejected → the rejection is
+    // SWALLOWED because the goal is already reached.
+    const envA = buildEnv({
+      decideSequence: [],
+      successCheckResults: [true],
+    });
+    envA.llmService.decideNextAction = vi.fn(async () => {
+      throw new Error('provider 500');
+    });
+    const stepA = aiscopeStep({ ai: 'Is the goal reached?' });
+
+    await envA.exec.executeWithPolicy(stepA);
+    expect(envA.ctx.getVariable('step-aiscope_status')).toBe('success');
+
+    // Scenario B: check false → decide rejected → the rejection IS
+    // propagated and aborts the step.
+    const envB = buildEnv({
+      decideSequence: [],
+      successCheckResults: [false],
+    });
+    envB.llmService.decideNextAction = vi.fn(async () => {
+      throw new Error('provider 500');
+    });
+    const stepB = aiscopeStep({ ai: 'Is the goal reached?', maxIterations: 3 });
+
+    const outcome = await envB.exec.executeWithPolicy(stepB);
+    expect(outcome).toBe('abort');
+    expect(envB.ctx.getVariable('step-aiscope_error') ?? '').toContain('provider 500');
   });
 });
