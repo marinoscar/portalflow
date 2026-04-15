@@ -19,6 +19,7 @@ import { ConfigService } from '../config/config.service.js';
 import { defaultExtensionConfig } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from './paths.js';
 import { launchChromeAndWaitForExtension } from '../browser/chrome-launcher.js';
+import { CheckpointStore, snapshotRunContext, restoreRunContext } from './checkpoint.js';
 
 export interface RunOptions {
   video?: boolean;
@@ -435,6 +436,16 @@ export class AutomationRunner {
     presenter.runStart(automation.name, steps.length);
 
     // ------------------------------------------------------------------
+    // Checkpoint store — step-boundary reconnect recovery
+    // ------------------------------------------------------------------
+    const checkpointStore = new CheckpointStore();
+    // Use the ExtensionHost's session runId as the checkpoint key — it's
+    // what the extension sends back as `previousRunId` on reconnect, so the
+    // host can match it. The RunContext has its own runId for template
+    // functions; the host/session runId is used for reconnect matching.
+    const runId = extensionHost.activeRunId ?? context.runId;
+
+    // ------------------------------------------------------------------
     // Run-window abort signal
     //
     // If the user closes the dedicated run window or its tab during the run,
@@ -442,6 +453,9 @@ export class AutomationRunner {
     // commands to a non-existent window.
     // ------------------------------------------------------------------
     let runWindowClosedError: Error | null = null;
+    // Reconnect/abort signals from the extension host state machine.
+    let runAbortError: Error | null = null;
+    let reconnectPending = false;
 
     function onWindowClosed(event: { windowId?: number }): void {
       logger.warn({ windowId: event.windowId }, 'Run window closed by user — aborting run');
@@ -452,6 +466,51 @@ export class AutomationRunner {
       logger.warn({ tabId: event.tabId }, 'Run tab closed by user — aborting run');
       runWindowClosedError = new Error('Run window closed by user');
     }
+
+    function onDisconnected(reason: string): void {
+      if (reason === 'reconnect_pending') {
+        const cp = checkpointStore.get(runId);
+        const stepIdx = cp ? cp.lastCompletedStepIndex + 1 : 0;
+        logger.warn(
+          { runId, reason, resumeAtStep: stepIdx },
+          'Extension disconnected — waiting up to 30s for reconnect',
+        );
+        reconnectPending = true;
+      } else {
+        logger.warn({ runId, reason }, 'Extension disconnected (mid-step or replaced) — aborting run');
+        runAbortError = new Error('Extension disconnected mid-step — run aborted');
+      }
+    }
+
+    function onResumed(info: { runId: string; resumeFromStep: number }): void {
+      logger.info(
+        { runId: info.runId, resumeFromStep: info.resumeFromStep },
+        'Extension reconnected — resuming run',
+      );
+      reconnectPending = false;
+      // Restore context from the last checkpoint so any in-memory state is consistent.
+      const cp = checkpointStore.get(info.runId);
+      if (cp) {
+        restoreRunContext(context, cp.contextSnapshot);
+      }
+    }
+
+    function onReconnectTimeout(info: { runId: string }): void {
+      const cp = checkpointStore.get(info.runId);
+      const stepIdx = cp ? cp.lastCompletedStepIndex + 1 : 0;
+      logger.error(
+        { runId: info.runId, stepIdx },
+        'Extension did not reconnect within 30s — aborting run',
+      );
+      reconnectPending = false;
+      runAbortError = new Error(
+        `Extension did not reconnect within 30s — run aborted at step ${stepIdx}`,
+      );
+    }
+
+    extensionHost.on('disconnected', onDisconnected);
+    extensionHost.on('resumed', onResumed);
+    extensionHost.on('reconnectTimeout', onReconnectTimeout);
 
     if (runWindowInfo !== null) {
       extensionHost.on('windowClosed', onWindowClosed);
@@ -468,6 +527,16 @@ export class AutomationRunner {
         if (runWindowClosedError !== null) {
           throw runWindowClosedError;
         }
+        // Check for a hard abort (mid-step disconnect or reconnect timeout).
+        if (runAbortError !== null) {
+          throw runAbortError;
+        }
+        // Check if we're waiting for a reconnect — spin-wait with small yields.
+        if (reconnectPending) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
+
         if (executionsRemaining-- <= 0) {
           throw new Error(
             `Step execution cap (${MAX_STEP_EXECUTIONS}) exceeded — likely a goto loop. ` +
@@ -528,18 +597,43 @@ export class AutomationRunner {
             { from: step.id, to: target, executionsRemaining },
             'Jumping to step',
           );
+
+          // Checkpoint before the jump so resume lands at the correct position.
+          checkpointStore.record({
+            runId,
+            lastCompletedStepIndex: i,
+            contextSnapshot: snapshotRunContext(context),
+            timestamp: Date.now(),
+          });
+          extensionHost.markResumePoint(runId, nextIndex);
+
           i = nextIndex;
           continue;
         }
 
+        // Checkpoint after each successfully-completed step (non-jump path).
+        checkpointStore.record({
+          runId,
+          lastCompletedStepIndex: i,
+          contextSnapshot: snapshotRunContext(context),
+          timestamp: Date.now(),
+        });
+        extensionHost.markResumePoint(runId, i + 1);
+
         i += 1;
       }
+
+      // Successful completion — clear the checkpoint.
+      checkpointStore.clear(runId);
     } finally {
       // ------------------------------------------------------------------
       // 12. Tear down run window listeners and close the host
       // ------------------------------------------------------------------
 
-      // Remove window lifecycle listeners so they don't fire after the run.
+      // Remove all lifecycle listeners attached for this run.
+      extensionHost.off('disconnected', onDisconnected);
+      extensionHost.off('resumed', onResumed);
+      extensionHost.off('reconnectTimeout', onReconnectTimeout);
       if (runWindowInfo !== null) {
         extensionHost.off('windowClosed', onWindowClosed);
         extensionHost.off('tabClosed', onTabClosed);

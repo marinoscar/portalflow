@@ -26,6 +26,14 @@ function computeBackoff(attempt: number): number {
 
 let currentSocket: WebSocket | null = null;
 
+/**
+ * Tracks the runId of the most-recently-received session envelope.
+ * Included in the `hello` payload on reconnect as `previousRunId` so the
+ * CLI-side ExtensionHost can route the reconnect to the active run.
+ * Reset to null when the offscreen document tears down.
+ */
+let activeRunId: string | null = null;
+
 function connect(attempt = 0): void {
   log('connecting', { url: WS_URL, attempt });
 
@@ -37,13 +45,27 @@ function connect(attempt = 0): void {
     log('open');
 
     const manifest = chrome.runtime.getManifest();
-    const helloMsg = {
+    const helloMsg: {
+      kind: 'event';
+      type: 'hello';
+      chromeVersion: string;
+      extensionVersion: string;
+      protocolVersion: string;
+      previousRunId?: string;
+    } = {
       kind: 'event' as const,
       type: 'hello' as const,
       chromeVersion: parseChromeVersion(),
       extensionVersion: manifest.version,
       protocolVersion: RUNNER_PROTOCOL_VERSION,
     };
+
+    // Include the previous runId on reconnect so the CLI can match it.
+    if (activeRunId !== null) {
+      helloMsg.previousRunId = activeRunId;
+      log('hello_with_previous_run_id', { previousRunId: activeRunId });
+    }
+
     ws.send(JSON.stringify(helloMsg));
     log('hello_sent', helloMsg);
   });
@@ -62,7 +84,14 @@ function connect(attempt = 0): void {
       const session = data as RunnerSession;
       if (session.kind === 'session') {
         sessionReceived = true;
-        log('session_received', { runId: session.runId, protocolVersion: session.protocolVersion });
+        // Track the active runId so we can include it in the next reconnect hello.
+        // If resumeFromStep is undefined, this is a fresh session — reset the runId.
+        activeRunId = session.runId;
+        log('session_received', {
+          runId: session.runId,
+          protocolVersion: session.protocolVersion,
+          resumeFromStep: session.resumeFromStep,
+        });
       } else {
         log('unexpected_before_session', data);
       }
@@ -92,6 +121,7 @@ function connect(attempt = 0): void {
     log('close', { code: event.code, reason: event.reason });
     currentSocket = null;
     sessionReceived = false;
+    // Note: we intentionally keep activeRunId so the next hello includes previousRunId.
 
     const delayMs = computeBackoff(attempt);
     log('reconnect_scheduled', { delayMs, nextAttempt: attempt + 1 });
@@ -103,6 +133,8 @@ window.addEventListener('beforeunload', () => {
   if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
     currentSocket.close(1000, 'offscreen unloading');
   }
+  // Tear-down: clear runId so we don't send a stale previousRunId after reload.
+  activeRunId = null;
 });
 
 // ---------------------------------------------------------------------------

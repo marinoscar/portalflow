@@ -198,7 +198,7 @@ export type RunnerResponse = RunnerResult | RunnerError;
 // ---------------------------------------------------------------------------
 
 export type RunnerEvent =
-  | { kind: 'event'; type: 'hello'; chromeVersion: string; extensionVersion: string; protocolVersion: string; existingWindowId?: number }
+  | { kind: 'event'; type: 'hello'; chromeVersion: string; extensionVersion: string; protocolVersion: string; existingWindowId?: number; previousRunId?: string }
   | { kind: 'event'; type: 'navigationComplete'; tabId: number; url: string }
   | { kind: 'event'; type: 'downloadComplete'; downloadId: number; filename: string; bytesReceived: number }
   | { kind: 'event'; type: 'tabClosed'; tabId: number }

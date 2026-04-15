@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import pino from 'pino';
-import { ExtensionHost, ExtensionCommandError } from '../extension-host.js';
+import { ExtensionHost, ExtensionCommandError, RECONNECT_WINDOW_MS } from '../extension-host.js';
 import { RUNNER_PROTOCOL_VERSION } from '../protocol.js';
 import type { RunnerResult, RunnerError } from '../protocol.js';
 
@@ -258,6 +258,8 @@ describe('ExtensionHost', () => {
 
     await host.close();
 
+    // After close(), state is 'aborted' so sendCommand throws the abort message
+    // (before it can even check isConnected).
     await expect(
       host.sendCommand({
         type: 'navigate',
@@ -266,7 +268,7 @@ describe('ExtensionHost', () => {
         tab: { kind: 'active' },
         url: 'https://example.com',
       }),
-    ).rejects.toThrow('Extension not connected');
+    ).rejects.toThrow(/Extension disconnected|Extension not connected/);
   });
 
   // ---------------------------------------------------------------------------
@@ -322,5 +324,267 @@ describe('ExtensionHost', () => {
     await expect(host.closeRunWindow(5, 5000)).resolves.toBeUndefined();
 
     client.close();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Reconnect-pending state machine
+  // ---------------------------------------------------------------------------
+
+  describe('reconnect-pending state machine', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('mid-step disconnect: sendCommand rejects with abort error, state goes to aborted', async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { client } = await connectAndHandshake(host.port);
+
+      // Send a command but don't reply — it stays pending.
+      const commandPromise = host.sendCommand({
+        type: 'navigate',
+        commandId: 'cmd-mid-step',
+        timeoutMs: 30_000,
+        tab: { kind: 'active' },
+        url: 'https://example.com',
+      });
+
+      // Wait until the command is received by the fake extension (so it's in-flight).
+      await new Promise<void>((resolve) => client.once('message', () => resolve()));
+
+      // Collect the disconnected reason emitted.
+      let disconnectedReason: string | undefined;
+      host.once('disconnected', (reason: string) => { disconnectedReason = reason; });
+
+      // Drop the connection while the command is in flight.
+      client.close();
+
+      // sendCommand should reject with the mid-step abort error.
+      await expect(commandPromise).rejects.toThrow('Extension disconnected mid-step — run aborted');
+
+      // State should be 'aborted'.
+      expect(host.getState()).toBe('aborted');
+      expect(disconnectedReason).toBe('aborted');
+    }, 15_000);
+
+    it('aborted state: subsequent sendCommand rejects immediately', async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { client } = await connectAndHandshake(host.port);
+
+      // Force into aborted state via mid-step disconnect.
+      const p = host.sendCommand({
+        type: 'navigate',
+        commandId: 'cmd-abort-then-send',
+        timeoutMs: 30_000,
+        tab: { kind: 'active' },
+        url: 'https://example.com',
+      });
+      await new Promise<void>((resolve) => client.once('message', () => resolve()));
+      client.close();
+      await p.catch(() => undefined); // absorb the error
+
+      // Now another sendCommand should reject immediately with the abort message.
+      await expect(
+        host.sendCommand({
+          type: 'navigate',
+          commandId: 'cmd-post-abort',
+          timeoutMs: 5000,
+          tab: { kind: 'active' },
+          url: 'https://example.com',
+        }),
+      ).rejects.toThrow('Extension disconnected mid-step — run aborted');
+    }, 15_000);
+
+    it('between-step disconnect: state goes to reconnect_pending, emits disconnected with reason', async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { client } = await connectAndHandshake(host.port);
+
+      let disconnectedReason: string | undefined;
+      host.once('disconnected', (reason: string) => { disconnectedReason = reason; });
+
+      // Drop without any in-flight command (between steps).
+      const closed = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      client.close();
+      await closed;
+
+      expect(host.getState()).toBe('reconnect_pending');
+      expect(disconnectedReason).toBe('reconnect_pending');
+    }, 15_000);
+
+    it('reconnect with matching runId within 30s: returns to connected, emits resumed, session carries resumeFromStep', async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { client, session } = await connectAndHandshake(host.port);
+      const runId = session['runId'] as string;
+
+      // Tell the host the resume point (as if the runner completed step 1, resumes at 2).
+      host.markResumePoint(runId, 2);
+
+      // Disconnect between steps (no pending commands).
+      const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      client.close();
+      await disconnected;
+      expect(host.getState()).toBe('reconnect_pending');
+
+      // Set up resumed listener.
+      const resumedInfo = await new Promise<{ runId: string; resumeFromStep: number }>((resolve) => {
+        host.once('resumed', resolve);
+
+        // Reconnect with previousRunId matching the session runId.
+        const client2 = new WebSocket(`ws://127.0.0.1:${host.port}`);
+        client2.once('open', () => {
+          client2.send(JSON.stringify(helloEvent({ previousRunId: runId })));
+        });
+        client2.once('message', (data) => {
+          const resumeSession = JSON.parse(data.toString()) as Record<string, unknown>;
+          expect(resumeSession['kind']).toBe('session');
+          expect(resumeSession['runId']).toBe(runId);
+          expect(resumeSession['resumeFromStep']).toBe(2);
+          client2.close();
+        });
+      });
+
+      expect(resumedInfo.runId).toBe(runId);
+      expect(resumedInfo.resumeFromStep).toBe(2);
+      expect(host.getState()).toBe('connected');
+    }, 15_000);
+
+    it('reconnect with wrong runId: closed with 1008, original state still reconnect_pending', async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { client } = await connectAndHandshake(host.port);
+
+      const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      client.close();
+      await disconnected;
+      expect(host.getState()).toBe('reconnect_pending');
+
+      // Try to reconnect with the wrong runId.
+      await new Promise<void>((resolve, reject) => {
+        const intruder = new WebSocket(`ws://127.0.0.1:${host.port}`);
+        intruder.on('error', reject);
+        intruder.once('open', () => {
+          intruder.send(JSON.stringify(helloEvent({ previousRunId: 'wrong-run-id-12345' })));
+        });
+        intruder.once('close', (code) => {
+          try {
+            expect(code).toBe(1008);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+
+      // State must still be reconnect_pending (not overridden by the intruder).
+      expect(host.getState()).toBe('reconnect_pending');
+    }, 15_000);
+
+    it('reconnect timeout after 30s: state goes to aborted, emits reconnectTimeout', async () => {
+      vi.useFakeTimers();
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+      // Connect, then disconnect between steps.
+      const clientConnected = new Promise<{ client: WebSocket }>((resolve, reject) => {
+        const c = new WebSocket(`ws://127.0.0.1:${host.port}`);
+        c.on('error', reject);
+        c.once('open', () => {
+          c.send(JSON.stringify(helloEvent()));
+          c.once('message', () => resolve({ client: c }));
+        });
+      });
+      // Run fake timers to allow the WS connection to complete.
+      // Use real-timer workaround: vitest's fake timers don't affect ws I/O,
+      // so we need to flush microtasks with advanceTimersByTime(0).
+      vi.advanceTimersByTime(0);
+      const { client } = await clientConnected;
+
+      const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      client.close();
+      vi.advanceTimersByTime(0);
+      await disconnected;
+      expect(host.getState()).toBe('reconnect_pending');
+
+      // Subscribe for the timeout event.
+      const timeoutFired = new Promise<{ runId: string }>((resolve) => host.once('reconnectTimeout', resolve));
+
+      // Advance past the 30s window.
+      vi.advanceTimersByTime(RECONNECT_WINDOW_MS + 1);
+
+      const timeoutInfo = await timeoutFired;
+      expect(typeof timeoutInfo.runId).toBe('string');
+      expect(host.getState()).toBe('aborted');
+    }, 15_000);
+
+    it('close() cancels the reconnect timer and transitions to aborted', async () => {
+      vi.useFakeTimers();
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+      const clientConnected = new Promise<{ client: WebSocket }>((resolve, reject) => {
+        const c = new WebSocket(`ws://127.0.0.1:${host.port}`);
+        c.on('error', reject);
+        c.once('open', () => {
+          c.send(JSON.stringify(helloEvent()));
+          c.once('message', () => resolve({ client: c }));
+        });
+      });
+      vi.advanceTimersByTime(0);
+      const { client } = await clientConnected;
+
+      const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      client.close();
+      vi.advanceTimersByTime(0);
+      await disconnected;
+      expect(host.getState()).toBe('reconnect_pending');
+
+      // close() should not hang even with a pending reconnect timer.
+      // Use real timers for the close() operation.
+      vi.useRealTimers();
+      await host.close();
+
+      expect(host.getState()).toBe('aborted');
+    }, 15_000);
+
+    it('sendCommand during reconnect_pending rejects with "waiting for reconnect" message', async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { client } = await connectAndHandshake(host.port);
+
+      const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      client.close();
+      await disconnected;
+      expect(host.getState()).toBe('reconnect_pending');
+
+      await expect(
+        host.sendCommand({
+          type: 'navigate',
+          commandId: 'cmd-during-reconnect',
+          timeoutMs: 5000,
+          tab: { kind: 'active' },
+          url: 'https://example.com',
+        }),
+      ).rejects.toThrow('Extension disconnected — waiting for reconnect');
+    }, 15_000);
+
+    it('markResumePoint stores step index used in the next reconnect session', async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { client, session } = await connectAndHandshake(host.port);
+      const runId = session['runId'] as string;
+
+      // Mark step 5 as the resume point.
+      host.markResumePoint(runId, 5);
+
+      const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      client.close();
+      await disconnected;
+
+      const resumeSession = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const c2 = new WebSocket(`ws://127.0.0.1:${host.port}`);
+        c2.on('error', reject);
+        c2.once('open', () => c2.send(JSON.stringify(helloEvent({ previousRunId: runId }))));
+        c2.once('message', (data) => {
+          resolve(JSON.parse(data.toString()) as Record<string, unknown>);
+          c2.close();
+        });
+      });
+
+      expect(resumeSession['resumeFromStep']).toBe(5);
+    }, 15_000);
   });
 });

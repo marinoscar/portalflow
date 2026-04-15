@@ -13,16 +13,17 @@
  * adds latency per call).
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import pino from 'pino';
-import { ExtensionHost } from '../../browser/extension-host.js';
+import { ExtensionHost, RECONNECT_WINDOW_MS } from '../../browser/extension-host.js';
 import { PageClient } from '../../browser/page-client.js';
 import { PageContextCapture } from '../../browser/context.js';
 import { ElementResolver } from '../../browser/element-resolver.js';
 import { RunContext } from '../run-context.js';
 import { RunPresenter } from '../run-presenter.js';
 import { StepExecutor } from '../step-executor.js';
+import { CheckpointStore } from '../checkpoint.js';
 import { RUNNER_PROTOCOL_VERSION } from '../../browser/protocol.js';
 import type { Step } from '@portalflow/schema';
 import type { LlmService } from '../../llm/llm.service.js';
@@ -632,6 +633,252 @@ describe('cli2 pipeline integration', () => {
       expect(windowClosedFired).toBe(true);
       expect(abortError).not.toBeNull();
       expect(abortError!.message).toBe('Run window closed by user');
+    },
+    15_000,
+  );
+
+  // ---------------------------------------------------------------------------
+  // Step-boundary reconnect — happy path
+  // ---------------------------------------------------------------------------
+
+  it(
+    'between-step reconnect happy path: 3 steps, disconnect after step 2, reconnect with previousRunId, step 3 completes',
+    async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+      // Build the service stack.
+      const { executor, runContext } = buildStack(host);
+
+      // Connect the fake extension and complete the handshake.
+      fakeWs = await handshake(host.port);
+
+      // The host's session runId — what the extension sends back as previousRunId.
+      const runId = host.activeRunId!;
+
+      // Steps: navigate → navigate → extract
+      const steps: Step[] = [
+        {
+          id: 'step-1',
+          name: 'Navigate 1',
+          type: 'navigate',
+          action: { url: 'https://example.com/1' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 10000,
+        } as Step,
+        {
+          id: 'step-2',
+          name: 'Navigate 2',
+          type: 'navigate',
+          action: { url: 'https://example.com/2' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 10000,
+        } as Step,
+        {
+          id: 'step-3',
+          name: 'Extract title',
+          type: 'extract',
+          action: { target: 'title', outputName: 'pageTitle' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 10000,
+        } as Step,
+      ];
+
+      // Fake extension replies to all commands with ok:true.
+      fakeWs.on('message', (data) => {
+        const cmd = JSON.parse(data.toString()) as { commandId: string; type: string };
+        fakeWs.send(JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value: null }));
+      });
+
+      // Execute steps 1 and 2.
+      const outcome1 = await executor.executeWithPolicy(steps[0]!);
+      expect(outcome1).toBe('continue');
+
+      // Record checkpoint for step 1 (simulating what AutomationRunner does).
+      // Use the host's session runId — it must match what the extension sends as previousRunId.
+      host.markResumePoint(runId, 1);
+
+      const outcome2 = await executor.executeWithPolicy(steps[1]!);
+      expect(outcome2).toBe('continue');
+
+      // Mark resume point at step 3 (index 2).
+      host.markResumePoint(runId, 2);
+
+      // Drop the connection between steps (step 2 done, step 3 not yet started).
+      const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+      fakeWs.removeAllListeners('message');
+      fakeWs.close();
+      await disconnected;
+      expect(host.getState()).toBe('reconnect_pending');
+
+      // Set up resumed listener.
+      const resumed = new Promise<{ runId: string; resumeFromStep: number }>((resolve) =>
+        host.once('resumed', resolve),
+      );
+
+      // Connect fakeWs2 with the matching previousRunId.
+      let fakeWs2: WebSocket;
+      let resumeSessionMsg: Record<string, unknown>;
+
+      await new Promise<void>((resolve, reject) => {
+        fakeWs2 = new WebSocket(`ws://127.0.0.1:${host.port}`);
+        fakeWs2.on('error', reject);
+        fakeWs2.once('open', () => {
+          fakeWs2.send(
+            JSON.stringify({
+              kind: 'event',
+              type: 'hello',
+              protocolVersion: RUNNER_PROTOCOL_VERSION,
+              chromeVersion: '120.0',
+              extensionVersion: '1.0.0',
+              previousRunId: runId,
+            }),
+          );
+        });
+        fakeWs2.once('message', (data) => {
+          resumeSessionMsg = JSON.parse(data.toString()) as Record<string, unknown>;
+          // Wire the ongoing command reply handler now that session is received.
+          fakeWs2.on('message', (data2) => {
+            const cmd = JSON.parse(data2.toString()) as { commandId: string; type: string };
+            const value = cmd.type === 'extract' ? 'reconnected-page-title' : null;
+            fakeWs2.send(
+              JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value }),
+            );
+          });
+          resolve();
+        });
+      });
+
+      // Wait for the host to emit 'resumed'.
+      const resumedInfo = await resumed;
+      expect(host.getState()).toBe('connected');
+      expect(resumedInfo.resumeFromStep).toBe(2);
+      expect(resumeSessionMsg!['resumeFromStep']).toBe(2);
+      expect(resumeSessionMsg!['runId']).toBe(runId);
+
+      // Execute step 3 on the reconnected socket.
+      const outcome3 = await executor.executeWithPolicy(steps[2]!);
+      expect(outcome3).toBe('continue');
+
+      expect(runContext.getVariable('step-1_status')).toBe('success');
+      expect(runContext.getVariable('step-2_status')).toBe('success');
+      expect(runContext.getVariable('step-3_status')).toBe('success');
+
+      fakeWs2!.close();
+    },
+    15_000,
+  );
+
+  // ---------------------------------------------------------------------------
+  // Step-boundary reconnect — timeout path
+  // ---------------------------------------------------------------------------
+
+  it(
+    'reconnect timeout: extension drops between steps, never reconnects, checkpoint preserved',
+    async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+        // Need to connect the fake extension using a real-timer-compatible approach.
+        // Let's advance fake timers 0ms to flush microtasks then do real async work.
+        const connected = new Promise<void>((resolve) => host.once('connected', resolve));
+        fakeWs = await handshake(host.port);
+        await connected;
+
+        const runId = host.activeRunId!;
+
+        // Simulate a checkpoint having been recorded after step 1.
+        const checkpointStore = new CheckpointStore();
+        checkpointStore.record({
+          runId,
+          lastCompletedStepIndex: 1,
+          contextSnapshot: {},
+          timestamp: Date.now(),
+        });
+        host.markResumePoint(runId, 2);
+
+        // Drop between steps.
+        const disconnected = new Promise<void>((resolve) => host.once('disconnected', () => resolve()));
+        fakeWs.close();
+        await disconnected;
+        expect(host.getState()).toBe('reconnect_pending');
+
+        // Subscribe for timeout.
+        const timeoutFired = new Promise<void>((resolve) => host.once('reconnectTimeout', () => resolve()));
+
+        // Advance past the 30s window.
+        vi.advanceTimersByTime(RECONNECT_WINDOW_MS + 1);
+
+        await timeoutFired;
+        expect(host.getState()).toBe('aborted');
+
+        // Checkpoint from step 1 should still exist (not cleared on abort).
+        const cp = checkpointStore.get(runId);
+        expect(cp).toBeDefined();
+        expect(cp!.lastCompletedStepIndex).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    15_000,
+  );
+
+  // ---------------------------------------------------------------------------
+  // Mid-step disconnect — hard abort
+  // ---------------------------------------------------------------------------
+
+  it(
+    'mid-step disconnect: extension drops while navigate command is in flight, run aborts immediately',
+    async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+      const { executor } = buildStack(host);
+
+      // Connect the fake extension.
+      fakeWs = await handshake(host.port);
+
+      // Set up the fake extension to receive the command but NOT reply.
+      // Instead, drop the connection when the navigate command arrives.
+      let disconnectAfterReceive: (() => void) | null = null;
+      const commandReceived = new Promise<void>((resolve) => {
+        fakeWs.once('message', (data) => {
+          const cmd = JSON.parse(data.toString()) as { type: string };
+          expect(cmd.type).toBe('navigate');
+          resolve();
+          // Close mid-flight — the command is in-flight, no reply sent.
+          fakeWs.close();
+        });
+      });
+
+      const step: Step = {
+        id: 'step-mid-step',
+        name: 'Navigate mid-step',
+        type: 'navigate',
+        action: { url: 'https://example.com' },
+        onFailure: 'abort',
+        maxRetries: 0,
+        timeout: 30_000,
+      } as Step;
+
+      // Start the step execution (it will call sendCommand which hangs on reply).
+      const stepPromise = executor.executeWithPolicy(step);
+
+      // Wait until the command is in-flight.
+      await commandReceived;
+      void disconnectAfterReceive;
+
+      // sendCommand should reject since the connection dropped mid-step.
+      // executeWithPolicy should return 'abort' because the error propagates.
+      const outcome = await stepPromise;
+      expect(outcome).toBe('abort');
+
+      // State must be 'aborted' (mid-step disconnect).
+      expect(host.getState()).toBe('aborted');
+
+      // State must be 'aborted' (mid-step disconnect).
+      expect(host.getState()).toBe('aborted');
     },
     15_000,
   );

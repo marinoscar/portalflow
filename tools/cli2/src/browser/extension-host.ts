@@ -18,6 +18,13 @@ import type {
 } from './protocol.js';
 
 // ---------------------------------------------------------------------------
+// Reconnect-pending state machine constants
+// ---------------------------------------------------------------------------
+
+/** Milliseconds the host waits for the extension to reconnect between steps. */
+export const RECONNECT_WINDOW_MS = 30_000;
+
+// ---------------------------------------------------------------------------
 // Typed error for extension command failures
 // ---------------------------------------------------------------------------
 
@@ -58,6 +65,20 @@ export interface ExtensionHostOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Internal connection state machine
+// ---------------------------------------------------------------------------
+
+/**
+ * Four-state machine for the host's connection lifecycle:
+ *
+ * idle            → no active run, fresh hello starts a new session.
+ * connected       → active run, a client is holding the WebSocket.
+ * reconnect_pending → between-step disconnect; waiting ≤30 s for same runId.
+ * aborted         → mid-step disconnect or timeout; run cannot be resumed.
+ */
+type HostState = 'idle' | 'connected' | 'reconnect_pending' | 'aborted';
+
+// ---------------------------------------------------------------------------
 // ExtensionHost — WebSocket server that the Chrome extension connects to
 // ---------------------------------------------------------------------------
 
@@ -68,6 +89,25 @@ export class ExtensionHost extends EventEmitter {
   private readonly pending = new Map<string, PendingCommand>();
   public readonly port: number;
   public activeRunId: string | null;
+
+  // State machine
+  private state: HostState = 'idle';
+
+  /**
+   * Reconnect window metadata.
+   * Populated when we enter `reconnect_pending`; null at all other times.
+   */
+  private reconnectWindow: {
+    runId: string;
+    deadline: number;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+
+  /**
+   * The resume point the runner wants the extension to start from on
+   * reconnect. Updated via `markResumePoint()` after every successful step.
+   */
+  private resumePoint: { runId: string; stepIndex: number } | null = null;
 
   private constructor(
     wss: WebSocketServer,
@@ -153,7 +193,36 @@ export class ExtensionHost extends EventEmitter {
         return;
       }
 
-      // Replace any existing connection.
+      // Extract optional reconnect field.
+      const previousRunId = msg['previousRunId'] as string | undefined;
+
+      // ---------------------------------------------------------------------------
+      // State-machine dispatch on incoming hello
+      // ---------------------------------------------------------------------------
+
+      if (this.state === 'reconnect_pending') {
+        const window = this.reconnectWindow!;
+        if (previousRunId === window.runId) {
+          // Matching reconnect — transition back to connected.
+          this._acceptReconnect(ws, remoteAddress, window.runId);
+        } else {
+          // Wrong runId (or no previousRunId) — reject this hello.
+          this.logger.warn(
+            { remoteAddress, previousRunId, expectedRunId: window.runId },
+            'hello during reconnect_pending has wrong runId — closing with 1008',
+          );
+          ws.close(1008, 'Policy Violation — wrong runId during reconnect window');
+        }
+        return;
+      }
+
+      if (this.state === 'aborted') {
+        // Any hello while aborted: accept as a fresh session (new run).
+        // The old run is already dead. Transition to idle first, then fall through.
+        this._transitionTo('idle');
+      }
+
+      // idle / connected → replace any existing connection and start fresh.
       if (this.activeConnection !== null) {
         this.logger.warn(
           { remoteAddress },
@@ -167,49 +236,165 @@ export class ExtensionHost extends EventEmitter {
           pending.reject(new Error('Connection replaced by newer extension connection'));
         }
         this.pending.clear();
-        this.emit('disconnected');
+        this.emit('disconnected', 'replaced');
       }
 
-      this.activeConnection = ws;
-
-      // Send session envelope.
-      const session: RunnerSession = {
-        kind: 'session',
-        runId: this.activeRunId ?? randomUUID(),
-        protocolVersion: RUNNER_PROTOCOL_VERSION,
-      };
-      ws.send(JSON.stringify(session));
-
-      this.logger.info({ remoteAddress, runId: session.runId }, 'session sent to extension');
-      this.emit('connected');
-
-      // Handle subsequent messages.
-      ws.on('message', (data) => this._handleMessage(data));
-
-      // Handle disconnection.
-      ws.on('close', (code, reason) => {
-        if (this.activeConnection === ws) {
-          this.logger.info(
-            { remoteAddress, code, reason: reason.toString() },
-            'extension disconnected',
-          );
-          this.activeConnection = null;
-
-          // Reject all pending commands.
-          for (const [, pending] of this.pending) {
-            clearTimeout(pending.timer);
-            pending.reject(new Error('Extension disconnected'));
-          }
-          this.pending.clear();
-          this.emit('disconnected');
-        }
-      });
-
-      ws.on('error', (err) => {
-        this.logger.error({ err, remoteAddress }, 'WebSocket error on extension connection');
-      });
+      this._acceptFreshConnection(ws, remoteAddress);
     });
   }
+
+  /**
+   * Accept a brand-new (non-resuming) connection.
+   * Assigns a fresh runId and sends the session envelope without `resumeFromStep`.
+   */
+  private _acceptFreshConnection(ws: WebSocket, remoteAddress: string): void {
+    this.activeConnection = ws;
+    this._transitionTo('connected');
+
+    const session: RunnerSession = {
+      kind: 'session',
+      runId: this.activeRunId ?? randomUUID(),
+      protocolVersion: RUNNER_PROTOCOL_VERSION,
+    };
+    this.activeRunId = session.runId;
+    ws.send(JSON.stringify(session));
+
+    this.logger.info({ remoteAddress, runId: session.runId }, 'session sent to extension (fresh)');
+    this.emit('connected');
+
+    this._wireSocketHandlers(ws, remoteAddress);
+  }
+
+  /**
+   * Accept a matching reconnect within the reconnect window.
+   * Sends the session envelope with `resumeFromStep` and transitions back to connected.
+   */
+  private _acceptReconnect(ws: WebSocket, remoteAddress: string, runId: string): void {
+    // Cancel the 30-second timeout.
+    if (this.reconnectWindow) {
+      clearTimeout(this.reconnectWindow.timer);
+      this.reconnectWindow = null;
+    }
+
+    this.activeConnection = ws;
+    this._transitionTo('connected');
+
+    const resumeFromStep = this.resumePoint?.runId === runId
+      ? this.resumePoint.stepIndex
+      : 0;
+
+    const session: RunnerSession = {
+      kind: 'session',
+      runId,
+      protocolVersion: RUNNER_PROTOCOL_VERSION,
+      resumeFromStep,
+    };
+    ws.send(JSON.stringify(session));
+
+    this.logger.info(
+      { remoteAddress, runId, resumeFromStep },
+      'session sent to extension (resume)',
+    );
+    this.emit('resumed', { runId, resumeFromStep });
+
+    this._wireSocketHandlers(ws, remoteAddress);
+  }
+
+  /**
+   * Attach message / close / error handlers to an accepted WebSocket.
+   * Called by both _acceptFreshConnection and _acceptReconnect.
+   */
+  private _wireSocketHandlers(ws: WebSocket, remoteAddress: string): void {
+    // Handle subsequent messages.
+    ws.on('message', (data) => this._handleMessage(data));
+
+    // Handle disconnection.
+    ws.on('close', (code, reason) => {
+      if (this.activeConnection !== ws) return;
+
+      this.logger.info(
+        { remoteAddress, code, reason: reason.toString() },
+        'extension disconnected',
+      );
+      this.activeConnection = null;
+
+      if (this.state !== 'connected') {
+        // Already transitioning — nothing to do.
+        return;
+      }
+
+      const hasPendingCommand = this.pending.size > 0;
+
+      if (hasPendingCommand) {
+        // Mid-step disconnect — abort immediately.
+        this.logger.warn({ remoteAddress }, 'mid-step disconnect — aborting run');
+        this._rejectAllPending(new Error('Extension disconnected mid-step — run aborted'));
+        this._transitionTo('aborted');
+        this.emit('disconnected', 'aborted');
+      } else {
+        // Between-step disconnect — enter reconnect window.
+        this.logger.info(
+          { remoteAddress, runId: this.activeRunId },
+          'between-step disconnect — entering reconnect_pending window',
+        );
+        this._startReconnectWindow();
+        this._transitionTo('reconnect_pending');
+        this.emit('disconnected', 'reconnect_pending');
+      }
+    });
+
+    ws.on('error', (err) => {
+      this.logger.error({ err, remoteAddress }, 'WebSocket error on extension connection');
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reconnect window management
+  // ---------------------------------------------------------------------------
+
+  private _startReconnectWindow(): void {
+    const runId = this.activeRunId!;
+    const deadline = Date.now() + RECONNECT_WINDOW_MS;
+
+    const timer = setTimeout(() => {
+      if (this.state !== 'reconnect_pending') return;
+
+      this.logger.warn(
+        { runId },
+        'extension did not reconnect within 30s — aborting run',
+      );
+      this.reconnectWindow = null;
+      this._transitionTo('aborted');
+      this.emit('reconnectTimeout', { runId });
+    }, RECONNECT_WINDOW_MS);
+
+    this.reconnectWindow = { runId, deadline, timer };
+  }
+
+  // ---------------------------------------------------------------------------
+  // State transitions
+  // ---------------------------------------------------------------------------
+
+  private _transitionTo(next: HostState): void {
+    this.logger.debug({ from: this.state, to: next }, 'ExtensionHost state transition');
+    this.state = next;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pending command rejection
+  // ---------------------------------------------------------------------------
+
+  private _rejectAllPending(err: Error): void {
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(err);
+    }
+    this.pending.clear();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Message dispatch
+  // ---------------------------------------------------------------------------
 
   private _handleMessage(raw: unknown): void {
     let parsed: unknown;
@@ -265,7 +450,33 @@ export class ExtensionHost extends EventEmitter {
     return this.activeConnection !== null && this.activeConnection.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * Returns the current connection state.
+   * Exposed for testing and observability.
+   */
+  getState(): HostState {
+    return this.state;
+  }
+
+  /**
+   * Record the step index the runner wants to resume from on reconnect.
+   * Should be called immediately after checkpointing a successful step.
+   * The value is passed to the extension via `resumeFromStep` in the next
+   * session envelope on reconnect.
+   */
+  markResumePoint(runId: string, stepIndex: number): void {
+    this.resumePoint = { runId, stepIndex };
+  }
+
   async sendCommand<T>(command: RunnerCommand): Promise<T> {
+    if (this.state === 'aborted') {
+      throw new Error('Extension disconnected mid-step — run aborted');
+    }
+
+    if (this.state === 'reconnect_pending') {
+      throw new Error('Extension disconnected — waiting for reconnect');
+    }
+
     if (!this.isConnected()) {
       throw new Error('Extension not connected');
     }
@@ -337,6 +548,12 @@ export class ExtensionHost extends EventEmitter {
   }
 
   async close(): Promise<void> {
+    // Cancel any pending reconnect window.
+    if (this.reconnectWindow) {
+      clearTimeout(this.reconnectWindow.timer);
+      this.reconnectWindow = null;
+    }
+
     if (this.activeConnection) {
       const conn = this.activeConnection;
       this.activeConnection = null;
@@ -344,11 +561,9 @@ export class ExtensionHost extends EventEmitter {
     }
 
     // Reject all pending commands.
-    for (const [, pending] of this.pending) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error('ExtensionHost closed'));
-    }
-    this.pending.clear();
+    this._rejectAllPending(new Error('ExtensionHost closed'));
+
+    this._transitionTo('aborted');
 
     return new Promise<void>((resolve, reject) => {
       this.wss.close((err) => {
