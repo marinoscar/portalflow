@@ -956,6 +956,24 @@ export class StepExecutor {
 
   private async executeAiScope(step: Step): Promise<void> {
     const action = step.action as AiScopeAction;
+
+    // Defensive guard. The schema's discriminated union should make it
+    // impossible for an aiscope step to reach here without a goal
+    // (the parser rejects malformed aiscope actions with a targeted
+    // error message), but a clear runtime error beats
+    // "Cannot read properties of undefined" if a future schema
+    // regression or a direct-from-JS caller sneaks through.
+    if (typeof action.goal !== 'string' || action.goal.trim().length === 0) {
+      throw new Error(
+        `aiscope step "${step.id}" has no "goal" — an aiscope action requires a non-empty "goal" string describing what the LLM should accomplish.`,
+      );
+    }
+    if (!action.successCheck) {
+      throw new Error(
+        `aiscope step "${step.id}" has no "successCheck" — an aiscope action requires a "successCheck" with either {check, value} or {ai}.`,
+      );
+    }
+
     const startedAt = Date.now();
     const deadlineMs = startedAt + action.maxDurationSec * 1000;
     const history: AgentActionHistoryEntry[] = [];

@@ -246,41 +246,109 @@ export interface Step {
   substeps?: Step[];
 }
 
-// The input type is relaxed to `unknown` to avoid TypeScript fighting the
-// z.lazy() recursion with optional-vs-required default field mismatches.
-// Runtime validation still enforces all constraints; only the static _input
-// annotation is widened here.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
-  z.object({
+// Common step fields shared by every type variant of the discriminated
+// union below. Factored into a helper so each variant can spread them
+// alongside its own `type` literal and matching action schema without
+// repeating eleven fields eleven times.
+//
+// `substeps` is a recursive reference to StepSchema, so we wrap it in
+// `z.lazy` — every variant needs the lazy wrapper so the union can be
+// built before StepSchema is finalized.
+function baseStepFields() {
+  return {
     id: z.string(),
     name: z.string(),
     description: z.string().optional(),
-    type: z.enum([
-      'navigate', 'interact', 'wait', 'extract',
-      'tool_call', 'condition', 'download', 'loop', 'call', 'goto', 'aiscope',
-    ]),
-    action: z.union([
-      NavigateActionSchema,
-      InteractActionSchema,
-      WaitActionSchema,
-      ExtractActionSchema,
-      ToolCallActionSchema,
-      ConditionActionSchema,
-      DownloadActionSchema,
-      LoopActionSchema,
-      CallActionSchema,
-      GotoActionSchema,
-      AiScopeActionSchema,
-    ]),
     aiGuidance: z.string().optional(),
     selectors: SelectorsSchema.optional(),
     validation: ValidationSchema.optional(),
     onFailure: z.enum(['retry', 'skip', 'abort']).default('abort'),
     maxRetries: z.number().int().min(0).default(3),
     timeout: z.number().int().min(0).default(30000),
-    substeps: z.array(StepSchema).optional(),
-  }),
+    substeps: z.array(z.lazy(() => StepSchema)).optional(),
+  };
+}
+
+// Per-type step variants. The action schema is now selected by the
+// literal `type` field, not by first-match over a broad z.union, so an
+// aiscope step that happens to match a looser schema (e.g. LoopAction,
+// which only requires maxIterations) can no longer be silently reparsed
+// with its fields stripped.
+const NavigateStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('navigate'),
+  action: NavigateActionSchema,
+});
+const InteractStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('interact'),
+  action: InteractActionSchema,
+});
+const WaitStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('wait'),
+  action: WaitActionSchema,
+});
+const ExtractStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('extract'),
+  action: ExtractActionSchema,
+});
+const ToolCallStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('tool_call'),
+  action: ToolCallActionSchema,
+});
+const ConditionStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('condition'),
+  action: ConditionActionSchema,
+});
+const DownloadStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('download'),
+  action: DownloadActionSchema,
+});
+const LoopStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('loop'),
+  action: LoopActionSchema,
+});
+const CallStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('call'),
+  action: CallActionSchema,
+});
+const GotoStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('goto'),
+  action: GotoActionSchema,
+});
+const AiScopeStepSchema = z.object({
+  ...baseStepFields(),
+  type: z.literal('aiscope'),
+  action: AiScopeActionSchema,
+});
+
+// The input type is relaxed to `unknown` to avoid TypeScript fighting the
+// z.lazy() recursion with optional-vs-required default field mismatches.
+// Runtime validation still enforces all constraints; only the static _input
+// annotation is widened here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const StepSchema: z.ZodType<Step, z.ZodTypeDef, any> = z.lazy(() =>
+  z.discriminatedUnion('type', [
+    NavigateStepSchema,
+    InteractStepSchema,
+    WaitStepSchema,
+    ExtractStepSchema,
+    ToolCallStepSchema,
+    ConditionStepSchema,
+    DownloadStepSchema,
+    LoopStepSchema,
+    CallStepSchema,
+    GotoStepSchema,
+    AiScopeStepSchema,
+  ]),
 );
 
 // ---------------------------------------------------------------------------
