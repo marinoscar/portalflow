@@ -3,6 +3,11 @@ import { join } from 'path';
 import type pino from 'pino';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import type { BrowserChannel, BrowserMode } from '../config/config.service.js';
+import {
+  PERSISTENT_LAUNCH_ARGS,
+  PERSISTENT_LAUNCH_TIMEOUT_MS,
+  preflightPersistentLaunch,
+} from './persistent-launch.js';
 
 export interface BrowserOptions {
   headless?: boolean;
@@ -151,7 +156,23 @@ export class BrowserService {
       );
     }
 
-    const launchArgs: string[] = [];
+    // Preflight: validate the directory layout, detect a running Chrome
+    // holding the profile, and scrub stale singleton files left behind
+    // by a previously crashed / killed Chrome. Without this scrub,
+    // `launchPersistentContext` can hang indefinitely when Chrome's
+    // process-singleton machinery tries to forward the new launch to a
+    // dead pid from a prior session. Throws with a clear error on any
+    // condition we cannot resolve automatically.
+    preflightPersistentLaunch({
+      userDataDir: options.userDataDir,
+      profileDirectory: options.profileDirectory,
+      logger: this.logger,
+    });
+
+    // Start from the curated persistent-mode launch args
+    // (--no-first-run, --disable-session-crashed-bubble, etc.) and
+    // append the user's profile directory selector.
+    const launchArgs: string[] = [...PERSISTENT_LAUNCH_ARGS];
     if (options.profileDirectory) {
       launchArgs.push(`--profile-directory=${options.profileDirectory}`);
     }
@@ -161,6 +182,7 @@ export class BrowserService {
       acceptDownloads: boolean;
       channel?: BrowserChannel;
       args: string[];
+      timeout: number;
       viewport?: { width: number; height: number };
       userAgent?: string;
       recordVideo?: { dir: string; size?: { width: number; height: number } };
@@ -168,6 +190,12 @@ export class BrowserService {
       headless: options.headless ?? false,
       acceptDownloads: true,
       args: launchArgs,
+      // Explicit upper bound on the launch so a hung Chrome startup
+      // fails with a clear Playwright error in ~60s instead of waiting
+      // forever. Without this, the default launch timeout for
+      // persistent contexts can miss certain singleton-forwarding
+      // hangs entirely.
+      timeout: PERSISTENT_LAUNCH_TIMEOUT_MS,
     };
 
     if (options.channel && options.channel !== 'chromium') {
@@ -190,7 +218,11 @@ export class BrowserService {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Detect the most common lock error and translate it.
+      // Detect the most common lock error and translate it. (The
+      // preflight check catches most of these before we get here, but
+      // keep this branch as a safety net for TOCTOU races: Chrome
+      // could have been started between preflight and the launch
+      // call by another actor.)
       if (
         message.includes('SingletonLock') ||
         message.includes('ProcessSingleton') ||
@@ -201,6 +233,18 @@ export class BrowserService {
           `Cannot open the browser profile at "${options.userDataDir}"${
             options.profileDirectory ? ` (profile "${options.profileDirectory}")` : ''
           } — it is already in use by another browser process. Close your browser windows that use this profile and try again, or pick a different profile via \`portalflow settings browser\`.\n\nUnderlying error: ${message}`,
+        );
+      }
+      // Translate Playwright's Timeout error into something more
+      // actionable so the user knows where to look (the preflight
+      // already handled obvious causes; if we timeout here, it's
+      // usually an issue inside Chrome itself like a slow sync or an
+      // extension stalling startup).
+      if (message.toLowerCase().includes('timeout')) {
+        throw new Error(
+          `Chrome persistent-context launch timed out after ${PERSISTENT_LAUNCH_TIMEOUT_MS / 1000}s for profile "${options.userDataDir}"${
+            options.profileDirectory ? ` / "${options.profileDirectory}"` : ''
+          }. Chrome started but never sent the CDP ready signal. Common causes: a stalled extension, Chrome sync hanging on a network call, a "Restore session?" popup blocking startup, or the profile being in use by another process that spawned after preflight. Try: closing all Chrome processes (\`pkill -f chrome\`) and retrying, disabling Chrome sync on the profile, or using a dedicated automation profile.\n\nUnderlying error: ${message}`,
         );
       }
       throw err;
