@@ -337,4 +337,136 @@ describe('cli2 pipeline integration', () => {
     },
     15_000,
   );
+
+  it(
+    'runs wait, select, check, hover, focus steps end-to-end',
+    async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+      fakeWs = await handshake(host.port);
+      // anyMatch is used internally by ElementResolver for selector resolution.
+      // We reply true so it picks the primary selector.
+      setupFakeExtension(fakeWs, {
+        wait: null,
+        interact: null,
+        anyMatch: true,
+      });
+
+      const { executor, runContext } = buildStack(host);
+
+      const steps: Step[] = [
+        // wait / delay — value is durationMs as a string per schema
+        {
+          id: 'step-wait-delay',
+          name: 'Wait delay',
+          type: 'wait',
+          action: { condition: 'delay', value: '1' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 5000,
+        } as Step,
+        // wait / selector — value is the CSS selector string
+        {
+          id: 'step-wait-sel',
+          name: 'Wait for selector',
+          type: 'wait',
+          action: { condition: 'selector', value: '#ready' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 5000,
+        } as Step,
+        // interact / select
+        {
+          id: 'step-select',
+          name: 'Select option',
+          type: 'interact',
+          action: { interaction: 'select', value: 'option-b' },
+          selectors: { primary: 'select#menu' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 5000,
+        } as Step,
+        // interact / check
+        {
+          id: 'step-check',
+          name: 'Check checkbox',
+          type: 'interact',
+          action: { interaction: 'check' },
+          selectors: { primary: '#agree' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 5000,
+        } as Step,
+        // interact / hover
+        {
+          id: 'step-hover',
+          name: 'Hover element',
+          type: 'interact',
+          action: { interaction: 'hover' },
+          selectors: { primary: '#menu-btn' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 5000,
+        } as Step,
+        // interact / focus
+        {
+          id: 'step-focus',
+          name: 'Focus element',
+          type: 'interact',
+          action: { interaction: 'focus' },
+          selectors: { primary: '#email' },
+          onFailure: 'abort',
+          maxRetries: 0,
+          timeout: 5000,
+        } as Step,
+      ];
+
+      for (const step of steps) {
+        const outcome = await executor.executeWithPolicy(step);
+        expect(outcome).toBe('continue');
+        expect(runContext.getVariable(`${step.id}_status`)).toBe('success');
+      }
+    },
+    15_000,
+  );
+
+  it(
+    'scroll, countMatching, anyMatch commands — PageClient-level wire-up',
+    async () => {
+      host = await ExtensionHost.start({ host: '127.0.0.1', port: 0, logger });
+
+      fakeWs = await handshake(host.port);
+      // Respond to scroll with ok:null, countMatching with count:5, anyMatch with exists:true
+      fakeWs.on('message', (data) => {
+        const cmd = JSON.parse(data.toString()) as { commandId: string; type: string };
+        let value: unknown = null;
+        if (cmd.type === 'countMatching') value = { count: 5 };
+        if (cmd.type === 'anyMatch') value = { exists: true };
+        fakeWs.send(JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value }));
+      });
+
+      const { pageClient } = buildStack(host);
+
+      // scroll sends a ScrollCommand and resolves
+      await expect(pageClient.scroll('down', 300)).resolves.toBeUndefined();
+      await expect(pageClient.scroll('top')).resolves.toBeUndefined();
+
+      // countMatching: the extension returns {count:5}, PageClient unwraps to number
+      const count = await pageClient.countMatching('li');
+      expect(count).toBe(5);
+
+      // elementExists: the extension returns {exists:true}, PageClient unwraps to boolean
+      const exists = await pageClient.elementExists('#foo');
+      expect(exists).toBe(true);
+      // elementExists with exists:false
+      fakeWs.removeAllListeners('message');
+      fakeWs.on('message', (data) => {
+        const cmd = JSON.parse(data.toString()) as { commandId: string };
+        fakeWs.send(JSON.stringify({ kind: 'result', commandId: cmd.commandId, ok: true, value: { exists: false } }));
+      });
+      const notExists = await pageClient.elementExists('#missing');
+      expect(notExists).toBe(false);
+    },
+    15_000,
+  );
 });

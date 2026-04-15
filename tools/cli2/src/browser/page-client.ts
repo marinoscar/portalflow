@@ -386,7 +386,13 @@ export class PageClient {
       selectors: { primary: selector },
     };
     try {
-      return await this.host.sendCommand<boolean>(cmd);
+      // The extension handler returns {exists: boolean}; also handle raw boolean
+      // for backward compat with the fake extension in tests.
+      const result = await this.host.sendCommand<{ exists: boolean } | boolean>(cmd);
+      if (typeof result === 'object' && result !== null && 'exists' in result) {
+        return result.exists;
+      }
+      return Boolean(result);
     } catch {
       // Mirror PageService semantics: return false on any error rather than
       // surfacing an exception to the caller.
@@ -427,7 +433,13 @@ export class PageClient {
       selectors: { primary: selector },
     };
     try {
-      return await this.host.sendCommand<number>(cmd);
+      // The extension handler returns {count: number}; also handle raw number
+      // for backward compat with the fake extension in tests.
+      const result = await this.host.sendCommand<{ count: number } | number>(cmd);
+      if (typeof result === 'object' && result !== null && 'count' in result) {
+        return result.count;
+      }
+      return Number(result);
     } catch (err) {
       throw this.wrapError('countMatching', `"${selector}"`, err);
     }

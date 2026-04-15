@@ -4,6 +4,17 @@ import { navigate } from './navigate';
 import { click } from './click';
 import { type as typeText } from './type';
 import { extract } from './extract';
+import { wait } from './wait';
+import { countMatching } from './count-matching';
+import { anyMatch } from './any-match';
+import { scroll } from './scroll';
+import {
+  select,
+  check,
+  uncheck,
+  hover,
+  focus,
+} from './interact-extended';
 
 // ---------------------------------------------------------------------------
 // Active-tab helper (task-6 simplification)
@@ -71,7 +82,56 @@ export async function handleRunnerCommand(
             recoverable: false,
           }));
 
-        // Remaining interact actions deferred to task 8
+        case 'select':
+          return withActiveTab((tabId) => select(command, tabId)).catch((err) => ({
+            kind: 'result' as const,
+            commandId: command.commandId,
+            ok: false as const,
+            message: err instanceof Error ? err.message : String(err),
+            code: 'tab_not_found',
+            recoverable: false,
+          }));
+
+        case 'check':
+          return withActiveTab((tabId) => check(command, tabId)).catch((err) => ({
+            kind: 'result' as const,
+            commandId: command.commandId,
+            ok: false as const,
+            message: err instanceof Error ? err.message : String(err),
+            code: 'tab_not_found',
+            recoverable: false,
+          }));
+
+        case 'uncheck':
+          return withActiveTab((tabId) => uncheck(command, tabId)).catch((err) => ({
+            kind: 'result' as const,
+            commandId: command.commandId,
+            ok: false as const,
+            message: err instanceof Error ? err.message : String(err),
+            code: 'tab_not_found',
+            recoverable: false,
+          }));
+
+        case 'hover':
+          return withActiveTab((tabId) => hover(command, tabId)).catch((err) => ({
+            kind: 'result' as const,
+            commandId: command.commandId,
+            ok: false as const,
+            message: err instanceof Error ? err.message : String(err),
+            code: 'tab_not_found',
+            recoverable: false,
+          }));
+
+        case 'focus':
+          return withActiveTab((tabId) => focus(command, tabId)).catch((err) => ({
+            kind: 'result' as const,
+            commandId: command.commandId,
+            ok: false as const,
+            message: err instanceof Error ? err.message : String(err),
+            code: 'tab_not_found',
+            recoverable: false,
+          }));
+
         default:
           return notImplemented(command.commandId);
       }
@@ -87,13 +147,50 @@ export async function handleRunnerCommand(
         recoverable: false,
       }));
 
-    // Commands deferred to later tasks
     case 'wait':
+      return withActiveTab((tabId) => wait(command, tabId)).catch((err) => ({
+        kind: 'result' as const,
+        commandId: command.commandId,
+        ok: false as const,
+        message: err instanceof Error ? err.message : String(err),
+        code: 'tab_not_found',
+        recoverable: false,
+      }));
+
+    case 'countMatching':
+      return withActiveTab((tabId) => countMatching(command, tabId)).catch((err) => ({
+        kind: 'result' as const,
+        commandId: command.commandId,
+        ok: false as const,
+        message: err instanceof Error ? err.message : String(err),
+        code: 'tab_not_found',
+        recoverable: false,
+      }));
+
+    case 'anyMatch':
+      return withActiveTab((tabId) => anyMatch(command, tabId)).catch((err) => ({
+        kind: 'result' as const,
+        commandId: command.commandId,
+        ok: false as const,
+        message: err instanceof Error ? err.message : String(err),
+        code: 'tab_not_found',
+        recoverable: false,
+      }));
+
+    case 'scroll':
+      return withActiveTab((tabId) => scroll(command, tabId)).catch((err) => ({
+        kind: 'result' as const,
+        commandId: command.commandId,
+        ok: false as const,
+        message: err instanceof Error ? err.message : String(err),
+        code: 'tab_not_found',
+        recoverable: false,
+      }));
+
+    // download and screenshot implemented in commit 3
     case 'download':
     case 'screenshot':
-    case 'countMatching':
-    case 'anyMatch':
-    case 'scroll':
+    // openWindow and closeWindow deferred to task 9
     case 'openWindow':
     case 'closeWindow':
     default:
