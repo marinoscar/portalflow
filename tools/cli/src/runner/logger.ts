@@ -1,5 +1,7 @@
 import pino from 'pino';
+import { join } from 'node:path';
 import type { LogLevel, LoggingConfig } from '../config/config.service.js';
+import { PORTALFLOW_HOME } from './paths.js';
 
 /**
  * Log level precedence, highest priority first:
@@ -17,6 +19,33 @@ export interface ResolvedLoggingConfig {
   file?: string;
   pretty: boolean;
   redactSecrets: boolean;
+  /**
+   * When `true`, stdout is owned by the RunPresenter and pino must NOT
+   * write to stdout. The logger returned in this mode writes to the
+   * file (from `file`, or a per-run default path) and nothing else.
+   * Set by AutomationRunner when the caller hasn't opted into
+   * `--verbose`.
+   */
+  fileOnly?: boolean;
+}
+
+/**
+ * Pick a default log file path for runs where the user hasn't
+ * configured one explicitly. Lives under ~/.portalflow/logs/ and is
+ * timestamp-stamped per run so presenter mode always has a concrete
+ * path to point at ("log: …") regardless of config state.
+ */
+export function defaultLogFilePath(automationName: string): string {
+  const slug = (automationName || 'run')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'run';
+  const ts = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .replace(/Z$/, '');
+  return join(PORTALFLOW_HOME, 'logs', `${slug}-${ts}.log`);
 }
 
 const VALID_LEVELS: LogLevel[] = [
@@ -117,6 +146,23 @@ export function createRunLogger(
       paths: REDACT_PATHS,
       censor: '[REDACTED]',
     };
+  }
+
+  // File-only mode: stdout is owned by the RunPresenter. The logger
+  // must NOT write anything to stdout or stderr; all events go to the
+  // configured file (raw JSON, one entry per line). Caller guarantees
+  // `resolved.file` is set when `fileOnly` is true.
+  if (resolved.fileOnly && resolved.file) {
+    try {
+      return pino(
+        pinoOptions,
+        pino.destination({ dest: resolved.file, sync: false, mkdir: true }),
+      );
+    } catch {
+      // Destination setup failed. Fall through to a silent logger so
+      // presenter mode is never broken by a file-permission error.
+      return pino({ ...pinoOptions, level: 'silent' });
+    }
   }
 
   // If no file is configured, use a single stdout transport. Otherwise

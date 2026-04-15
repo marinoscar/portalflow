@@ -12,7 +12,8 @@ import { VaultcliAdapter } from '../tools/vaultcli.adapter.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext, type RunResult } from './run-context.js';
 import { StepExecutor } from './step-executor.js';
-import { createRunLogger, resolveLoggingConfig } from './logger.js';
+import { createRunLogger, defaultLogFilePath, resolveLoggingConfig } from './logger.js';
+import { RunPresenter } from './run-presenter.js';
 import { ConfigService } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from './paths.js';
 
@@ -27,6 +28,13 @@ export interface RunOptions {
   inputs?: Map<string, string>;
   /** CLI-supplied log level override (--log-level flag). */
   logLevel?: string;
+  /**
+   * When `true`, disable the RunPresenter and let pino print to stdout
+   * as it did pre-1.1.16. Useful for debugging the runner itself.
+   * Defaults to `false` — new runs get the clean presenter view and
+   * all log lines are written to a file instead.
+   */
+  verbose?: boolean;
   // ---- Browser profile overrides (--browser-* flags) ----
   /** "isolated" | "persistent" — overrides config.browser.mode for this run. */
   browserMode?: 'isolated' | 'persistent';
@@ -76,7 +84,28 @@ export class AutomationRunner {
     const configService = new ConfigService();
     const userConfig = await configService.load();
     const loggingConfig = resolveLoggingConfig(userConfig.logging, options?.logLevel);
+
+    // Presenter mode (default): stdout is owned by the RunPresenter so
+    // the user sees a clean stream of steps and LLM decisions. Pino is
+    // redirected to a file so the detailed log is still available for
+    // troubleshooting. If the user didn't configure a log file, we
+    // generate a default path under ~/.portalflow/logs/.
+    //
+    // `--verbose` flips the switch: pino writes to stdout as before and
+    // the presenter becomes a silent no-op.
+    const presenterEnabled = !(options?.verbose ?? false);
+    if (presenterEnabled) {
+      if (!loggingConfig.file) {
+        loggingConfig.file = defaultLogFilePath(automation.name);
+      }
+      loggingConfig.fileOnly = true;
+    }
+
     const logger = createRunLogger(automation.name, loggingConfig);
+    const presenter = new RunPresenter(
+      presenterEnabled,
+      loggingConfig.file ?? '(no log file)',
+    );
 
     logger.info(
       {
@@ -88,6 +117,7 @@ export class AutomationRunner {
           file: loggingConfig.file ?? null,
           pretty: loggingConfig.pretty,
           redactSecrets: loggingConfig.redactSecrets,
+          fileOnly: loggingConfig.fileOnly ?? false,
         },
       },
       'Starting automation run',
@@ -315,6 +345,7 @@ export class AutomationRunner {
       contextCapture,
       llmService,
       functionsMap,
+      presenter,
     );
 
     // ------------------------------------------------------------------
@@ -334,6 +365,8 @@ export class AutomationRunner {
     for (let j = 0; j < steps.length; j++) {
       stepIndexById.set(steps[j]!.id, j);
     }
+
+    presenter.runStart(automation.name, steps.length);
 
     const MAX_STEP_EXECUTIONS = 1000;
     let executionsRemaining = MAX_STEP_EXECUTIONS;
@@ -360,12 +393,30 @@ export class AutomationRunner {
         'Executing step',
       );
 
+      presenter.stepStart(step, i, steps.length);
+      const stepStartedAt = Date.now();
       const outcome = await stepExecutor.executeWithPolicy(step);
+      const stepDurationMs = Date.now() - stepStartedAt;
+
+      // The executor records the step's terminal outcome on the
+      // context via recordStepOutcome, which stores <stepId>_status
+      // and <stepId>_error as variables. Read them back to decide
+      // which icon the presenter shows.
+      const stepStatus = context.getVariable(`${step.id}_status`);
+      const stepError = context.getVariable(`${step.id}_error`);
 
       if (outcome === 'abort') {
+        presenter.stepEnd(step, stepDurationMs, 'failed', stepError || undefined);
         // abort policy — stop processing further steps
         break;
       }
+
+      presenter.stepEnd(
+        step,
+        stepDurationMs,
+        stepStatus === 'skipped' ? 'skipped' : 'success',
+        stepStatus === 'skipped' ? stepError || undefined : undefined,
+      );
 
       context.incrementCompleted();
 
@@ -425,6 +476,8 @@ export class AutomationRunner {
         logger.error({ stepId: e.stepId, stepName: e.stepName }, e.message);
       }
     }
+
+    presenter.runEnd(result);
 
     return result;
   }

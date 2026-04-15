@@ -27,6 +27,7 @@ import type {
 } from '../llm/provider.interface.js';
 import type { Tool } from '../tools/tool.interface.js';
 import { RunContext } from './run-context.js';
+import { RunPresenter } from './run-presenter.js';
 
 /**
  * Default action whitelist for aiscope steps when `allowedActions` is
@@ -112,6 +113,14 @@ export class StepExecutor {
     private readonly contextCapture: PageContextCapture,
     private readonly llmService: LlmService,
     private readonly functions: Map<string, FunctionDefinition> = new Map(),
+    /**
+     * Optional terminal presenter. When provided, the executor calls
+     * its methods at key user-visible moments (aiscope decisions, tool
+     * outputs, extract results) so the user sees a clean stream on
+     * stdout. Tests and internal callers can omit it — the executor
+     * falls back to a silent no-op that discards all calls.
+     */
+    private readonly presenter: RunPresenter = new RunPresenter(false, ''),
   ) {}
 
   /**
@@ -773,6 +782,10 @@ export class StepExecutor {
       this.context.setVariable(action.outputName, value);
     }
 
+    // Surface the extracted value in the terminal view (presenter no-op
+    // in verbose mode).
+    this.presenter.extractResult(action.outputName, value);
+
     // At debug level, log the actual extracted value (capped) so troubleshooters
     // can see *what* was captured — not just that an extract happened. Large
     // HTML payloads are truncated to keep log files readable.
@@ -828,6 +841,8 @@ export class StepExecutor {
       'Executing tool call',
     );
 
+    this.presenter.toolCallStart(action.tool, action.command);
+
     const t0 = Date.now();
     const result = await tool.execute(action.command, resolvedArgs);
     const durationMs = Date.now() - t0;
@@ -871,6 +886,7 @@ export class StepExecutor {
         { stepId: step.id, outputName: action.outputName },
         'Tool output stored in context',
       );
+      this.presenter.toolCallResult(action.outputName, result.output);
     }
   }
 
@@ -967,6 +983,8 @@ export class StepExecutor {
       'aiscope: start',
     );
 
+    this.presenter.aiscopeStart(step.id, action.maxIterations);
+
     for (let iteration = 1; iteration <= action.maxIterations; iteration++) {
       const remainingMs = deadlineMs - Date.now();
       if (remainingMs <= 0) {
@@ -985,6 +1003,8 @@ export class StepExecutor {
         'aiscope: iteration start',
       );
 
+      this.presenter.aiscopeIteration(iteration);
+
       // 1. Observe
       const pageContext = await this.contextCapture.capture({
         includeScreenshot: action.includeScreenshot,
@@ -992,14 +1012,16 @@ export class StepExecutor {
 
       // 2. Success check
       if (await this.evaluateSuccessCheck(action.successCheck, pageContext)) {
+        const durationMs = Date.now() - startedAt;
         logger.info(
           {
             stepId: step.id,
             iteration,
-            durationMs: Date.now() - startedAt,
+            durationMs,
           },
           'aiscope: goal achieved',
         );
+        this.presenter.aiscopeGoalReached(durationMs, iteration - 1);
         return;
       }
 
@@ -1021,6 +1043,12 @@ export class StepExecutor {
           reasoning: decision.reasoning,
         },
         'aiscope: decided',
+      );
+
+      this.presenter.aiscopeDecision(
+        decision.action,
+        decision.selector,
+        decision.reasoning ?? '',
       );
 
       // 4. Dispatch — validate against the allowed list FIRST so that a
