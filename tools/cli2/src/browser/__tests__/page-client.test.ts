@@ -195,8 +195,14 @@ describe('PageClient', () => {
   // scroll
   // ---------------------------------------------------------------------------
 
-  it('scroll throws NotYetImplemented error', async () => {
-    await expect(client.scroll('down')).rejects.toThrow('not yet implemented');
+  it('scroll → ScrollCommand with correct direction and resolves', async () => {
+    spy.mockResolvedValue(undefined);
+    await client.scroll('down', 300);
+    const cmd = capturedCommand(spy);
+    expect(cmd.type).toBe('scroll');
+    expect((cmd as any).direction).toBe('down');
+    expect((cmd as any).amountPx).toBe(300);
+    expect((cmd as any).tab).toEqual({ kind: 'active' });
   });
 
   // ---------------------------------------------------------------------------

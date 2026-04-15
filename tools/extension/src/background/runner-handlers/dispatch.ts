@@ -93,6 +93,7 @@ export async function handleRunnerCommand(
     case 'screenshot':
     case 'countMatching':
     case 'anyMatch':
+    case 'scroll':
     case 'openWindow':
     case 'closeWindow':
     default:

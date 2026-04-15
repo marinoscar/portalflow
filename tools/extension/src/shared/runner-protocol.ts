@@ -8,7 +8,7 @@
  */
 
 // IMPORTANT: bump this on any incompatible change
-export const RUNNER_PROTOCOL_VERSION = '1';
+export const RUNNER_PROTOCOL_VERSION = '2';
 
 // ---------------------------------------------------------------------------
 // Primitive selector/targeting types
@@ -147,6 +147,15 @@ export interface CloseWindowCommand {
   windowId: number;
 }
 
+export interface ScrollCommand {
+  commandId: string;
+  type: 'scroll';
+  tab: TabSelector;
+  direction: 'up' | 'down' | 'top' | 'bottom';
+  amountPx?: number;
+  timeoutMs: number;
+}
+
 export type RunnerCommand =
   | NavigateCommand
   | InteractCommand
@@ -157,7 +166,8 @@ export type RunnerCommand =
   | CountMatchingCommand
   | AnyMatchCommand
   | OpenWindowCommand
-  | CloseWindowCommand;
+  | CloseWindowCommand
+  | ScrollCommand;
 
 // ---------------------------------------------------------------------------
 // Response envelopes (extension → CLI)

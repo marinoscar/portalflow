@@ -9,6 +9,8 @@ import type {
   ScreenshotCommand,
   CountMatchingCommand,
   AnyMatchCommand,
+  DownloadCommand,
+  ScrollCommand,
   TabSelector,
 } from './protocol.js';
 
@@ -265,22 +267,23 @@ export class PageClient {
     }
   }
 
-  /**
-   * Scroll the page in a direction.
-   *
-   * TODO(task-6-or-8): scroll is not yet in the extension protocol. Wire up a
-   * ScrollCommand when the extension side adds it. Until then this method
-   * throws NotYetImplemented so the step executor surfaces a clear error
-   * rather than a silent no-op.
-   */
   async scroll(
     direction: 'up' | 'down' | 'top' | 'bottom',
-    _amountPx?: number,
+    amountPx?: number,
   ): Promise<void> {
-    throw new Error(
-      `scroll("${direction}") is not yet implemented in the extension protocol. ` +
-      'It will be wired up in task 6 or 8.',
-    );
+    const cmd: ScrollCommand = {
+      type: 'scroll',
+      commandId: this.newId(),
+      timeoutMs: this.defaultTimeoutMs,
+      tab: ACTIVE_TAB,
+      direction,
+      amountPx,
+    };
+    try {
+      await this.host.sendCommand(cmd);
+    } catch (err) {
+      throw this.wrapError('scroll', `"${direction}"`, err);
+    }
   }
 
   // ---------------------------------------------------------------------------

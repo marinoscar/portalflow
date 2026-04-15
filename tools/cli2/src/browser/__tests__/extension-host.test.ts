@@ -77,7 +77,7 @@ describe('ExtensionHost', () => {
       const client = new WebSocket(`ws://127.0.0.1:${host.port}`);
       client.on('error', reject);
       client.once('open', () => {
-        client.send(JSON.stringify(helloEvent({ protocolVersion: '0' })));
+        client.send(JSON.stringify(helloEvent({ protocolVersion: '1' })));
       });
       client.once('close', (code) => {
         try {
