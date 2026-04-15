@@ -35,6 +35,7 @@
     "activeTab",
     "tabs",
     "webNavigation",
+    "webRequest",
     "offscreen",
     "alarms"
   ],
