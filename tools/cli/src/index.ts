@@ -99,6 +99,11 @@ program
     'Sub-profile inside the user data directory (e.g. "Default", "Profile 1").',
   )
   .option(
+    '--stealth',
+    'Apply anti-detection patches to the browser launch so the automation looks more like a real human user (strips --enable-automation, patches navigator.webdriver, window.chrome, plugins, WebGL vendor, etc.). Opt-in.',
+    false,
+  )
+  .option(
     '-v, --verbose',
     'Print the full pino log stream to stdout (disables the clean presenter view). Useful for debugging the runner itself.',
     false,
@@ -120,6 +125,7 @@ program
       browserChannel?: string;
       browserUserDataDir?: string;
       browserProfileDirectory?: string;
+      stealth?: boolean;
       verbose?: boolean;
     },
   ) => {
@@ -191,6 +197,7 @@ program
         browserChannel: options.browserChannel,
         browserUserDataDir: options.browserUserDataDir,
         browserProfileDirectory: options.browserProfileDirectory,
+        browserStealth: options.stealth,
         verbose: options.verbose,
       });
 

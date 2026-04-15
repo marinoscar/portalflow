@@ -44,6 +44,14 @@ export interface RunOptions {
   browserUserDataDir?: string;
   /** Sub-profile name override (e.g. "Default", "Profile 1"). */
   browserProfileDirectory?: string;
+  /**
+   * Enable anti-detection stealth patches. When true, PortalFlow strips
+   * `--enable-automation` and applies a curated init script that masks
+   * `navigator.webdriver`, `window.chrome`, plugins, WebGL vendor, and
+   * other common fingerprints. Opt-in because stealth can break the
+   * occasional site that sanity-checks the browser fingerprint.
+   */
+  browserStealth?: boolean;
 }
 
 export class AutomationRunner {
@@ -282,6 +290,8 @@ export class AutomationRunner {
       options?.browserUserDataDir ?? storedBrowser.userDataDir;
     const browserProfileDirectory =
       options?.browserProfileDirectory ?? storedBrowser.profileDirectory;
+    const browserStealth =
+      options?.browserStealth ?? storedBrowser.stealth ?? false;
 
     logger.info(
       {
@@ -289,6 +299,7 @@ export class AutomationRunner {
         channel: browserChannel ?? 'chromium',
         userDataDir: browserUserDataDir ?? null,
         profileDirectory: browserProfileDirectory ?? null,
+        stealth: browserStealth,
       },
       'Resolved browser config',
     );
@@ -306,6 +317,7 @@ export class AutomationRunner {
       channel: browserChannel,
       userDataDir: browserUserDataDir,
       profileDirectory: browserProfileDirectory,
+      stealth: browserStealth,
     });
 
     logger.info({ headless }, 'Browser launched');
