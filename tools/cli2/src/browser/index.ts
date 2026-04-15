@@ -2,6 +2,10 @@ export { ExtensionHost, ExtensionCommandError } from './extension-host.js';
 export type { ExtensionHostOptions } from './extension-host.js';
 export { PageClient } from './page-client.js';
 export type { PageClientOptions } from './page-client.js';
+export { PageContextCapture } from './context.js';
+export type { CaptureOptions } from './context.js';
+export { ElementResolver } from './element-resolver.js';
+export type { ResolverResult } from './element-resolver.js';
 
 // Re-export protocol type guards for downstream consumers.
 export {
