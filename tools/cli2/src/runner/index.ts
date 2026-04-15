@@ -7,3 +7,7 @@ export { resolvePaths, resolveVideo } from './paths.js';
 export type { EffectivePaths, EffectiveVideo } from './paths.js';
 export { RunPresenter } from './run-presenter.js';
 export type { StepStatus } from './run-presenter.js';
+export { AutomationRunner } from './automation-runner.js';
+export type { RunOptions } from './automation-runner.js';
+export { StepExecutor, JumpOutOfBlockError } from './step-executor.js';
+export type { StepOutcome } from './step-executor.js';

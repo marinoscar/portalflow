@@ -64,11 +64,71 @@ program
     false,
   )
   .addHelpText('after', helpText.runHelpText())
-  .action(() => {
-    process.stdout.write(
-      '\nrun is not yet implemented in portalflow2 (task 3 of the cli2 rollout)\n\n',
-    );
-    process.exit(0);
+  .action(async (file: string | undefined, opts: {
+    video?: boolean;
+    videoDir?: string;
+    screenshotDir?: string;
+    downloadDir?: string;
+    automationsDir?: string;
+    input?: string[];
+    inputsJson?: string;
+    logLevel?: string;
+    stealth?: boolean;
+    verbose?: boolean;
+  }) => {
+    if (!file) {
+      process.stdout.write(
+        '\nportalflow2 run: interactive TUI not yet implemented.\n' +
+        'Usage: portalflow2 run <automation.json>\n\n',
+      );
+      process.exit(0);
+    }
+
+    // Parse --input key=value flags into a Map
+    const inputs = new Map<string, string>();
+    for (const kv of (opts.input ?? [])) {
+      const eqIdx = kv.indexOf('=');
+      if (eqIdx === -1) {
+        process.stderr.write(`portalflow2: invalid --input format (expected key=value): "${kv}"\n`);
+        process.exit(1);
+      }
+      inputs.set(kv.slice(0, eqIdx), kv.slice(eqIdx + 1));
+    }
+    if (opts.inputsJson) {
+      try {
+        const obj = JSON.parse(opts.inputsJson) as Record<string, string>;
+        for (const [k, v] of Object.entries(obj)) {
+          inputs.set(k, v);
+        }
+      } catch {
+        process.stderr.write(`portalflow2: --inputs-json is not valid JSON\n`);
+        process.exit(1);
+      }
+    }
+
+    const { AutomationRunner } = await import('./runner/automation-runner.js');
+    const runner = new AutomationRunner();
+
+    try {
+      const result = await runner.run(file, {
+        video: opts.video,
+        videoDir: opts.videoDir,
+        screenshotDir: opts.screenshotDir,
+        downloadDir: opts.downloadDir,
+        automationsDir: opts.automationsDir,
+        inputs: inputs.size > 0 ? inputs : undefined,
+        logLevel: opts.logLevel,
+        verbose: opts.verbose,
+      });
+
+      if (!result.success) {
+        process.exit(1);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`\nportalflow2 run: ${msg}\n\n`);
+      process.exit(1);
+    }
   });
 
 // validate [file]
