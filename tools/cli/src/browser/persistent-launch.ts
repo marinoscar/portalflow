@@ -1,4 +1,12 @@
-import { existsSync, lstatSync, readlinkSync, unlinkSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type pino from 'pino';
 
@@ -58,6 +66,25 @@ export const PERSISTENT_LAUNCH_ARGS: readonly string[] = [
   '--hide-crash-restore-bubble',
   '--disable-infobars',
   '--password-store=basic',
+
+  // --- Network-suppression flags ---
+  // Stop Chrome from making startup network calls (sync, component
+  // updates, metrics, default-apps check, field-trial config) which
+  // can block Playwright's CDP handshake. Without these, a real
+  // user profile with sync enabled may sit on a network call for
+  // tens of seconds before answering CDP.
+  '--disable-background-networking',
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-breakpad',
+  '--disable-component-update',
+  '--disable-default-apps',
+  '--disable-domain-reliability',
+  '--disable-sync',
+  '--metrics-recording-only',
+  '--disable-client-side-phishing-detection',
+  '--disable-renderer-backgrounding',
+  '--disable-features=TranslateUI,OptimizationHints,MediaRouter,DialMediaRouteProvider',
 ];
 
 /**
@@ -133,6 +160,113 @@ export function inspectSingletonLock(userDataDir: string): LockInspection | null
     // EPERM: process exists but we can't signal it — treat as live.
     return { pid, stale: false };
   }
+}
+
+/**
+ * Patch a Chrome profile's `Preferences` file so Chrome believes the
+ * previous session exited cleanly. Without this, a profile whose last
+ * Chrome process was killed (by `pkill -f chrome`, a crash, or
+ * Playwright's close() during a stuck launch) has
+ * `profile.exit_type === "Crashed"` / `profile.exited_cleanly === false`
+ * in its Preferences file. On next launch, Chrome fires the session-
+ * restore machinery: it may show a "Chrome didn't shut down correctly.
+ * Restore?" bubble (suppressed by --disable-session-crashed-bubble /
+ * --hide-crash-restore-bubble on newer builds but not always), and
+ * more importantly it MAY block Playwright's initial CDP handshake
+ * while session restore is in flight.
+ *
+ * This is the same trick undetected-chromedriver uses to keep real
+ * Chrome profiles automatable across runs.
+ *
+ * Writes atomically via a temporary file + rename so a crashed write
+ * cannot corrupt the user's real profile.
+ *
+ * Returns `true` if Preferences was patched, `false` if the file was
+ * missing, already clean, or could not be read (in which case the
+ * caller should log a warning but NOT abort — the flags above are
+ * enough to get past most session-restore behavior even without the
+ * Preferences patch).
+ */
+export function patchProfilePreferences(
+  userDataDir: string,
+  profileDirectory: string | undefined,
+  logger?: pino.Logger,
+): boolean {
+  const profileDir = profileDirectory
+    ? join(userDataDir, profileDirectory)
+    : join(userDataDir, 'Default');
+  const prefsPath = join(profileDir, 'Preferences');
+
+  if (!existsSync(prefsPath)) {
+    // Fresh profile with no Preferences yet — nothing to patch.
+    return false;
+  }
+
+  let raw: string;
+  try {
+    raw = readFileSync(prefsPath, 'utf-8');
+  } catch (err) {
+    logger?.warn(
+      { prefsPath, err },
+      'Could not read Chrome Preferences for session-exit patch (non-fatal — continuing launch)',
+    );
+    return false;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    logger?.warn(
+      { prefsPath, err },
+      'Chrome Preferences is not valid JSON (may be corrupted from a crashed write) — skipping session-exit patch',
+    );
+    return false;
+  }
+
+  const profile = (parsed.profile ??= {}) as Record<string, unknown>;
+  const wasCrashed =
+    profile.exit_type !== 'Normal' || profile.exited_cleanly !== true;
+  if (!wasCrashed) {
+    // Already clean. Nothing to do.
+    return false;
+  }
+
+  profile.exit_type = 'Normal';
+  profile.exited_cleanly = true;
+
+  // Write atomically: serialize to a temp file, then rename over the
+  // original. rename(2) is atomic within a filesystem, so even if the
+  // process is killed mid-write Chrome's profile stays in a consistent
+  // state — either the old file or the new one.
+  const tmpPath = `${prefsPath}.portalflow.tmp`;
+  try {
+    writeFileSync(tmpPath, JSON.stringify(parsed), 'utf-8');
+    renameSync(tmpPath, prefsPath);
+  } catch (err) {
+    logger?.warn(
+      { prefsPath, err },
+      'Failed to write patched Chrome Preferences — continuing launch with in-file state',
+    );
+    // Best-effort tmp cleanup if the rename failed but the write
+    // succeeded. Ignore any error from this.
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* swallow */
+    }
+    return false;
+  }
+
+  logger?.info(
+    {
+      prefsPath,
+      profileDirectory: profileDirectory ?? 'Default',
+      previousExitType: 'Crashed',
+    },
+    'Patched Chrome Preferences to mark previous session as cleanly exited',
+  );
+  return true;
 }
 
 /**
@@ -220,4 +354,10 @@ export function preflightPersistentLaunch(options: PreflightOptions): void {
   // prior launch so Chrome's process-singleton machinery doesn't try
   // to forward the new launch to a dead pid.
   clearSingletonFiles(userDataDir, logger);
+
+  // Patch the profile's Preferences file so Chrome doesn't try to
+  // restore the previous session on startup — which is the single
+  // most common reason a persistent-mode launch hangs after the
+  // singleton files have been cleaned.
+  patchProfilePreferences(userDataDir, profileDirectory, logger);
 }

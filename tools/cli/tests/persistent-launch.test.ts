@@ -1,10 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  symlinkSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   inspectSingletonLock,
   clearSingletonFiles,
+  patchProfilePreferences,
   preflightPersistentLaunch,
 } from '../src/browser/persistent-launch.js';
 
@@ -167,6 +176,153 @@ describe('persistent-launch helpers', () => {
       expect(existsSync(join(userDataDir, 'SingletonLock'))).toBe(false);
       expect(existsSync(join(userDataDir, 'SingletonCookie'))).toBe(false);
       expect(existsSync(join(userDataDir, 'SingletonSocket'))).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // patchProfilePreferences
+  // ---------------------------------------------------------------------
+
+  describe('patchProfilePreferences', () => {
+    function writePrefs(
+      profileDir: string,
+      profile: Record<string, unknown>,
+    ): string {
+      mkdirSync(profileDir, { recursive: true });
+      const path = join(profileDir, 'Preferences');
+      writeFileSync(path, JSON.stringify({ profile }), 'utf-8');
+      return path;
+    }
+
+    it('patches a Crashed profile to Normal', () => {
+      const profileDir = join(userDataDir, 'Profile 2');
+      const path = writePrefs(profileDir, {
+        exit_type: 'Crashed',
+        exited_cleanly: false,
+        name: 'Test',
+      });
+
+      const patched = patchProfilePreferences(userDataDir, 'Profile 2');
+
+      expect(patched).toBe(true);
+      const raw = readFileSync(path, 'utf-8');
+      const parsed = JSON.parse(raw);
+      expect(parsed.profile.exit_type).toBe('Normal');
+      expect(parsed.profile.exited_cleanly).toBe(true);
+      // Other fields should be preserved.
+      expect(parsed.profile.name).toBe('Test');
+    });
+
+    it('returns false and does not touch an already-clean profile', () => {
+      const profileDir = join(userDataDir, 'Default');
+      const path = writePrefs(profileDir, {
+        exit_type: 'Normal',
+        exited_cleanly: true,
+        name: 'Test',
+      });
+      const beforeMtime = readFileSync(path, 'utf-8');
+
+      const patched = patchProfilePreferences(userDataDir, 'Default');
+
+      expect(patched).toBe(false);
+      // File content should be unchanged.
+      expect(readFileSync(path, 'utf-8')).toBe(beforeMtime);
+    });
+
+    it('returns false when Preferences does not exist', () => {
+      mkdirSync(join(userDataDir, 'Profile 2'));
+      const patched = patchProfilePreferences(userDataDir, 'Profile 2');
+      expect(patched).toBe(false);
+    });
+
+    it('handles invalid JSON gracefully', () => {
+      const profileDir = join(userDataDir, 'Profile 2');
+      mkdirSync(profileDir, { recursive: true });
+      writeFileSync(join(profileDir, 'Preferences'), 'not json {', 'utf-8');
+
+      // Should not throw; returns false.
+      expect(() =>
+        patchProfilePreferences(userDataDir, 'Profile 2'),
+      ).not.toThrow();
+      expect(patchProfilePreferences(userDataDir, 'Profile 2')).toBe(false);
+    });
+
+    it('defaults to "Default" profile when profileDirectory is undefined', () => {
+      const profileDir = join(userDataDir, 'Default');
+      writePrefs(profileDir, { exit_type: 'Crashed', exited_cleanly: false });
+
+      const patched = patchProfilePreferences(userDataDir, undefined);
+      expect(patched).toBe(true);
+    });
+
+    it('patches when profile.exited_cleanly is false even if exit_type is Normal', () => {
+      const profileDir = join(userDataDir, 'Default');
+      writePrefs(profileDir, {
+        exit_type: 'Normal',
+        exited_cleanly: false,
+      });
+
+      const patched = patchProfilePreferences(userDataDir, 'Default');
+      expect(patched).toBe(true);
+    });
+
+    it('creates the profile key if it does not exist', () => {
+      const profileDir = join(userDataDir, 'Default');
+      mkdirSync(profileDir, { recursive: true });
+      writeFileSync(
+        join(profileDir, 'Preferences'),
+        JSON.stringify({ other: 'field' }),
+        'utf-8',
+      );
+
+      // The 'profile' key is missing entirely. The patch should add
+      // it with the clean-exit flags.
+      const patched = patchProfilePreferences(userDataDir, 'Default');
+      expect(patched).toBe(true);
+      const parsed = JSON.parse(
+        readFileSync(join(profileDir, 'Preferences'), 'utf-8'),
+      );
+      expect(parsed.profile.exit_type).toBe('Normal');
+      expect(parsed.profile.exited_cleanly).toBe(true);
+      expect(parsed.other).toBe('field'); // unrelated fields preserved
+    });
+
+    it('writes atomically — no .portalflow.tmp file left behind on success', () => {
+      const profileDir = join(userDataDir, 'Default');
+      writePrefs(profileDir, { exit_type: 'Crashed', exited_cleanly: false });
+
+      patchProfilePreferences(userDataDir, 'Default');
+
+      // After a successful rename, the temp file must be gone.
+      expect(
+        existsSync(join(profileDir, 'Preferences.portalflow.tmp')),
+      ).toBe(false);
+    });
+  });
+
+  // preflightPersistentLaunch should also call patchProfilePreferences,
+  // so verify the end-to-end flow on a crashed profile.
+  describe('preflightPersistentLaunch integration with Preferences patch', () => {
+    it('patches a crashed profile as part of preflight', () => {
+      const profileDir = join(userDataDir, 'Profile 2');
+      mkdirSync(profileDir, { recursive: true });
+      const prefsPath = join(profileDir, 'Preferences');
+      writeFileSync(
+        prefsPath,
+        JSON.stringify({
+          profile: { exit_type: 'Crashed', exited_cleanly: false },
+        }),
+        'utf-8',
+      );
+
+      preflightPersistentLaunch({
+        userDataDir,
+        profileDirectory: 'Profile 2',
+      });
+
+      const parsed = JSON.parse(readFileSync(prefsPath, 'utf-8'));
+      expect(parsed.profile.exit_type).toBe('Normal');
+      expect(parsed.profile.exited_cleanly).toBe(true);
     });
   });
 });
