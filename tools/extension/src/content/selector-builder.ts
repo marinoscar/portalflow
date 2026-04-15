@@ -1,3 +1,5 @@
+import { cssEscape, isValidCssSelector } from '../shared/selector-util';
+
 /**
  * Build a stable selector for an element, plus a small set of fallbacks.
  * Strategies are tried in order of stability; the first match becomes `primary`
@@ -130,17 +132,5 @@ function computeAbsoluteCssPath(el: Element): string {
 }
 
 function isValidSelector(sel: string): boolean {
-  try {
-    document.querySelector(sel);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function cssEscape(value: string): string {
-  if (typeof (window as Window & typeof globalThis & { CSS?: { escape?: (v: string) => string } }).CSS?.escape === 'function') {
-    return (window as Window & typeof globalThis & { CSS?: { escape?: (v: string) => string } }).CSS!.escape!(value);
-  }
-  return value.replace(/"/g, '\\"');
+  return isValidCssSelector(sel);
 }
