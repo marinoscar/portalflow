@@ -8,6 +8,12 @@ import {
   PERSISTENT_LAUNCH_TIMEOUT_MS,
   preflightPersistentLaunch,
 } from './persistent-launch.js';
+import {
+  STEALTH_EVASION_LIST,
+  STEALTH_IGNORE_DEFAULT_ARGS,
+  STEALTH_INIT_SCRIPT,
+  STEALTH_LAUNCH_ARGS,
+} from './stealth.js';
 
 export interface BrowserOptions {
   headless?: boolean;
@@ -32,6 +38,17 @@ export interface BrowserOptions {
   userDataDir?: string;
   /** Sub-profile name inside the user data dir, e.g. "Default" or "Profile 1". */
   profileDirectory?: string;
+
+  // ---- Stealth ----
+  /**
+   * When true, apply anti-detection patches to the launch so the
+   * browser's automation tells (navigator.webdriver, window.chrome,
+   * plugin list, WebGL vendor, etc.) match a plausible real-user
+   * Chrome fingerprint. Opt-in because it occasionally breaks sites
+   * that sanity-check the browser fingerprint. See browser/stealth.ts
+   * for the list of evasions applied.
+   */
+  stealth?: boolean;
 }
 
 export class BrowserService {
@@ -92,9 +109,26 @@ export class BrowserService {
     chromium: typeof import('playwright').chromium,
     options: BrowserOptions,
   ): Promise<void> {
-    this.browser = await chromium.launch({
+    const stealth = options.stealth === true;
+
+    // When stealth is enabled, strip `--enable-automation` (the
+    // authoritative source of navigator.webdriver) from Playwright's
+    // default args and add the curated stealth flags. This must happen
+    // at launch() time — context-level patches alone are not enough
+    // because navigator.webdriver is browser-wide.
+    const launchOptions: {
+      headless: boolean;
+      args?: string[];
+      ignoreDefaultArgs?: string[];
+    } = {
       headless: options.headless ?? false,
-    });
+    };
+    if (stealth) {
+      launchOptions.args = [...STEALTH_LAUNCH_ARGS];
+      launchOptions.ignoreDefaultArgs = [...STEALTH_IGNORE_DEFAULT_ARGS];
+    }
+
+    this.browser = await chromium.launch(launchOptions);
 
     const contextOptions: {
       acceptDownloads: boolean;
@@ -115,11 +149,27 @@ export class BrowserService {
     }
 
     this.context = await this.browser.newContext(contextOptions);
+
+    // Apply the stealth init script AFTER the context exists but
+    // BEFORE the first page is created, so the patches are in place
+    // for the very first navigation. addInitScript runs on every new
+    // document within the context, including iframes.
+    if (stealth) {
+      await this.context.addInitScript(STEALTH_INIT_SCRIPT);
+    }
+
     this.page = await this.context.newPage();
 
     this.logger?.info(
-      { mode: 'isolated', channel: 'chromium' },
-      'browser launched (fresh in-memory context)',
+      {
+        mode: 'isolated',
+        channel: 'chromium',
+        stealth,
+        ...(stealth ? { evasions: STEALTH_EVASION_LIST } : {}),
+      },
+      stealth
+        ? 'browser launched (fresh in-memory context, stealth patches applied)'
+        : 'browser launched (fresh in-memory context)',
     );
   }
 
@@ -169,10 +219,16 @@ export class BrowserService {
       logger: this.logger,
     });
 
+    const stealth = options.stealth === true;
+
     // Start from the curated persistent-mode launch args
-    // (--no-first-run, --disable-session-crashed-bubble, etc.) and
-    // append the user's profile directory selector.
-    const launchArgs: string[] = [...PERSISTENT_LAUNCH_ARGS];
+    // (--no-first-run, --disable-session-crashed-bubble, etc.),
+    // layer on stealth flags if enabled, and append the user's
+    // profile directory selector last.
+    const launchArgs: string[] = [
+      ...PERSISTENT_LAUNCH_ARGS,
+      ...(stealth ? STEALTH_LAUNCH_ARGS : []),
+    ];
     if (options.profileDirectory) {
       launchArgs.push(`--profile-directory=${options.profileDirectory}`);
     }
@@ -182,6 +238,7 @@ export class BrowserService {
       acceptDownloads: boolean;
       channel?: BrowserChannel;
       args: string[];
+      ignoreDefaultArgs?: string[];
       timeout: number;
       viewport?: { width: number; height: number };
       userAgent?: string;
@@ -197,6 +254,9 @@ export class BrowserService {
       // hangs entirely.
       timeout: PERSISTENT_LAUNCH_TIMEOUT_MS,
     };
+    if (stealth) {
+      persistentOptions.ignoreDefaultArgs = [...STEALTH_IGNORE_DEFAULT_ARGS];
+    }
 
     if (options.channel && options.channel !== 'chromium') {
       persistentOptions.channel = options.channel;
@@ -251,6 +311,15 @@ export class BrowserService {
     }
 
     this.context = context;
+
+    // Apply the stealth init script BEFORE touching any page so that
+    // the very first page load runs with the patches in place. For
+    // persistent mode this matters even more than isolated mode — the
+    // real profile's session restore can fire before we act.
+    if (stealth) {
+      await this.context.addInitScript(STEALTH_INIT_SCRIPT);
+    }
+
     // Persistent context comes with a default page already open. Reuse it
     // when present; otherwise create a fresh one. This matters because some
     // browsers restore the previous tab on launch and we want to act on it.
@@ -267,8 +336,12 @@ export class BrowserService {
         channel: options.channel ?? 'chromium',
         userDataDir: options.userDataDir,
         profileDirectory: options.profileDirectory ?? 'Default',
+        stealth,
+        ...(stealth ? { evasions: STEALTH_EVASION_LIST } : {}),
       },
-      'browser launched (persistent context — real profile)',
+      stealth
+        ? 'browser launched (persistent context — real profile, stealth patches applied)'
+        : 'browser launched (persistent context — real profile)',
     );
   }
 

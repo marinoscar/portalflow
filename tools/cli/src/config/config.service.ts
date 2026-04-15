@@ -86,6 +86,17 @@ export interface BrowserConfig {
   userDataDir?: string;
   /** Sub-profile inside the user data directory (e.g. 'Default', 'Profile 1'). */
   profileDirectory?: string;
+  /**
+   * When true, apply a curated set of automation-hiding patches to every
+   * browser context — strip `--enable-automation`, inject a stealth init
+   * script that masks `navigator.webdriver` / `window.chrome` / plugins /
+   * WebGL vendor strings / permissions leak / etc.
+   *
+   * Default: false (opt-in). Enabling stealth occasionally breaks sites
+   * that sanity-check the browser fingerprint, so it is not on by default.
+   * See docs/AUTOMATION-JSON-SPEC.md for the list of evasions applied.
+   */
+  stealth?: boolean;
 }
 
 export interface CliConfig {

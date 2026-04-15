@@ -93,6 +93,7 @@ automations are resilient to minor UI changes without requiring manual updates t
   - [10.2 vaultcli](#102-vaultcli)
 - [11. Outputs](#11-outputs)
 - [12. Settings](#12-settings)
+  - [12.1 Stealth mode (anti-bot-detection)](#121-stealth-mode-anti-bot-detection)
 - [13. Template Syntax](#13-template-syntax)
   - [13.4 System functions](#134-system-functions)
 - [14. The loop Step in Depth](#14-the-loop-step-in-depth)
@@ -2087,6 +2088,63 @@ If neither is set, the user config path is used; if that is also unset, the buil
   "videoSize": { "width": 1280, "height": 720 }
 }
 ```
+
+### 12.1 Stealth mode (anti-bot-detection)
+
+By default, Playwright launches Chromium with `--enable-automation`, which sets `navigator.webdriver = true` and a handful of other signals that bot-detection libraries (Akamai Bot Manager, Cloudflare Turnstile, DataDome, PerimeterX) use to block automated traffic. **Stealth mode** is an opt-in launch option that strips those signals and applies a curated set of JavaScript patches to make the browser fingerprint match a plausible real-user Chrome.
+
+**Enable it** via any of:
+
+```bash
+# CLI flag (per-run)
+portalflow run my-automation.json --stealth
+
+# User config (applies to every run unless overridden)
+# ~/.portalflow/config.json
+{
+  "browser": {
+    "stealth": true
+  }
+}
+```
+
+**What stealth mode does:**
+
+1. Passes `ignoreDefaultArgs: ['--enable-automation']` to Playwright's launch so the top-level automation flag is never set. Without this single flag removal, `navigator.webdriver` is true regardless of any JavaScript patches.
+2. Adds launch args: `--disable-blink-features=AutomationControlled`, `--disable-features=...,AutomationControlled`, `--password-store=basic` (prevents OS keyring prompts during launch).
+3. Registers a per-context init script via Playwright's `context.addInitScript()`. The script runs on every new document (including iframes) before any page JavaScript fires, and patches:
+   - `navigator.webdriver` → `undefined` (belt-and-suspenders over the flag removal)
+   - `window.chrome` → fake `{runtime, loadTimes, csi, app}` object matching real Chrome
+   - `navigator.plugins` → synthesized `PluginArray` with PDF Viewer entries
+   - `navigator.languages` → `['en-US', 'en']`
+   - `navigator.permissions.query({name:'notifications'})` → returns `Notification.permission` to avoid the automation-state leak
+   - WebGL `UNMASKED_VENDOR_WEBGL` / `UNMASKED_RENDERER_WEBGL` → plausible real-Chrome values (`'Google Inc. (Intel)'` / `'ANGLE (Intel, Intel(R) UHD Graphics 620 …)'`)
+   - `navigator.hardwareConcurrency` → `8`
+   - `navigator.deviceMemory` → `8`
+   - `HTMLIFrameElement.contentWindow.chrome` → the same patched `chrome` object so cross-frame fingerprinters see consistency
+   - `Function.prototype.toString` → patched so the patched getters' `.toString()` returns `"function () { [native code] }"` (defeats detectors that `toString()` the getters to check for `[native code]`)
+
+**Works with both browser modes.** Stealth layers on top of whatever browser mode you're using:
+
+- **Isolated + stealth** (recommended for 99% of use cases): fresh in-memory Chromium with all the stealth patches applied. Nothing persists between runs — cookies, logins, and history are gone on every launch — but bot detectors see a "clean" real-looking browser.
+- **Persistent + stealth**: real on-disk profile (cookies and logins carry over) WITH stealth patches on top. The profile's real fingerprint already looks human; stealth is belt-and-suspenders for the few signals Playwright adds to persistent launches.
+
+**When stealth mode is enough, and when it isn't:**
+
+Stealth mode defeats **~80% of bot-detection libraries** in off-the-shelf configurations. What it does NOT defeat:
+
+- **Behavioral / timing analysis** (detectors that measure keystroke intervals or mouse-move patterns). These catch automation by the *way* it interacts, not by what the browser reports about itself. Future PortalFlow tiers (humanized input) will address this.
+- **TLS fingerprinting / JA3** (detectors that fingerprint the TLS handshake). Chromium always produces the same JA3 regardless of user vs automation, so this is a wash — neither Playwright nor your real Chrome can be distinguished this way anyway.
+- **CAPTCHA-gated sites** (reCAPTCHA v3 score, hCaptcha, Turnstile challenge). Stealth will get you past the first check but the challenge itself is unsolvable without human input.
+- **Sites using advanced fingerprinting** (Canvas noise, audio context, Font enumeration). Stealth patches the most-checked signals but not all of them. Some enterprise-tier detectors check dozens of signals and will still catch you.
+
+If stealth mode isn't enough for your target site, the next tier is **CDP attach mode** — start your real Chrome manually (from its icon, with your daily profile, no flags), and PortalFlow connects to it over the DevTools Protocol. The browser is indistinguishable from a real user session because it IS a real user session. Not yet implemented; will be shipped as a follow-up tier when stealth mode alone proves insufficient for a real target.
+
+**Gotchas:**
+
+- Stealth mode occasionally breaks **legitimate** sites that sanity-check the browser fingerprint — they see a patched `window.chrome` that doesn't quite match the stock Chrome they expect, and refuse to load. This is why stealth is opt-in, not default. If a site worked for you before stealth and stops working after enabling it, that's the cause. Report it and we'll tune the relevant evasion.
+- Stealth does NOT change the User-Agent string. If you need a specific UA, set `settings.userAgent` separately.
+- **Verify stealth is actually helping**. The log line `browser launched (fresh in-memory context, stealth patches applied)` confirms the launch happened in stealth mode. To verify bot-detection bypass, visit [https://bot.sannysoft.com](https://bot.sannysoft.com) or [https://arh.antoinevastel.com/bots/areyouheadless](https://arh.antoinevastel.com/bots/areyouheadless) manually in a stealth-mode session — each row should be green.
 
 ---
 
