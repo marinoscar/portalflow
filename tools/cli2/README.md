@@ -88,6 +88,26 @@ The choice is persisted to `~/.portalflow/config.json` and can be changed later 
 
 ---
 
+## Quick install (scripted)
+
+Instead of following the manual steps above, you can run the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli2/install.sh | bash
+```
+
+The script is idempotent — run it again to update. It clones the repo to `~/.portalflow-cli2/`, builds `@portalflow/schema`, the extension at `tools/extension/dist/`, and `portalflow2` itself, seeds `~/.portalflow/` default directories, and installs `portalflow2` + `portalflow2-update` to `/usr/local/bin/` (requires `sudo`).
+
+After the script completes you still need to do the one-time "Load unpacked" step in `chrome://extensions` — the installer prints the exact dist path and copies it to your clipboard.
+
+To uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli2/install.sh | bash -s -- --uninstall
+```
+
+---
+
 ## Running an automation
 
 ### Three invocation modes
