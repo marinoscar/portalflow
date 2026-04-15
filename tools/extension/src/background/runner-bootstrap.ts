@@ -1,5 +1,6 @@
 import type { RunnerCommand, RunnerResponse } from '../shared/runner-protocol';
 import { notImplemented } from './runner-handlers/stub';
+import { handleRunnerCommand as dispatchRunnerCommand } from './runner-handlers/dispatch';
 
 const PREFIX = '[portalflow-runner-bootstrap]';
 
@@ -54,11 +55,11 @@ export async function teardownRunner(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Command dispatch (stubbed — task 6 fills in real handlers)
+// Command dispatch — delegates to the dispatch table (task 6)
 // ---------------------------------------------------------------------------
 
 async function handleRunnerCommand(command: RunnerCommand): Promise<RunnerResponse> {
-  return notImplemented(command.commandId);
+  return dispatchRunnerCommand(command);
 }
 
 // ---------------------------------------------------------------------------
