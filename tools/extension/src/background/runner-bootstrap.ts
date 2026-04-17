@@ -8,6 +8,13 @@ function log(...args: unknown[]): void {
   console.log(PREFIX, ...args);
 }
 
+try {
+  const manifest = chrome.runtime.getManifest();
+  log(`PortalFlow Extension v${manifest.version}`);
+} catch {
+  // getManifest unavailable in test environments
+}
+
 // ---------------------------------------------------------------------------
 // Offscreen document lifecycle
 // ---------------------------------------------------------------------------
