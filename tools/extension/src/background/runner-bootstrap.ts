@@ -100,3 +100,18 @@ chrome.runtime.onInstalled.addListener(() => {
   log('onInstalled — bootstrapping runner');
   bootstrapRunner().catch((err) => console.error(PREFIX, 'onInstalled bootstrap failed:', err));
 });
+
+// MV3 service workers are evicted after ~30s idle. When `portalflow2` launches
+// a new Chrome window while Chrome is already running, `onStartup` does NOT
+// fire. These listeners wake the SW on any new window/tab creation so the
+// offscreen doc (and its WebSocket client) can spin up in time for the CLI's
+// handshake window.
+chrome.windows.onCreated.addListener((win) => {
+  log(`windows.onCreated (windowId=${win.id}) — bootstrapping runner`);
+  bootstrapRunner().catch((err) => console.error(PREFIX, 'windows.onCreated bootstrap failed:', err));
+});
+
+chrome.tabs.onCreated.addListener((tab) => {
+  log(`tabs.onCreated (tabId=${tab.id}) — bootstrapping runner`);
+  bootstrapRunner().catch((err) => console.error(PREFIX, 'tabs.onCreated bootstrap failed:', err));
+});
