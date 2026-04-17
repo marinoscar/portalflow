@@ -156,6 +156,15 @@ export interface ScrollCommand {
   timeoutMs: number;
 }
 
+export type ClearBrowsingDataRange = 'none' | 'last15min' | 'last1hour' | 'last24hour' | 'last7days' | 'all';
+
+export interface ClearBrowsingDataCommand {
+  commandId: string;
+  type: 'clearBrowsingData';
+  range: ClearBrowsingDataRange;
+  timeoutMs: number;
+}
+
 export type RunnerCommand =
   | NavigateCommand
   | InteractCommand
@@ -167,7 +176,8 @@ export type RunnerCommand =
   | AnyMatchCommand
   | OpenWindowCommand
   | CloseWindowCommand
-  | ScrollCommand;
+  | ScrollCommand
+  | ClearBrowsingDataCommand;
 
 // ---------------------------------------------------------------------------
 // Response envelopes (extension → CLI)
