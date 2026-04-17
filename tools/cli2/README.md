@@ -141,12 +141,14 @@ Opens the TUI file picker scoped to the configured automations directory.
 1. `portalflow2` reads `~/.portalflow/config.json` and verifies that `profileMode` is set. If it is `unset`, the CLI exits with instructions to configure it first.
 2. `portalflow2` starts the WebSocket server on `127.0.0.1:7667` (configurable).
 3. `portalflow2` detects the Chrome binary (via `detectChromeBinary`) or uses the `extension.chromeBinary` config override.
-4. Chrome is spawned with `--no-first-run --no-default-browser-check` and, for dedicated mode, `--user-data-dir=<profileDir>`. No headless, no CDP, no automation flags.
-5. The extension's offscreen document connects to the WebSocket and sends a `hello` event carrying the Chrome version, extension version, and protocol version.
-6. `portalflow2` validates the protocol version and replies with a `session` envelope carrying a UUID `runId`.
-7. `portalflow2` sends an `openWindow` command; the extension opens a new dedicated browser window.
-8. Automation steps execute one at a time over the WebSocket, each as a typed command. The extension performs the DOM action in the run window and replies with a `result` or `error` envelope.
-9. On completion, `portalflow2` either closes the run window (if `extension.closeWindowOnFinish: true`) or leaves it open for inspection.
+4. If `--kill-chrome` was passed (or answered "Yes" in the TUI), all running Chrome/Chromium processes are terminated using `pkill` (Linux/macOS) or `taskkill` (Windows). The CLI waits 1.5 seconds afterward so that file locks on the Chrome profile are fully released before the new instance starts.
+5. Chrome is spawned with `--no-first-run --no-default-browser-check` and, for dedicated mode, `--user-data-dir=<profileDir>`. No headless, no CDP, no automation flags.
+6. The extension's offscreen document connects to the WebSocket and sends a `hello` event carrying the Chrome version, extension version, and protocol version.
+7. `portalflow2` validates the protocol version and replies with a `session` envelope carrying a UUID `runId`.
+8. If `--clear-history <range>` was passed with a value other than `none` (or a range was selected in the TUI), the CLI sends a `clearHistory` command to the extension, which calls `chrome.browsingData.remove()` to clear browsing history and cache for the requested time range. Cookies and saved passwords are not touched, so existing logged-in sessions survive.
+9. `portalflow2` sends an `openWindow` command; the extension opens a new dedicated browser window.
+10. Automation steps execute one at a time over the WebSocket, each as a typed command. The extension performs the DOM action in the run window and replies with a `result` or `error` envelope.
+11. On completion, `portalflow2` either closes the run window (if `extension.closeWindowOnFinish: true`) or leaves it open for inspection.
 
 ---
 
@@ -166,19 +168,23 @@ portalflow2 run ~/automations/login.json --input username=alice --input password
 portalflow2 run ~/automations/export.json --download-dir ~/Downloads/reports
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--video` | Enable video recording for this run |
-| `--no-video` | Disable video recording even if enabled in config |
-| `--video-dir <dir>` | Directory to store recorded videos |
-| `--screenshot-dir <dir>` | Directory to store screenshots |
-| `--download-dir <dir>` | Directory to store downloaded files |
-| `--automations-dir <dir>` | Directory to search for automation files |
-| `--input <key=value>` | Pass an input value (repeatable) |
-| `--inputs-json <json>` | Pass multiple inputs as a JSON object |
-| `-l, --log-level <level>` | Log verbosity: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent` |
-| `--stealth` | Apply anti-detection patches (opt-in, default false) |
-| `-v, --verbose` | Print the full pino log stream to stdout |
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--video` | boolean | — | Enable video recording for this run |
+| `--no-video` | boolean | — | Disable video recording even if enabled in config |
+| `--video-dir <dir>` | string | — | Directory to store recorded videos |
+| `--screenshot-dir <dir>` | string | — | Directory to store screenshots |
+| `--download-dir <dir>` | string | — | Directory to store downloaded files |
+| `--automations-dir <dir>` | string | — | Directory to search for automation files |
+| `--input <key=value>` | string | — | Pass an input value (repeatable) |
+| `--inputs-json <json>` | string | — | Pass multiple inputs as a JSON object |
+| `-l, --log-level <level>` | string | — | Log verbosity: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent` |
+| `--stealth` | boolean | `false` | Apply anti-detection patches (opt-in) |
+| `-v, --verbose` | boolean | — | Print the full pino log stream to stdout |
+| `--kill-chrome` | boolean | `false` | Close all existing Chrome/Chromium processes before launching Chrome. Ensures a clean start with no stale singleton locks or leftover sessions. Uses `pkill` on Linux/macOS, `taskkill` on Windows, followed by a 1.5 s pause to let processes release file locks. |
+| `--clear-history <range>` | string | `none` | Clear browsing history and cache (not cookies or passwords) after the extension connects but before steps execute. Preserves logged-in sessions. Accepted values: `none`, `last15min`, `last1hour`, `last24hour`, `last7days`, `all`. |
+
+> **Note:** `--kill-chrome` and `--clear-history` are per-run runtime options. They are not persisted in `~/.portalflow/config.json`. Pass them on the command line each time, or answer the corresponding TUI prompts before each run.
 
 ### `portalflow2 validate [file]`
 
@@ -685,6 +691,10 @@ Chrome extensions are per-profile: an extension loaded in "Default" is invisible
 ### Yellow "Developer mode extensions" balloon
 
 Chrome always shows this notification bar when unpacked extensions are loaded. It is non-blocking and non-critical. Click the X to dismiss it for the session.
+
+### Kill chrome killed my other work
+
+`--kill-chrome` sends a terminate signal to every Chrome and Chromium process on the machine — not just the automation window. Any unsaved work in other Chrome tabs (open forms, in-progress uploads, unsubmitted drafts) is lost. Use this flag only when you want a completely fresh start with no stale singleton locks. The TUI prompt for this option defaults to "No" as a safety measure. If you only need to resolve a SingletonLock conflict, consider closing Chrome manually before running instead.
 
 ### Port 7667 already in use
 
