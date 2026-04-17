@@ -59,6 +59,8 @@ export interface AgentActionHistoryEntry {
   action: string;
   selector?: string;
   value?: string;
+  /** For type actions dispatched via inputRef — records the ref name, not the actual value. */
+  inputRef?: string;
   succeeded: boolean;
   error?: string;
 }
@@ -79,6 +81,17 @@ export interface NextActionQuery {
   allowedActions: string[];
   /** The last few action attempts with outcomes — bounded FIFO. */
   recentHistory: AgentActionHistoryEntry[];
+  /**
+   * Named inputs available for use via `inputRef` in type actions. The LLM
+   * sees the names and types but NEVER the actual values — values are
+   * resolved from context variables at dispatch time.
+   */
+  availableInputs?: Array<{
+    name: string;
+    /** 'string' | 'secret' | 'number' | 'boolean' */
+    type: string;
+    description?: string;
+  }>;
 }
 
 /**
@@ -91,6 +104,12 @@ export interface NextActionResult {
   action: string;
   selector?: string;
   value?: string;
+  /**
+   * For `type` actions — references a context variable by name instead of
+   * sending a literal value. The runner resolves this at dispatch time so
+   * secret values are never included in LLM messages.
+   */
+  inputRef?: string;
   reasoning: string;
 }
 

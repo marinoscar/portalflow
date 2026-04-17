@@ -6,6 +6,7 @@ import type {
   ExtractAction,
   FunctionDefinition,
   GotoAction,
+  Input,
   InteractAction,
   LoopAction,
   LoopExitWhen,
@@ -21,6 +22,7 @@ import type { PageContextCapture } from '../browser/context.js';
 import type { LlmService } from '../llm/llm.service.js';
 import type {
   AgentActionHistoryEntry,
+  NextActionQuery,
   NextActionResult,
   PageContext,
 } from '../llm/provider.interface.js';
@@ -119,6 +121,12 @@ export class StepExecutor {
      * falls back to a silent no-op that discards all calls.
      */
     private readonly presenter: RunPresenter = new RunPresenter(false, ''),
+    /**
+     * The automation's declared inputs. Used by aiscope steps to build the
+     * `availableInputs` list sent to the LLM — names and types only, never
+     * actual values. Defaults to empty so existing callers need not change.
+     */
+    private readonly automationInputs: Input[] = [],
   ) {}
 
   /**
@@ -1000,6 +1008,18 @@ export class StepExecutor {
     // `${loop_index}` or the item variable in the goal text.
     const resolvedGoal = this.context.resolveTemplate(action.goal);
 
+    // Build a list of available input names for the LLM — secrets are listed
+    // by name and type but their values are NOT included in the prompt.
+    // Only the automation's declared inputs are exposed; internal runner
+    // state variables are not surfaced to avoid leaking implementation detail.
+    const availableInputs: NextActionQuery['availableInputs'] = this.automationInputs.map(
+      (input) => ({
+        name: input.name,
+        type: input.type,
+        description: input.description,
+      }),
+    );
+
     logger.info(
       {
         stepId: step.id,
@@ -1083,6 +1103,7 @@ export class StepExecutor {
           pageContext,
           allowedActions,
           recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
+          availableInputs,
         });
       } else {
         const t0 = Date.now();
@@ -1093,6 +1114,7 @@ export class StepExecutor {
             pageContext,
             allowedActions,
             recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
+            availableInputs,
           }),
         ]);
 
@@ -1178,13 +1200,23 @@ export class StepExecutor {
 
       try {
         await this.dispatchAiScopeAction(decision);
-        history.push({
+        // For type actions dispatched via inputRef, record the ref name in
+        // history (not the resolved value — secrets must not appear in logs).
+        // For tool_call actions, record the result variable name so the LLM
+        // can see what it stored and reference it on the next iteration.
+        const historyEntry: AgentActionHistoryEntry = {
           iteration,
           action: decision.action,
           selector: decision.selector,
-          value: decision.value,
           succeeded: true,
-        });
+        };
+        if (decision.action === 'type' && decision.inputRef) {
+          historyEntry.inputRef = decision.inputRef;
+          historyEntry.value = `[inputRef:${decision.inputRef}]`;
+        } else {
+          historyEntry.value = decision.value;
+        }
+        history.push(historyEntry);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger.warn(
@@ -1230,12 +1262,25 @@ export class StepExecutor {
         if (!selector) throw new Error('click requires a `selector`');
         await this.pageClient.click(selector);
         return;
-      case 'type':
-        if (!selector || value === undefined) {
-          throw new Error('type requires `selector` and `value`');
+      case 'type': {
+        if (!selector) throw new Error('type requires a `selector`');
+        let textValue: string;
+        if (decision.inputRef) {
+          const resolved = this.context.getVariable(decision.inputRef);
+          if (resolved === undefined) {
+            throw new Error(
+              `type: inputRef "${decision.inputRef}" is not set in context variables`,
+            );
+          }
+          textValue = resolved;
+        } else if (value !== undefined) {
+          textValue = value;
+        } else {
+          throw new Error('type requires either `value` or `inputRef`');
         }
-        await this.pageClient.type(selector, value);
+        await this.pageClient.type(selector, textValue);
         return;
+      }
       case 'select':
         if (!selector || value === undefined) {
           throw new Error('select requires `selector` and `value`');
