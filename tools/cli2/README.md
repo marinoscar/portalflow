@@ -12,6 +12,7 @@
 - [Commands](#commands)
 - [Configuration reference](#configuration-reference)
 - [Architecture](#architecture)
+- [aiscope: credentials and tool integration](#aiscope-credentials-and-tool-integration)
 - [WebSocket protocol reference](#websocket-protocol-reference)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations (v1)](#known-limitations-v1)
@@ -388,6 +389,81 @@ LLM provider credentials and the active provider name. Managed via `portalflow2 
 **Offscreen document:** the WebSocket client in the extension runs in a dedicated offscreen document (`chrome.offscreen.createDocument`), not the service worker. MV3 service workers are evicted after 30 seconds of idle; a held-open WebSocket from the service worker does not count as activity. The offscreen document avoids this eviction.
 
 For the full architectural rationale behind this design, see [`docs/BROWSER-CONTROL-STRATEGY.md §4`](../../docs/BROWSER-CONTROL-STRATEGY.md#4-the-recommended-path-forward-chrome-extension).
+
+---
+
+## aiscope: credentials and tool integration
+
+`aiscope` steps drive the browser using an observe-act loop: the LLM sees a screenshot (or page snapshot), emits a single action, the executor carries it out, and the cycle repeats until the `successCheck` condition is met or the step budget is exhausted. Two mechanisms let the LLM interact with secrets and external tools without the raw values ever appearing in the LLM prompt: `inputRef` for reading automation inputs, and `tool_call` for invoking external tools (such as `vaultcli` or `smscli`) and capturing their output.
+
+### Using credentials and tools in aiscope
+
+`aiscope` can reference automation inputs — passwords, usernames, OTPs — without the LLM ever seeing the actual secret values. When the LLM needs to type a secret, it emits an `inputRef` field pointing to an input name instead of a `value` field containing the text. The step executor resolves the real value from the in-memory context at dispatch time and sends it directly to the browser; the value never travels through the LLM. Similarly, when the LLM needs data from an external tool (for example, an OTP from `smscli`), it emits a `tool_call` action. The executor runs the tool, stores the result in context under a predictable key, and the LLM can reference that key via `inputRef` on the very next iteration.
+
+### Worked example: AT&T login with OTP
+
+The automation JSON below defines a single `aiscope` step that handles the full AT&T login flow, including an OTP challenge, using credentials from `vaultcli` and a one-time code from `smscli`.
+
+```json
+{
+  "name": "AT&T login with OTP",
+  "version": "1.0.0",
+  "inputs": [
+    {
+      "name": "credentials",
+      "type": "secret",
+      "source": "vaultcli",
+      "value": "att",
+      "description": "AT&T login credentials (username + password from vault)"
+    }
+  ],
+  "tools": ["vaultcli", "smscli"],
+  "steps": [
+    {
+      "id": "login",
+      "name": "Sign in to AT&T",
+      "type": "aiscope",
+      "action": {
+        "goal": "Navigate to https://www.att.com/my/#/login, enter the username and password, handle any OTP/2FA verification, and reach the account dashboard.",
+        "successCheck": {
+          "ai": "The page shows the AT&T account overview or dashboard with account details visible"
+        },
+        "maxDurationSec": 300,
+        "maxIterations": 50,
+        "includeScreenshot": true
+      },
+      "onFailure": "abort",
+      "maxRetries": 1,
+      "timeout": 600000
+    }
+  ]
+}
+```
+
+### What happens at runtime
+
+The following sequence describes the LLM's internal decisions during the observe-act loop. These are NOT part of the JSON above — they are what the LLM emits on each iteration, processed by the step executor.
+
+1. LLM sees the goal and the available inputs: `credentials (secret)`, `credentials_username (string)`, `credentials_password (string)`.
+2. LLM emits `{"action": "navigate", "value": "https://www.att.com/my/#/login"}` — the executor navigates to the login page.
+3. Page loads the login form. LLM sees a username field in the screenshot.
+4. LLM emits `{"action": "type", "selector": "#username", "inputRef": "credentials_username"}` — the executor resolves the actual username from context and types it. The LLM never sees the value.
+5. LLM emits `{"action": "click", "selector": "#next-button"}` — advances to the password screen.
+6. LLM emits `{"action": "type", "selector": "#password", "inputRef": "credentials_password"}` — same pattern for the password; the executor resolves and types the real value.
+7. LLM emits `{"action": "click", "selector": "#sign-in"}` — submits the form.
+8. Page shows an OTP verification screen. LLM recognizes it needs an OTP.
+9. LLM emits `{"action": "tool_call", "value": "smscli:get-otp"}` — the executor runs `smscli`, captures the OTP, and stores it as `smscli_get_otp_result` in context.
+10. LLM emits `{"action": "type", "selector": "#otp-input", "inputRef": "smscli_get_otp_result"}` — types the OTP code via `inputRef`; the actual digits are never in the prompt.
+11. LLM emits `{"action": "click", "selector": "#verify-button"}` — submits the OTP.
+12. Success check passes — the dashboard is visible. The step completes.
+
+### Security note
+
+Secret values are never included in the LLM prompt. The LLM sees only the input names and their declared types (for example, `credentials_password (secret)`). When the LLM emits `"inputRef": "credentials_password"`, the step executor resolves the actual value from the in-memory context at dispatch time — after the LLM has already responded. The history buffer shown to the LLM on subsequent iterations displays `[inputRef:credentials_password]` in place of the actual password, so secrets are never surfaced in the conversation history that feeds back into the model.
+
+### Naming conventions
+
+Vault-sourced inputs are exploded into per-field variables at load time. If the input is named `credentials` and the vault entry returns `{ username, password }`, the available `inputRef` names are `credentials` (the raw secret string, if applicable), `credentials_username`, and `credentials_password`. Tool call results are stored as `<tool>_<command>_result` — for example, a `smscli:get-otp` call produces `smscli_get_otp_result`. Use these exact names in `inputRef` fields.
 
 ---
 
