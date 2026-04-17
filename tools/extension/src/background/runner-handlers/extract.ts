@@ -52,6 +52,28 @@ export async function extract(
     }
   }
 
+  // Full-page HTML (no selector) can use chrome.scripting.executeScript
+  // instead of the content script. This works on about:blank and avoids the
+  // "Receiving end does not exist" error from aiscope's initial observe phase.
+  if (command.target === 'html' && !command.selectors) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => document.documentElement.outerHTML,
+      });
+      const value = results?.[0]?.result ?? '';
+      return { kind: 'result', commandId: command.commandId, ok: true, value };
+    } catch {
+      // about:blank or restricted page — return minimal HTML so aiscope can proceed
+      return {
+        kind: 'result',
+        commandId: command.commandId,
+        ok: true,
+        value: '<html><head></head><body></body></html>',
+      };
+    }
+  }
+
   const domOp = (): Promise<DomReply> =>
     new Promise((resolve, reject) => {
       chrome.tabs.sendMessage(
