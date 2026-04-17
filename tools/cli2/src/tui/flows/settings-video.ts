@@ -1,6 +1,7 @@
 import * as p from '@clack/prompts';
 import { ConfigService, type VideoConfig } from '../../config/config.service.js';
 import { resolveVideo } from '../../runner/paths.js';
+import { asTrimmedString } from '../helpers.js';
 
 export async function runSettingsVideoFlow(configService: ConfigService): Promise<void> {
   const cfg = await configService.load();
@@ -45,19 +46,19 @@ export async function runSettingsVideoFlow(configService: ConfigService): Promis
       const w = await p.text({
         message: 'Width (pixels):',
         initialValue: String(current.width),
-        validate: (v) => (isNaN(parseInt(v, 10)) ? 'Must be a number' : undefined),
+        validate: (v) => (isNaN(parseInt(asTrimmedString(v), 10)) ? 'Must be a number' : undefined),
       });
       if (p.isCancel(w)) return;
 
       const h = await p.text({
         message: 'Height (pixels):',
         initialValue: String(current.height),
-        validate: (v) => (isNaN(parseInt(v, 10)) ? 'Must be a number' : undefined),
+        validate: (v) => (isNaN(parseInt(asTrimmedString(v), 10)) ? 'Must be a number' : undefined),
       });
       if (p.isCancel(h)) return;
 
-      update.width = parseInt(w as string, 10);
-      update.height = parseInt(h as string, 10);
+      update.width = parseInt(asTrimmedString(w), 10);
+      update.height = parseInt(asTrimmedString(h), 10);
     }
     // 'current' preset: no dimension changes needed
   }

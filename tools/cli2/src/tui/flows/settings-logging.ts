@@ -1,6 +1,7 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { ConfigService, type LoggingConfig, type LogLevel } from '../../config/config.service.js';
+import { asTrimmedString } from '../helpers.js';
 
 const LEVELS: Array<{ value: LogLevel; label: string; hint: string }> = [
   { value: 'trace', label: 'trace', hint: 'everything — very verbose' },
@@ -50,7 +51,7 @@ export async function runSettingsLoggingFlow(configService: ConfigService): Prom
       placeholder: '~/.portalflow/portalflow.log',
     });
     if (p.isCancel(filePrompt)) return;
-    const raw = filePrompt.trim();
+    const raw = asTrimmedString(filePrompt);
     file = raw.startsWith('~')
       ? raw.replace(/^~/, process.env['HOME'] ?? '~')
       : raw;

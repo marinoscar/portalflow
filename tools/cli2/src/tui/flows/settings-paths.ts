@@ -1,6 +1,7 @@
 import * as p from '@clack/prompts';
 import { ConfigService, type PathsConfig } from '../../config/config.service.js';
 import { resolvePaths, DEFAULT_PATHS, type EffectivePaths } from '../../runner/paths.js';
+import { asTrimmedString } from '../helpers.js';
 
 export async function runSettingsPathsFlow(configService: ConfigService): Promise<void> {
   const cfg = await configService.load();
@@ -43,7 +44,7 @@ export async function runSettingsPathsFlow(configService: ConfigService): Promis
       placeholder: DEFAULT_PATHS[key],
     });
     if (p.isCancel(input)) return;
-    update[key] = (input as string).trim();
+    update[key] = asTrimmedString(input);
   }
 
   await configService.setPaths(update);
