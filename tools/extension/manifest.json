@@ -34,7 +34,10 @@
     "downloads",
     "activeTab",
     "tabs",
-    "webNavigation"
+    "webNavigation",
+    "webRequest",
+    "offscreen",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -45,6 +48,18 @@
       "js": ["src/content/recorder.ts"],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/runner-content.ts"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/offscreen/index.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

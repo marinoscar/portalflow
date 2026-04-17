@@ -507,4 +507,18 @@ First check the log file for which log lines DID appear vs which are missing. Th
 
 ---
 
+### Update (2026-04-15): Extension mode shipped
+
+Extension mode is now the recommended transport for PortalFlow browser automation. It is available via the new `portalflow2` CLI at `tools/cli2/`, backed by the existing PortalFlow extension at `tools/extension/` running in bi-modal (record + run) configuration.
+
+- **Package**: `@portalflow/cli2`, bin `portalflow2`
+- **Protocol**: WebSocket on `ws://127.0.0.1:7667`, runner protocol version `2`
+- **Install**: see [`tools/cli2/README.md`](../tools/cli2/README.md)
+- **Supported step types**: all 11 from `AutomationSchema` — navigate, interact (click/type/select/check/uncheck/hover/focus), wait (selector/navigation/delay/network_idle), extract (text/attribute/html/url/title/screenshot), download, tool_call, condition, loop, call, goto, aiscope.
+- **Known v1 gaps**: file uploads, cross-origin iframes, drag-and-drop, full-page screenshots, headless operation, signed CRX distribution, concurrent runs, mid-step reconnect recovery. See the cli2 README's "Known limitations" section.
+
+`tools/cli/` (the Playwright-based CLI) remains functional for users who need it but is scheduled for removal once cli2 has been in active use for a few releases. The persistent-mode failure modes documented in §2.2–2.5 are not fixed — they are now **avoided entirely** because cli2 never launches Chrome with automation flags.
+
+---
+
 *This document is the memory of what we've tried. Update it every time something new is learned.*
