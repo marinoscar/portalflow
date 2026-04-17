@@ -10,6 +10,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        offscreen: 'src/offscreen/index.html',
+      },
+    },
   },
   server: {
     port: 5173,
