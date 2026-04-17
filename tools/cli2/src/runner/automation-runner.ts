@@ -446,6 +446,7 @@ export class AutomationRunner {
       llmService,
       functionsMap,
       presenter,
+      automation.inputs,
     );
 
     // ------------------------------------------------------------------

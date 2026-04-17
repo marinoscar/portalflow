@@ -1,6 +1,6 @@
 {
   "name": "@portalflow/cli2",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "PortalFlow CLI v2 — executes browser automations via Chrome extension transport",
   "type": "module",
   "bin": {

@@ -56,9 +56,9 @@ Respond with JSON only, no markdown fences:
 
 Respond with JSON only, no markdown fences, matching:
 
-{"action": "<name>", "selector": "<css selector if applicable>", "value": "<input text / URL / duration / scroll direction>", "reasoning": "short explanation"}
+{"action": "<name>", "selector": "<css selector if applicable>", "value": "<input text / URL / duration / scroll direction>", "inputRef": "<input name>", "reasoning": "short explanation"}
 
-Only include "selector" when the chosen action takes one (click, type, select, check, uncheck, hover, focus). Only include "value" when the chosen action needs one (type, select, navigate, wait, scroll). For "done" or a bare action, omit the fields you don't need.
+Only include "selector" when the chosen action takes one (click, type, select, check, uncheck, hover, focus). Only include "value" when the chosen action needs one (type, select, navigate, wait, scroll). Only include "inputRef" for type actions that reference an available input instead of a literal value — when inputRef is present, "value" is ignored. For "done" or a bare action, omit the fields you don't need.
 
 ## Allowed action semantics
 
@@ -72,5 +72,30 @@ Only include "selector" when the chosen action takes one (click, type, select, c
 - focus      — selector: focuses the element without typing.
 - scroll     — value: "up" | "down" | "top" | "bottom". No selector.
 - wait       — value: milliseconds as a string (e.g. "1500"). Use for transitions and mid-load states.
-- done       — no selector or value. Signals that you believe the goal is reached.`,
+- tool_call  — value: "<tool>:<command>". Invokes an external tool. Result is stored as a context variable for subsequent inputRef use.
+- done       — no selector or value. Signals that you believe the goal is reached.
+
+## Using inputRef for secrets
+
+When available inputs are listed in the query, you can reference them by name instead of typing literal values. For type actions, use "inputRef" instead of "value":
+
+{"action": "type", "selector": "#password", "inputRef": "password", "reasoning": "typing the password from the vault"}
+
+The runner resolves the inputRef to the actual value from the execution context. NEVER put the actual secret value in the "value" field — always use inputRef for inputs marked as "secret".
+
+For non-secret inputs (type: "string"), you may use either "value" (literal) or "inputRef" (reference). Prefer inputRef when the input is explicitly listed as available.
+
+## tool_call action
+
+When you need to invoke an external tool (e.g. smscli to retrieve an OTP code), emit:
+
+{"action": "tool_call", "value": "<tool>:<command>", "reasoning": "retrieving OTP via smscli"}
+
+For example: {"action": "tool_call", "value": "smscli:get-otp", "reasoning": "fetching OTP code for 2FA"}
+
+The runner executes the tool, stores the result as a context variable named <tool>_<command>_result (e.g. smscli_get_otp_result), and on the next iteration you can reference it via inputRef:
+
+{"action": "type", "selector": "#otp-input", "inputRef": "smscli_get_otp_result", "reasoning": "typing the OTP code received from smscli"}
+
+Note: tool_call is only available when it appears in the allowed actions list. If you explicitly set allowedActions on an aiscope step and want tool_call, you must include it in that list.`,
 };

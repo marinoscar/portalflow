@@ -299,7 +299,7 @@ Question: ${question}`;
    * screenshot. Parses the model's JSON response into a NextActionResult.
    */
   async decideNextAction(query: NextActionQuery): Promise<NextActionResult> {
-    const { goal, pageContext, allowedActions, recentHistory } = query;
+    const { goal, pageContext, allowedActions, recentHistory, availableInputs } = query;
 
     const historyBlock =
       recentHistory.length > 0
@@ -308,13 +308,23 @@ Question: ${question}`;
               const head = `[#${h.iteration}] action=${h.action}`;
               const sel = h.selector ? ` selector="${h.selector}"` : '';
               const val = h.value ? ` value="${h.value}"` : '';
+              const ref = h.inputRef ? ` inputRef="${h.inputRef}"` : '';
+              const toolRes = h.toolResult ? ` toolResult="${h.toolResult}"` : '';
               const outcome = h.succeeded
                 ? ' → succeeded'
                 : ` → FAILED: ${h.error ?? '(no message)'}`;
-              return `${head}${sel}${val}${outcome}`;
+              return `${head}${sel}${val}${ref}${toolRes}${outcome}`;
             })
             .join('\n')
         : '(no prior actions in this aiscope session)';
+
+    // Build the available inputs table only when inputs are declared.
+    // Values are NEVER included — only names and types so the LLM knows
+    // what it can reference via inputRef.
+    const availableInputsBlock =
+      availableInputs && availableInputs.length > 0
+        ? `\n## Available inputs\n\nThe following inputs are available for use with inputRef in type actions:\n\n| Name | Type | Description |\n|------|------|-------------|\n${availableInputs.map((i) => `| ${i.name} | ${i.type} | ${i.description ?? ''} |`).join('\n')}\n\nFor inputs marked "secret", ALWAYS use inputRef — never put the actual value in your response.`
+        : '';
 
     const userText = `## Goal
 ${goal}
@@ -323,7 +333,7 @@ ${goal}
 ${allowedActions.join(', ')}
 
 ## Recent action history (oldest first)
-${historyBlock}
+${historyBlock}${availableInputsBlock}
 
 ## Current page
 URL: ${pageContext.url}
