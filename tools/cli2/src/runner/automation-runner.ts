@@ -204,18 +204,25 @@ export class AutomationRunner {
               );
               break;
             }
-            // Primary variable: the JSON envelope so templates can still
-            // reference `{{creds}}` for inspection.
-            resolved = vaultResult.output;
             // Explode every field into <inputName>_<key> context variables.
             if (vaultResult.fields) {
               for (const [k, v] of Object.entries(vaultResult.fields)) {
                 context.setVariable(`${input.name}_${k}`, v);
               }
+              // If the secret has a field matching the input name, use that
+              // single value. E.g. input.name === 'password' and the vault
+              // returns {username, password} → resolved = fields.password.
+              if (input.name in vaultResult.fields) {
+                resolved = vaultResult.fields[input.name];
+              } else {
+                resolved = vaultResult.output;
+              }
               logger.info(
-                { input: input.name, fields: Object.keys(vaultResult.fields) },
+                { input: input.name, fields: Object.keys(vaultResult.fields), matched: input.name in vaultResult.fields },
                 'Resolved vaultcli secret with multi-field exploding',
               );
+            } else {
+              resolved = vaultResult.output;
             }
           } catch (err) {
             logger.warn({ input: input.name, err }, 'vaultcli call threw an error');
