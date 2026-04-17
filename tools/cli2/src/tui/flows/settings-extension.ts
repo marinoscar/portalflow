@@ -20,6 +20,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ConfigService, ExtensionConfig } from '../../config/config.service.js';
 import { defaultExtensionConfig } from '../../config/config.service.js';
+import { asTrimmedString } from '../helpers.js';
 
 const DEFAULT_PROFILE_DIR = join(homedir(), '.portalflow', 'chrome-profile');
 
@@ -45,7 +46,7 @@ export async function runExtensionSettings(configService: ConfigService): Promis
     message: 'Extension host (WebSocket listen address):',
     initialValue: current.host,
     placeholder: '127.0.0.1',
-    validate: (v) => (v.trim() === '' ? 'Host is required' : undefined),
+    validate: (v) => (asTrimmedString(v) === '' ? 'Host is required' : undefined),
   });
   if (p.isCancel(hostInput)) {
     p.log.info('Cancelled. No changes saved.');
@@ -58,7 +59,7 @@ export async function runExtensionSettings(configService: ConfigService): Promis
     initialValue: String(current.port),
     placeholder: '7667',
     validate: (v) => {
-      const n = parseInt(v, 10);
+      const n = parseInt(asTrimmedString(v), 10);
       if (isNaN(n) || n < 1024 || n > 65535) return 'Port must be a number between 1024 and 65535';
       return undefined;
     },
@@ -97,13 +98,13 @@ export async function runExtensionSettings(configService: ConfigService): Promis
       message: 'Dedicated Chrome profile directory:',
       initialValue: current.profileDir ?? DEFAULT_PROFILE_DIR,
       placeholder: DEFAULT_PROFILE_DIR,
-      validate: (v) => (v.trim() === '' ? 'Directory path is required' : undefined),
+      validate: (v) => (asTrimmedString(v) === '' ? 'Directory path is required' : undefined),
     });
     if (p.isCancel(dirInput)) {
       p.log.info('Cancelled. No changes saved.');
       return;
     }
-    profileDir = (dirInput as string).trim();
+    profileDir = asTrimmedString(dirInput);
     // Create the directory so Chrome can use it immediately
     try {
       mkdirSync(profileDir, { recursive: true });
@@ -134,15 +135,21 @@ export async function runExtensionSettings(configService: ConfigService): Promis
   }
 
   // Build and persist update
+  const portStr = asTrimmedString(portInput);
+  const portNum = portStr === '' ? current.port : parseInt(portStr, 10);
+  const safePort = Number.isFinite(portNum) && portNum >= 1024 && portNum <= 65535
+    ? portNum
+    : current.port;
+
   const update: Partial<ExtensionConfig> = {
-    host: (hostInput as string).trim(),
-    port: parseInt(portInput as string, 10),
+    host: asTrimmedString(hostInput),
+    port: safePort,
     profileMode: modeChoice,
     profileDir: modeChoice === 'dedicated' ? profileDir : undefined,
     closeWindowOnFinish: closeChoice as boolean,
   };
 
-  const binaryStr = (binaryInput as string).trim();
+  const binaryStr = asTrimmedString(binaryInput);
   if (binaryStr.length > 0) {
     update.chromeBinary = binaryStr;
   } else {

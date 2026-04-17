@@ -1,6 +1,22 @@
 // Shared helpers for the provider TUI
 import { getPresetById } from '../llm/provider-kinds.js';
 
+/**
+ * Coerce a @clack/prompts text-prompt return value to a trimmed string.
+ *
+ * `p.text()` returns `undefined` when the user clears the input to empty
+ * (the `initialValue` is visual only — the returned value is NOT the
+ * placeholder or the initial value when the field is empty). Casting to
+ * `string` via `as string` and then calling `.trim()` crashes at runtime.
+ *
+ * The symbol case covers clack's cancellation sentinel; callers should already
+ * have guarded against cancellation with `p.isCancel()` before reaching
+ * `asTrimmedString`, so treating a symbol as '' is a safe defensive fallback.
+ */
+export function asTrimmedString(v: string | symbol | undefined): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
 export function providerDisplayName(name: string): string {
   const preset = getPresetById(name);
   if (preset) return preset.label;
