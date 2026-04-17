@@ -46,6 +46,7 @@ const DEFAULT_AISCOPE_ACTIONS = [
   'focus',
   'scroll',
   'wait',
+  'tool_call',
   'done',
 ] as const;
 
@@ -1216,6 +1217,11 @@ export class StepExecutor {
         } else {
           historyEntry.value = decision.value;
         }
+        if (decision.action === 'tool_call' && decision.value) {
+          const [toolName, ...cmdParts] = decision.value.split(':');
+          const command = cmdParts.join(':');
+          historyEntry.toolResult = `${toolName}_${command.replace(/[^a-zA-Z0-9]/g, '_')}_result`;
+        }
         history.push(historyEntry);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -1321,6 +1327,40 @@ export class StepExecutor {
           );
         }
         await this.pageClient.delay(ms);
+        return;
+      }
+      case 'tool_call': {
+        if (!value) throw new Error('tool_call requires a value in format "tool:command"');
+        const colonIdx = value.indexOf(':');
+        if (colonIdx < 1) {
+          throw new Error(
+            `tool_call value must be "tool:command" — got "${value}"`,
+          );
+        }
+        const toolName = value.slice(0, colonIdx);
+        const command = value.slice(colonIdx + 1);
+        if (!command) {
+          throw new Error(
+            `tool_call value must be "tool:command" — got "${value}"`,
+          );
+        }
+        const tool = this.tools.get(toolName);
+        if (!tool) {
+          const available = [...this.tools.keys()].join(', ') || 'none';
+          throw new Error(
+            `tool_call: unknown tool "${toolName}". Available: ${available}`,
+          );
+        }
+        const toolResult = await tool.execute(command, decision.toolCall?.args ?? {});
+        if (!toolResult.success) {
+          throw new Error(
+            `tool_call ${toolName}:${command} failed: ${toolResult.error ?? 'unknown error'}`,
+          );
+        }
+        // Store result in context so the LLM can reference it via inputRef
+        // on the next iteration. Variable name is deterministic and safe.
+        const resultVarName = `${toolName}_${command.replace(/[^a-zA-Z0-9]/g, '_')}_result`;
+        this.context.setVariable(resultVarName, toolResult.output);
         return;
       }
       default:

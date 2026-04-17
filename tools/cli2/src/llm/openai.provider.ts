@@ -297,10 +297,11 @@ Question: ${question}`;
               const sel = h.selector ? ` selector="${h.selector}"` : '';
               const val = h.value ? ` value="${h.value}"` : '';
               const ref = h.inputRef ? ` inputRef="${h.inputRef}"` : '';
+              const toolRes = h.toolResult ? ` toolResult="${h.toolResult}"` : '';
               const outcome = h.succeeded
                 ? ' → succeeded'
                 : ` → FAILED: ${h.error ?? '(no message)'}`;
-              return `${head}${sel}${val}${ref}${outcome}`;
+              return `${head}${sel}${val}${ref}${toolRes}${outcome}`;
             })
             .join('\n')
         : '(no prior actions in this aiscope session)';

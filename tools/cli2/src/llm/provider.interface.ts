@@ -61,6 +61,8 @@ export interface AgentActionHistoryEntry {
   value?: string;
   /** For type actions dispatched via inputRef — records the ref name, not the actual value. */
   inputRef?: string;
+  /** For tool_call actions — records the context variable name where the result was stored. */
+  toolResult?: string;
   succeeded: boolean;
   error?: string;
 }
@@ -110,6 +112,16 @@ export interface NextActionResult {
    * secret values are never included in LLM messages.
    */
   inputRef?: string;
+  /**
+   * For `tool_call` actions — carries the parsed tool and command along with
+   * optional args. Populated by the runner after parsing `value` ("tool:command").
+   * The LLM itself never needs to fill this field.
+   */
+  toolCall?: {
+    tool: string;
+    command: string;
+    args?: Record<string, string>;
+  };
   reasoning: string;
 }
 
