@@ -9,6 +9,7 @@
  *   - port (default: 7667, validated 1024–65535)
  *   - profileMode (dedicated / real)
  *   - profileDir (only when dedicated, default: ~/.portalflow/chrome-profile)
+ *   - realProfile (only when real, optional sub-profile selection)
  *   - closeWindowOnFinish (yes / no)
  *   - chromeBinary (optional override; empty = auto-detect)
  */
@@ -21,12 +22,18 @@ import { join } from 'node:path';
 import type { ConfigService, ExtensionConfig } from '../../config/config.service.js';
 import { defaultExtensionConfig } from '../../config/config.service.js';
 import { asTrimmedString } from '../helpers.js';
+import { selectRealProfile } from './profile-prompt.js';
 
 const DEFAULT_PROFILE_DIR = join(homedir(), '.portalflow', 'chrome-profile');
 
 export async function runExtensionSettings(configService: ConfigService): Promise<void> {
   const cfg = await configService.load();
   const current: ExtensionConfig = cfg.extension ?? defaultExtensionConfig();
+
+  // Format the real-profile summary for display
+  const realProfileDisplay = current.realProfile
+    ? `${current.realProfile.displayName} (${current.realProfile.profileName}) — ${current.realProfile.browser}`
+    : pc.dim('(auto)');
 
   // Show current values
   p.note(
@@ -35,6 +42,7 @@ export async function runExtensionSettings(configService: ConfigService): Promis
       `Port:               ${current.port}`,
       `Profile mode:       ${current.profileMode}`,
       `Profile dir:        ${current.profileDir ?? pc.dim('(n/a)')}`,
+      `Real profile:       ${realProfileDisplay}`,
       `Close on finish:    ${current.closeWindowOnFinish ? 'yes' : 'no'}`,
       `Chrome binary:      ${current.chromeBinary ?? pc.dim('(auto-detect)')}`,
     ].join('\n'),
@@ -82,7 +90,7 @@ export async function runExtensionSettings(configService: ConfigService): Promis
       {
         value: 'real' as const,
         label: 'Real profile',
-        hint: 'Your default Chrome profile — extension must be pre-installed',
+        hint: 'Your existing Chrome profile — extension must be pre-installed',
       },
     ],
   });
@@ -110,6 +118,37 @@ export async function runExtensionSettings(configService: ConfigService): Promis
       mkdirSync(profileDir, { recursive: true });
     } catch {
       // Non-fatal — Chrome will create it if needed
+    }
+  }
+
+  // --- realProfile (only for real mode) ---
+  let realProfileSelection = current.realProfile;
+  if (modeChoice === 'real') {
+    const switchingToReal = current.profileMode !== 'real';
+
+    if (switchingToReal) {
+      // Switching from dedicated/unset → real: always run the selector
+      realProfileSelection = await selectRealProfile();
+    } else {
+      // Already in real mode: offer to keep or re-select
+      const hasExistingProfile = Boolean(current.realProfile);
+      if (hasExistingProfile) {
+        const keepProfile = await p.confirm({
+          message: `Keep profile '${current.realProfile!.displayName}' (${current.realProfile!.profileName})?`,
+          initialValue: true,
+        });
+        if (p.isCancel(keepProfile)) {
+          p.log.info('Cancelled. No changes saved.');
+          return;
+        }
+        if (!keepProfile) {
+          realProfileSelection = await selectRealProfile();
+        }
+        // else: keep existing realProfile — realProfileSelection unchanged
+      } else {
+        // Was real mode with no selection; run the selector
+        realProfileSelection = await selectRealProfile();
+      }
     }
   }
 
@@ -146,6 +185,7 @@ export async function runExtensionSettings(configService: ConfigService): Promis
     port: safePort,
     profileMode: modeChoice,
     profileDir: modeChoice === 'dedicated' ? profileDir : undefined,
+    realProfile: modeChoice === 'real' ? realProfileSelection : undefined,
     closeWindowOnFinish: closeChoice as boolean,
   };
 
