@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import type { ClearBrowsingDataRange } from '../browser/protocol.js';
 import { AutomationSchema } from '@portalflow/schema';
 import type { Automation, FunctionDefinition } from '@portalflow/schema';
 import { ExtensionHost } from '../browser/extension-host.js';
@@ -18,7 +19,7 @@ import { RunPresenter } from './run-presenter.js';
 import { ConfigService } from '../config/config.service.js';
 import { defaultExtensionConfig } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from './paths.js';
-import { launchChromeAndWaitForExtension } from '../browser/chrome-launcher.js';
+import { launchChromeAndWaitForExtension, killExistingChrome } from '../browser/chrome-launcher.js';
 import { CheckpointStore, snapshotRunContext, restoreRunContext } from './checkpoint.js';
 
 export interface RunOptions {
@@ -55,6 +56,17 @@ export interface RunOptions {
    * ExtensionHost (i.e., `extensionHost` is not supplied). Default: 30_000.
    */
   extensionConnectTimeoutMs?: number;
+  /**
+   * When true, kill all existing Chrome/Chromium processes before launching.
+   * Only relevant when the runner starts its own Chrome instance.
+   */
+  killChrome?: boolean;
+  /**
+   * Clear browsing history and cache for this time range before steps execute.
+   * Happens after the extension handshake but before the first step.
+   * 'none' (default) skips clearing.
+   */
+  clearHistory?: ClearBrowsingDataRange;
 }
 
 /**
@@ -346,6 +358,10 @@ export class AutomationRunner {
       // this to a real value before production runs.
       if (extensionCfg.profileMode === 'dedicated' || extensionCfg.profileMode === 'real') {
         try {
+          if (options?.killChrome) {
+            logger.info('Killing existing Chrome instances before launch...');
+            await killExistingChrome(logger);
+          }
           await launchChromeAndWaitForExtension(extensionHost, extensionCfg, logger);
           logger.info({ port: extensionHost.port }, 'Chrome launched and extension connected');
         } catch (err) {
@@ -364,6 +380,16 @@ export class AutomationRunner {
         );
         await waitForExtensionConnection(extensionHost, connectTimeoutMs);
         logger.info({ port: extensionHost.port }, 'Chrome extension connected (manual mode)');
+      }
+
+      // Clear browsing data after handshake but before opening the run window.
+      if (options?.clearHistory && options.clearHistory !== 'none') {
+        try {
+          await extensionHost.clearBrowsingData(options.clearHistory);
+          logger.info({ range: options.clearHistory }, 'Cleared browsing data');
+        } catch (err) {
+          logger.warn({ err, range: options.clearHistory }, 'clearBrowsingData failed (non-fatal)');
+        }
       }
 
       // Open the dedicated automation window now that Chrome is connected.

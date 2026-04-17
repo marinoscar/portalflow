@@ -192,6 +192,35 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
     return;
   }
 
+  // 6a. Ask about killing existing Chrome instances
+  const killChrome = await p.confirm({
+    message: 'Close all existing Chrome instances before launching?',
+    initialValue: false,
+  });
+  if (p.isCancel(killChrome)) {
+    p.log.info('Run cancelled.');
+    if (!options.nested) p.outro('');
+    return;
+  }
+
+  // 6b. Ask about clearing browsing history/cache
+  const clearHistory = await p.select({
+    message: 'Clear browsing history and cache before running?',
+    options: [
+      { value: 'none', label: 'None — keep browsing data as is' },
+      { value: 'last15min', label: 'Last 15 minutes' },
+      { value: 'last1hour', label: 'Last hour' },
+      { value: 'last24hour', label: 'Last 24 hours' },
+      { value: 'last7days', label: 'Last 7 days' },
+      { value: 'all', label: 'All — clear everything' },
+    ],
+  });
+  if (p.isCancel(clearHistory)) {
+    p.log.info('Run cancelled.');
+    if (!options.nested) p.outro('');
+    return;
+  }
+
   // 7. Final confirmation
   const start = await p.confirm({
     message: `Start running ${pc.cyan(automation.name)}?`,
@@ -220,11 +249,17 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
   p.log.info(pc.dim('Starting extension host and launching Chrome...'));
 
   const { ExtensionHost } = await import('../../browser/extension-host.js');
-  const { launchChromeAndWaitForExtension } = await import('../../browser/chrome-launcher.js');
+  const { launchChromeAndWaitForExtension, killExistingChrome } = await import('../../browser/chrome-launcher.js');
   const pino = await import('pino');
 
   // Use a silent logger for the launch phase — the TUI owns stdout
   const silentLogger = pino.default({ level: 'silent' });
+
+  // Kill existing Chrome instances if requested
+  if (killChrome) {
+    p.log.step('Closing existing Chrome instances...');
+    await killExistingChrome(silentLogger);
+  }
 
   let host;
   try {
@@ -252,6 +287,16 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
     await host.close().catch(() => undefined);
     if (!options.nested) p.outro('');
     return;
+  }
+
+  // Clear browsing data if requested (after handshake, before steps execute)
+  if (clearHistory && clearHistory !== 'none') {
+    try {
+      await host.clearBrowsingData(clearHistory as import('../../browser/protocol.js').ClearBrowsingDataRange);
+      p.log.info(`Cleared browsing data: ${clearHistory}`);
+    } catch (err) {
+      p.log.warn(`clearBrowsingData failed (non-fatal): ${(err as Error).message}`);
+    }
   }
 
   // 10. Execute via AutomationRunner (reuse the already-started host)

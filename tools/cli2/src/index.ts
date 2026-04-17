@@ -31,7 +31,7 @@ program
 program
   .name('portalflow2')
   .description('PortalFlow CLI v2 — executes browser automations via Chrome extension transport')
-  .version('1.0.6')
+  .version('1.0.7')
   .addHelpText('after', helpText.topLevelHelpText())
   .action(async () => {
     const { runMainTui } = await import('./tui/main-tui.js');
@@ -71,6 +71,12 @@ program
     'Print the full pino log stream to stdout. Useful for debugging the runner itself.',
     false,
   )
+  .option('--kill-chrome', 'Close all existing Chrome instances before launching', false)
+  .option(
+    '--clear-history <range>',
+    'Clear browsing history and cache before running. Ranges: none, last15min, last1hour, last24hour, last7days, all',
+    'none',
+  )
   .addHelpText('after', helpText.runHelpText())
   .action(async (file: string | undefined, opts: {
     video?: boolean;
@@ -83,6 +89,8 @@ program
     logLevel?: string;
     stealth?: boolean;
     verbose?: boolean;
+    killChrome?: boolean;
+    clearHistory?: string;
   }) => {
     if (!file) {
       const { runRunFlow } = await import('./tui/flows/run.js');
@@ -137,6 +145,8 @@ program
         inputs: inputs.size > 0 ? inputs : undefined,
         logLevel: opts.logLevel,
         verbose: opts.verbose,
+        killChrome: opts.killChrome,
+        clearHistory: opts.clearHistory as import('./browser/protocol.js').ClearBrowsingDataRange | undefined,
       });
 
       if (!result.success) {
