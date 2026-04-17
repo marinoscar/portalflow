@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type pino from 'pino';
 import type { ExtensionHost } from './extension-host.js';
-import type { ExtensionConfig } from '../config/config.service.js';
+import type { ExtensionConfig, RealProfileSelection } from '../config/config.service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers for binary resolution
@@ -122,6 +122,12 @@ export interface LaunchChromeOptions {
   profileMode: 'dedicated' | 'real';
   /** Required when profileMode === 'dedicated'. */
   profileDir?: string;
+  /**
+   * When profileMode is 'real' and the user selected a specific sub-profile,
+   * provide it here so we can pass --user-data-dir + --profile-directory.
+   * When absent, Chrome picks its default profile (previous behaviour).
+   */
+  realProfile?: RealProfileSelection;
 }
 
 /**
@@ -139,8 +145,17 @@ export function launchChrome(opts: LaunchChromeOptions): ChildProcess {
       throw new Error('launchChrome: profileDir is required when profileMode is "dedicated"');
     }
     args.push(`--user-data-dir=${opts.profileDir}`);
+  } else if (opts.profileMode === 'real' && opts.realProfile) {
+    // Real mode with a specific sub-profile selected by the user.
+    // --user-data-dir targets the browser's installation data dir.
+    // --profile-directory picks the sub-folder within that dir.
+    // The singleton-forwarding path works fine here because cli2 doesn't
+    // use CDP — the extension opens the WebSocket from inside Chrome.
+    args.push(`--user-data-dir=${opts.realProfile.userDataDir}`);
+    args.push(`--profile-directory=${opts.realProfile.profileName}`);
   }
-  // For 'real' mode: no --user-data-dir. Chrome uses system default profile.
+  // else: real mode without a selection → no profile flags.
+  // Chrome opens in whatever profile it considers "default".
   // The user must have already installed the extension in that profile via
   // chrome://extensions → Load unpacked.
 
@@ -175,11 +190,16 @@ function resolveExtensionDistPath(): string {
  * Waits for the ExtensionHost to emit a 'connected' event within `timeoutMs`.
  * If the timeout fires, throws an error with a detailed troubleshooting checklist.
  *
+ * When `realProfile` is provided (real-mode with a specific sub-profile), an
+ * additional paragraph is appended to the error pointing the user to the exact
+ * profile path where the extension must be installed.
+ *
  * This error message is the primary onboarding signal — keep it accurate.
  */
 export function waitForExtensionHandshake(
   host: ExtensionHost,
   timeoutMs: number,
+  realProfile?: RealProfileSelection,
 ): Promise<void> {
   if (host.isConnected()) return Promise.resolve();
 
@@ -187,6 +207,15 @@ export function waitForExtensionHandshake(
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      const realProfileNote = realProfile
+        ? `\n` +
+          `Extra check for real-profile mode:\n` +
+          `  → The PortalFlow extension must be loaded in the "${realProfile.displayName}" profile\n` +
+          `    (at ${realProfile.userDataDir}/${realProfile.profileName}/Extensions/...).\n` +
+          `  → Switch to that profile in Chrome's profile picker and reload\n` +
+          `    chrome://extensions → Load unpacked to confirm it's installed there.\n`
+        : '';
+
       reject(
         new Error(
           `Extension did not connect within 30 seconds.\n` +
@@ -203,7 +232,8 @@ export function waitForExtensionHandshake(
           `  4. Is another process holding port 7667?\n` +
           `     → Kill the other process or set extension.port in ~/.portalflow/config.json to a free port.\n` +
           `\n` +
-          `See tools/cli2/README.md for full setup instructions.`,
+          `See tools/cli2/README.md for full setup instructions.\n` +
+          realProfileNote,
         ),
       );
     }, timeoutMs);
@@ -262,6 +292,7 @@ export async function launchChromeAndWaitForExtension(
     binary,
     profileMode,
     profileDir: config.profileDir,
+    realProfile: config.realProfile,
   });
   logger.info({ pid: chromeProcess.pid, profileMode }, 'Chrome launched');
 
@@ -270,7 +301,7 @@ export async function launchChromeAndWaitForExtension(
     { timeoutMs },
     'Waiting for PortalFlow extension to connect...',
   );
-  await waitForExtensionHandshake(host, timeoutMs);
+  await waitForExtensionHandshake(host, timeoutMs, config.realProfile);
   logger.info('PortalFlow extension connected');
 
   return { chromeProcess, binary, profileMode };
