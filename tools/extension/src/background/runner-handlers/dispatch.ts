@@ -19,6 +19,7 @@ import {
 } from './interact-extended';
 import { handleOpenWindow } from './open-window';
 import { handleCloseWindow } from './close-window';
+import { clearBrowsingData } from './clear-browsing-data';
 import { getRunTabId } from '../run-window';
 
 // ---------------------------------------------------------------------------
@@ -231,6 +232,9 @@ export async function handleRunnerCommand(
 
     case 'closeWindow':
       return handleCloseWindow(command);
+
+    case 'clearBrowsingData':
+      return withActiveTab((tabId) => clearBrowsingData(command, tabId));
 
     default:
       return notImplemented((command as { commandId: string }).commandId);

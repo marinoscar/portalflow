@@ -25,6 +25,52 @@ import type { ExtensionHost } from './extension-host.js';
 import type { ExtensionConfig, RealProfileSelection } from '../config/config.service.js';
 
 // ---------------------------------------------------------------------------
+// killExistingChrome
+// ---------------------------------------------------------------------------
+
+/**
+ * Kills all running Chrome/Chromium processes on the current platform.
+ *
+ * This is a best-effort operation — if no matching process is found (pkill
+ * exits with code 1 on Linux/macOS) the error is swallowed silently. After
+ * killing, a 1.5 s pause lets processes fully exit and release file locks
+ * before Chrome is relaunched.
+ *
+ * Only supported on linux, darwin, and win32. Other platforms are skipped
+ * with a warning.
+ */
+export async function killExistingChrome(logger: pino.Logger): Promise<void> {
+  const platform = process.platform;
+  let cmd: string;
+  let args: string[];
+
+  if (platform === 'linux') {
+    cmd = 'pkill';
+    args = ['-f', 'google-chrome|chromium-browser|chromium'];
+  } else if (platform === 'darwin') {
+    cmd = 'pkill';
+    args = ['-f', 'Google Chrome|Chromium'];
+  } else if (platform === 'win32') {
+    cmd = 'taskkill';
+    args = ['/IM', 'chrome.exe', '/F'];
+  } else {
+    logger.warn(`killExistingChrome: unsupported platform ${platform}`);
+    return;
+  }
+
+  try {
+    const { execFileSync } = await import('node:child_process');
+    execFileSync(cmd, args, { stdio: 'ignore' });
+    logger.info('Killed existing Chrome instances');
+    // Brief pause to let processes fully exit and release locks
+    await new Promise(r => setTimeout(r, 1500));
+  } catch {
+    // pkill exits with code 1 when no matching process found — that's fine
+    logger.debug('No existing Chrome processes found (or kill failed silently)');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers for binary resolution
 // ---------------------------------------------------------------------------
 

@@ -15,6 +15,8 @@ import type {
   RunnerError,
   OpenWindowCommand,
   CloseWindowCommand,
+  ClearBrowsingDataCommand,
+  ClearBrowsingDataRange,
 } from './protocol.js';
 
 // ---------------------------------------------------------------------------
@@ -527,6 +529,22 @@ export class ExtensionHost extends EventEmitter {
       timeoutMs,
     };
     return this.sendCommand<{ windowId: number; tabId: number }>(command);
+  }
+
+  /**
+   * Clears browsing history and cache for the given time range.
+   * A range of 'none' returns immediately without sending any command.
+   * Does NOT clear cookies or passwords — those are needed for logged-in sessions.
+   */
+  async clearBrowsingData(range: ClearBrowsingDataRange, timeoutMs = 30_000): Promise<void> {
+    if (range === 'none') return;
+    const command: ClearBrowsingDataCommand = {
+      commandId: randomUUID(),
+      type: 'clearBrowsingData',
+      range,
+      timeoutMs,
+    };
+    await this.sendCommand(command);
   }
 
   /**
