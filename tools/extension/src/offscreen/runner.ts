@@ -44,7 +44,13 @@ function connect(attempt = 0): void {
   ws.addEventListener('open', () => {
     log('open');
 
-    const manifest = chrome.runtime.getManifest();
+    // chrome.runtime.getManifest() is not available in offscreen documents
+    let extensionVersion = 'unknown';
+    try {
+      extensionVersion = chrome.runtime.getManifest?.()?.version ?? 'unknown';
+    } catch {
+      // expected in offscreen context
+    }
     const helloMsg: {
       kind: 'event';
       type: 'hello';
@@ -56,7 +62,7 @@ function connect(attempt = 0): void {
       kind: 'event' as const,
       type: 'hello' as const,
       chromeVersion: parseChromeVersion(),
-      extensionVersion: manifest.version,
+      extensionVersion,
       protocolVersion: RUNNER_PROTOCOL_VERSION,
     };
 
