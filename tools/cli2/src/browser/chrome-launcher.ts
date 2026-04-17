@@ -179,8 +179,16 @@ function resolveExtensionDistPath(): string {
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    // From dist/browser/chrome-launcher.js, go up to repo root then into tools/extension/dist
-    return pathResolve(__dirname, '..', '..', '..', '..', 'extension', 'dist');
+    // From dist/browser/chrome-launcher.js, go up to tools/ then into extension/dist
+    const resolved = pathResolve(__dirname, '..', '..', '..', 'extension', 'dist');
+    // Only return the resolved path if the dist actually exists — otherwise the
+    // user sees a misleading path in the error message.
+    if (existsSync(resolved)) return resolved;
+    // Also try the alternative monorepo layout where cli2 and extension are peers
+    // of the current working directory (e.g., running from a source checkout).
+    const cwdFallback = pathResolve(process.cwd(), 'tools', 'extension', 'dist');
+    if (existsSync(cwdFallback)) return cwdFallback;
+    return resolved; // best-effort: still show the resolved path even if missing
   } catch {
     return 'tools/extension/dist';
   }
