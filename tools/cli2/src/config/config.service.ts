@@ -73,12 +73,33 @@ export interface BrowserConfig {
   stealth?: boolean;
 }
 
+/**
+ * Persisted selection of a specific Chrome sub-profile for "real" profile mode.
+ *
+ * When the user picks a profile via the TUI, all four fields are stored so the
+ * settings display can show a human-friendly summary without re-reading the
+ * filesystem.
+ */
+export interface RealProfileSelection {
+  /** Absolute path to Chrome's user data directory, e.g. "/home/user/.config/google-chrome". */
+  userDataDir: string;
+  /** Sub-profile directory name, e.g. "Default" or "Profile 1". */
+  profileName: string;
+  /** Human-readable display name from Chrome's Local State metadata. */
+  displayName: string;
+  /** Friendly browser name, e.g. "Google Chrome". */
+  browser: string;
+}
+
 export interface ExtensionConfig {
   host: string;              // default: '127.0.0.1'
   port: number;              // default: 7667
   chromeBinary?: string;     // optional override; auto-detected otherwise
   profileMode: 'dedicated' | 'real' | 'unset'; // 'unset' triggers first-run prompt
   profileDir?: string;       // when profileMode === 'dedicated'
+  /** When profileMode is 'real', the specific sub-profile to launch into.
+   *  When undefined, Chrome picks its default profile. */
+  realProfile?: RealProfileSelection;
   closeWindowOnFinish: boolean; // default: false
 }
 
