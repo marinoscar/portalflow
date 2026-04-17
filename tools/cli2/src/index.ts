@@ -31,7 +31,7 @@ program
 program
   .name('portalflow2')
   .description('PortalFlow CLI v2 — executes browser automations via Chrome extension transport')
-  .version('1.0.4')
+  .version('1.0.5')
   .addHelpText('after', helpText.topLevelHelpText())
   .action(async () => {
     const { runMainTui } = await import('./tui/main-tui.js');

@@ -1,12 +1,16 @@
+import { createRequire } from 'node:module';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { ConfigService } from '../config/config.service.js';
 import { providerDisplayName } from './helpers.js';
 
+const require = createRequire(import.meta.url);
+const { version } = require('../../package.json') as { version: string };
+
 type MainAction = 'run' | 'validate' | 'provider' | 'settings' | 'exit';
 
 export async function runMainTui(): Promise<void> {
-  p.intro(pc.bgCyan(pc.black(' PortalFlow ')));
+  p.intro(pc.bgCyan(pc.black(` PortalFlow v${version} `)));
 
   // Initial status
   const config = new ConfigService();
