@@ -314,8 +314,9 @@ This is the primary new section introduced by cli2.
 | `host` | `string` | `127.0.0.1` | Bind address for the WebSocket server |
 | `port` | `number` | `7667` | WebSocket port (1024–65535) |
 | `chromeBinary` | `string \| undefined` | auto-detect | Override Chrome binary path. When unset, cli2 probes platform-specific locations (see Troubleshooting). |
-| `profileMode` | `'dedicated' \| 'real' \| 'unset'` | `unset` | `unset` triggers the first-run prompt. `dedicated` uses an isolated profile at `profileDir`. `real` uses Chrome's system default profile. |
+| `profileMode` | `'dedicated' \| 'real' \| 'unset'` | `unset` | `unset` triggers the first-run prompt. `dedicated` uses an isolated profile at `profileDir`. `real` uses a Chrome profile — either the specific one recorded in `realProfile`, or Chrome's default if `realProfile` is undefined. |
 | `profileDir` | `string \| undefined` | `~/.portalflow/chrome-profile/` | Profile directory when `profileMode` is `dedicated` |
+| `realProfile` | `object \| undefined` | `undefined` | Which Chrome sub-profile to launch into when `profileMode` is `real`. Selected interactively via the first-run prompt or `portalflow2 settings extension`; if undefined, Chrome picks its default profile. Object shape: `{ userDataDir, profileName, displayName, browser }`. |
 | `closeWindowOnFinish` | `boolean` | `false` | Close the run window when the automation completes |
 
 ### `paths` section
@@ -676,6 +677,10 @@ The offscreen document dropped while a command was in flight. Rare; suggests the
 ### Extension did not reconnect within 30s — run aborted at step X
 
 The offscreen doc dropped between steps and did not reconnect within the 30-second window. The most common cause is that Chrome was closed or the extension was disabled. Re-run the automation.
+
+### Extension not loaded in the selected profile
+
+Chrome extensions are per-profile: an extension loaded in "Default" is invisible to "Profile 1" and vice versa. When `profileMode` is `real` and you have selected a specific profile via `portalflow2 settings extension`, portalflow2 launches Chrome with `--user-data-dir=<path>` and `--profile-directory=<name>`, which opens Chrome in exactly that profile. If the PortalFlow extension was only installed in a different profile, Chrome will open correctly but the extension will not be present, and the 30-second handshake will time out. Fix: switch to the chosen profile in Chrome's profile picker (the round avatar icon in the top-right corner), then go to `chrome://extensions`, enable Developer mode, click Load unpacked, and select `tools/extension/dist/`. After that re-run `portalflow2`.
 
 ### Yellow "Developer mode extensions" balloon
 

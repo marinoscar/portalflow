@@ -329,6 +329,49 @@ describe('launchChrome', () => {
       }),
     ).toThrow('profileDir is required when profileMode is "dedicated"');
   });
+
+  it('passes --user-data-dir AND --profile-directory when real mode has a realProfile', () => {
+    launchChrome({
+      binary: '/usr/bin/google-chrome',
+      profileMode: 'real',
+      realProfile: {
+        userDataDir: '/home/user/.config/google-chrome',
+        profileName: 'Profile 1',
+        displayName: 'Work',
+        browser: 'Google Chrome',
+      },
+    });
+
+    const [, args] = mockSpawn.mock.calls[0]!;
+    expect(args).toContain('--user-data-dir=/home/user/.config/google-chrome');
+    expect(args).toContain('--profile-directory=Profile 1');
+  });
+
+  it('does NOT pass --user-data-dir or --profile-directory when real mode has no realProfile', () => {
+    launchChrome({
+      binary: '/usr/bin/google-chrome',
+      profileMode: 'real',
+      // realProfile not provided
+    });
+
+    const [, args] = mockSpawn.mock.calls[0]!;
+    const argStr = (args as string[]).join(' ');
+    expect(argStr).not.toContain('--user-data-dir');
+    expect(argStr).not.toContain('--profile-directory');
+  });
+
+  it('passes --user-data-dir only (no --profile-directory) for dedicated mode', () => {
+    launchChrome({
+      binary: '/usr/bin/google-chrome',
+      profileMode: 'dedicated',
+      profileDir: '/home/user/.portalflow/chrome-profile',
+    });
+
+    const [, args] = mockSpawn.mock.calls[0]!;
+    expect(args).toContain('--user-data-dir=/home/user/.portalflow/chrome-profile');
+    const argStr = (args as string[]).join(' ');
+    expect(argStr).not.toContain('--profile-directory');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -398,5 +441,53 @@ describe('waitForExtensionHandshake', () => {
     const promise = waitForExtensionHandshake(host as any, 50);
 
     await expect(promise).rejects.toThrow('npm -w tools/extension run build');
+  });
+
+  it('rejection message includes real-profile extra check when realProfile is provided', async () => {
+    const host = new EventEmitter() as EventEmitter & { isConnected: () => boolean };
+    host.isConnected = () => false;
+
+    const realProfile = {
+      userDataDir: '/home/user/.config/google-chrome',
+      profileName: 'Profile 1',
+      displayName: 'Work',
+      browser: 'Google Chrome',
+    };
+
+    const promise = waitForExtensionHandshake(host as any, 50, realProfile);
+
+    await expect(promise).rejects.toThrow('Extra check for real-profile mode');
+  });
+
+  it('rejection message names the displayName and profileName in real-profile extra check', async () => {
+    const host = new EventEmitter() as EventEmitter & { isConnected: () => boolean };
+    host.isConnected = () => false;
+
+    const realProfile = {
+      userDataDir: '/home/user/.config/google-chrome',
+      profileName: 'Profile 1',
+      displayName: 'Work',
+      browser: 'Google Chrome',
+    };
+
+    const promise = waitForExtensionHandshake(host as any, 50, realProfile);
+
+    await expect(promise).rejects.toThrow('"Work"');
+  });
+
+  it('rejection message does NOT include real-profile extra check when realProfile is absent', async () => {
+    const host = new EventEmitter() as EventEmitter & { isConnected: () => boolean };
+    host.isConnected = () => false;
+
+    const promise = waitForExtensionHandshake(host as any, 50);
+
+    let errorMessage = '';
+    try {
+      await promise;
+    } catch (err) {
+      errorMessage = (err as Error).message;
+    }
+    expect(errorMessage).not.toContain('Extra check for real-profile mode');
+    expect(errorMessage).toContain('Extension did not connect within 30 seconds.');
   });
 });
