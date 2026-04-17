@@ -22,15 +22,34 @@ export async function extract(
   tabId: number,
 ): Promise<RunnerResponse> {
   if (command.target === 'screenshot') {
-    // Build a ScreenshotCommand from the extract command
     const screenshotCmd: ScreenshotCommand = {
       type: 'screenshot',
       commandId: command.commandId,
       timeoutMs: command.timeoutMs,
       tab: command.tab,
-      saveDir: '', // CLI side handles saving; extension returns the dataUrl
+      saveDir: '',
     };
     return screenshotHandler(screenshotCmd, tabId);
+  }
+
+  // url and title can be resolved via chrome.tabs.get — no content script needed.
+  // This is critical because the run window starts on about:blank where no
+  // content script is injected.
+  if (command.target === 'url' || command.target === 'title') {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      const value = command.target === 'url' ? (tab.url ?? '') : (tab.title ?? '');
+      return { kind: 'result', commandId: command.commandId, ok: true, value };
+    } catch (err) {
+      return {
+        kind: 'result',
+        commandId: command.commandId,
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+        code: 'tabs_get_failed',
+        recoverable: true,
+      };
+    }
   }
 
   const domOp = (): Promise<DomReply> =>
