@@ -2,7 +2,7 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { ConfigService } from '../../config/config.service.js';
 import { PROVIDER_PRESETS, type ProviderKind } from '../../llm/provider-kinds.js';
-import { maskApiKey } from '../helpers.js';
+import { maskApiKey, asTrimmedString } from '../helpers.js';
 
 const CUSTOM_VALUE = '__custom__';
 
@@ -55,11 +55,12 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
     const nameInput = await p.text({
       message: 'Name for this provider (letters, digits, hyphens only):',
       validate(value) {
-        if (!value.trim()) return 'Name is required';
-        if (!/^[a-z0-9-]+$/.test(value.trim())) {
+        const v = asTrimmedString(value);
+        if (!v) return 'Name is required';
+        if (!/^[a-z0-9-]+$/.test(v)) {
           return 'Name must contain only lowercase letters, digits, and hyphens';
         }
-        if (value.trim() === 'anthropic') {
+        if (v === 'anthropic') {
           return '"anthropic" is reserved for the native Anthropic preset';
         }
         return undefined;
@@ -69,7 +70,7 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
       p.cancel('Cancelled');
       process.exit(0);
     }
-    providerName = (nameInput as string).trim();
+    providerName = asTrimmedString(nameInput);
     kind = 'openai-compatible';
     presetBaseUrl = undefined;
     presetDefaultModel = '';
@@ -85,7 +86,7 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
       message: 'Name for this provider:',
       initialValue: preset.id,
       validate(value) {
-        if (!value.trim()) return 'Name is required';
+        if (!asTrimmedString(value)) return 'Name is required';
         return undefined;
       },
     });
@@ -93,7 +94,7 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
       p.cancel('Cancelled');
       process.exit(0);
     }
-    providerName = (nameInput as string).trim();
+    providerName = asTrimmedString(nameInput);
 
     if (providers[providerName]) {
       p.log.warn(`Provider "${providerName}" already exists — it will be updated.`);
@@ -117,8 +118,9 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
         placeholder: 'https://api.example.com/v1',
         initialValue: existing.baseUrl ?? '',
         validate(value) {
-          if (!value.trim()) return 'Base URL is required';
-          if (!/^https?:\/\//.test(value.trim())) {
+          const v = asTrimmedString(value);
+          if (!v) return 'Base URL is required';
+          if (!/^https?:\/\//.test(v)) {
             return 'Base URL must start with http:// or https://';
           }
           return undefined;
@@ -128,7 +130,7 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
         p.cancel('Cancelled');
         process.exit(0);
       }
-      baseUrl = (baseUrlInput as string).trim();
+      baseUrl = asTrimmedString(baseUrlInput);
     } else {
       // Preset: pre-fill with preset URL, allow override
       baseUrlDefaultInput = existing.baseUrl ?? presetBaseUrl ?? '';
@@ -142,7 +144,7 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
         p.cancel('Cancelled');
         process.exit(0);
       }
-      baseUrl = ((baseUrlInput as string) || baseUrlDefaultInput).trim() || undefined;
+      baseUrl = (asTrimmedString(baseUrlInput) || baseUrlDefaultInput) || undefined;
     }
   }
 
@@ -168,7 +170,7 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
     process.exit(0);
   }
 
-  const apiKeyRaw = (apiKeyInput as string).trim();
+  const apiKeyRaw = asTrimmedString(apiKeyInput as string | undefined);
   const apiKey = apiKeyRaw || existing.apiKey || (isOllama ? 'not required for local Ollama' : '');
 
   // Model
@@ -185,7 +187,7 @@ export async function runConfigureFlow(configService: ConfigService): Promise<vo
     process.exit(0);
   }
 
-  const model = ((modelInput as string) || modelDefault).trim();
+  const model = asTrimmedString(modelInput) || modelDefault;
 
   // Save provider config
   const providerConfig: Record<string, string> = { kind, model };

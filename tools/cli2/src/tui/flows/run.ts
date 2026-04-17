@@ -27,6 +27,7 @@ import { AutomationSchema } from '@portalflow/schema';
 import type { Automation } from '@portalflow/schema';
 import { ConfigService } from '../../config/config.service.js';
 import { resolvePaths, resolveVideo } from '../../runner/paths.js';
+import { asTrimmedString } from '../helpers.js';
 
 export interface RunFlowOptions {
   nested?: boolean;
@@ -141,7 +142,7 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
         raw = await p.password({
           message: label,
           validate: input.required
-            ? (v) => (v.trim() === '' ? 'This input is required' : undefined)
+            ? (v) => (asTrimmedString(v as string | undefined) === '' ? 'This input is required' : undefined)
             : undefined,
         });
       } else if (input.type === 'number') {
@@ -149,8 +150,9 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
           message: label,
           initialValue: input.source === 'cli_arg' ? (input.value ?? '') : '',
           validate: (v) => {
-            if (input.required && v.trim() === '') return 'This input is required';
-            if (v.trim() !== '' && isNaN(parseFloat(v))) return 'Must be a number';
+            const s = asTrimmedString(v);
+            if (input.required && s === '') return 'This input is required';
+            if (s !== '' && isNaN(parseFloat(s))) return 'Must be a number';
             return undefined;
           },
         });
@@ -160,7 +162,7 @@ export async function runRunFlow(options: RunFlowOptions = {}): Promise<void> {
           message: label,
           initialValue: input.source === 'cli_arg' ? (input.value ?? '') : '',
           validate: input.required
-            ? (v) => (v.trim() === '' ? 'This input is required' : undefined)
+            ? (v) => (asTrimmedString(v) === '' ? 'This input is required' : undefined)
             : undefined,
         });
       }
