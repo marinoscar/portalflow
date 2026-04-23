@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [extension 1.4.0] - 2026-04-24
+
+Tooling release: the PortalFlow extension gains a full-page
+Automation Editor — a three-pane IDE for opening, editing, and
+downloading automation JSON.
+
+### Added
+
+- **Automation Editor page** (`@portalflow/extension` 1.4.0)
+  - Opens in its own browser tab via the new "Open Editor" button in the sidepanel header.
+  - Three-pane layout: outline tree on the left (metadata, inputs, steps, functions, with drag-to-reorder), form editor in the middle, JSON preview + Issues panel on the right.
+  - Form coverage for every one of the 11 step types — `navigate`, `interact`, `wait`, `extract`, `tool_call`, `condition`, `download`, `loop`, `call`, `goto`, `aiscope` — with the schema's discriminated unions enforced through the UI (interaction-type gates which fields appear, aiscope's `successCheck` tri-state maps to deterministic / AI / omit, condition's deterministic-vs-AI mutual exclusion, etc.).
+  - Upload `.json` via file picker or drag-and-drop anywhere on the page. Files that fail schema validation surface the errors in a modal with a "Load anyway" escape hatch so the user can fix them in the editor.
+  - Download emits a clean, schema-validated `.json` ready to feed to `portalflow run`. The download button disables itself when the document has validation errors.
+  - Every Zod validation error is clickable in the Issues panel and jumps the form pane to the offending node.
+  - Keyboard shortcuts: Ctrl/Cmd+O to upload, Ctrl/Cmd+S to download. `beforeunload` warns on unsaved changes.
+- **Why this exists**: authoring automations by hand against `docs/AUTOMATION-JSON-SPEC.md` was error-prone — 11 step types with discriminated unions and template fields is a lot to keep in one's head. The in-extension editor closes the edit → validate → run loop entirely inside the extension, and the downloaded file runs unchanged through the CLI.
+
 ## [2.1.0] - 2026-04-24
 
 CLI and extension both pre-flight LLM connectivity and show a clear friendly message when the API is unreachable. LLM-agnostic — works on Anthropic, OpenAI, and every OpenAI-compatible shim.
