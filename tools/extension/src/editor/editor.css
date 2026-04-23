@@ -937,6 +937,53 @@ details[open] > .outline-section-header::before {
 }
 
 /* ------------------------------------------------------------------ */
+/* Radio row layout (mode selectors in step type bodies)               */
+/* ------------------------------------------------------------------ */
+
+.radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #0f172a;
+  cursor: pointer;
+  user-select: none;
+}
+
+.radio-label input[type='radio'] {
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.radio-label--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.radio-label--disabled input[type='radio'] {
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Allowed-actions grid (AiScope body)                                 */
+/* ------------------------------------------------------------------ */
+
+.allowed-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* ------------------------------------------------------------------ */
 /* Parameter rows (FunctionForm)                                        */
 /* ------------------------------------------------------------------ */
 

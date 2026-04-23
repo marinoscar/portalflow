@@ -112,6 +112,7 @@ function FormPane({ state, dispatch }: { state: EditorState; dispatch: React.Dis
           path={node.path}
           dispatch={dispatch}
           validation={validation}
+          automation={automation}
         />
       );
     }
@@ -130,6 +131,7 @@ function FormPane({ state, dispatch }: { state: EditorState; dispatch: React.Dis
             functionIndex={node.index}
             dispatch={dispatch}
             validation={validation}
+            automation={automation}
           />
         );
       }

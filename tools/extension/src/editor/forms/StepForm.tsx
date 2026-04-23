@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Step, StepType } from '@portalflow/schema';
+import type { Step, StepType, Automation } from '@portalflow/schema';
 import type { EditorAction, ValidationResult } from '../state/editor-state';
 import { TextField } from './fields/TextField';
 import { TextAreaField } from './fields/TextAreaField';
@@ -9,6 +9,17 @@ import { TemplateHint } from './fields/TemplateHint';
 import { SelectorsEditor } from './fields/SelectorsEditor';
 import { ValidationEditor } from './fields/ValidationEditor';
 import { fieldErrorsForPath } from './errors';
+import { NavigateBody } from './steps/NavigateBody';
+import { InteractBody } from './steps/InteractBody';
+import { WaitBody } from './steps/WaitBody';
+import { ExtractBody } from './steps/ExtractBody';
+import { ToolCallBody } from './steps/ToolCallBody';
+import { ConditionBody } from './steps/ConditionBody';
+import { DownloadBody } from './steps/DownloadBody';
+import { LoopBody } from './steps/LoopBody';
+import { CallBody } from './steps/CallBody';
+import { GotoBody } from './steps/GotoBody';
+import { AiScopeBody } from './steps/AiScopeBody';
 
 // ---------------------------------------------------------------------------
 // Default action shapes for each step type
@@ -87,13 +98,128 @@ interface StepFormProps {
   functionIndex?: number;
   dispatch: React.Dispatch<EditorAction>;
   validation: ValidationResult;
+  /** Full automation — passed through to type bodies that need step/function lists */
+  automation?: Automation;
 }
 
 // ---------------------------------------------------------------------------
 // StepForm
 // ---------------------------------------------------------------------------
 
-export function StepForm({ step, path, functionIndex, dispatch, validation }: StepFormProps) {
+// ---------------------------------------------------------------------------
+// TypeBody dispatcher
+// ---------------------------------------------------------------------------
+
+interface TypeBodyProps {
+  step: Step;
+  onActionChange: (partial: Partial<Step['action']>) => void;
+  errors: Record<string, string>;
+  automation: Automation;
+}
+
+function TypeBody({ step, onActionChange, errors, automation }: TypeBodyProps) {
+  switch (step.type) {
+    case 'navigate':
+      return (
+        <NavigateBody
+          action={step.action as Parameters<typeof NavigateBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof NavigateBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    case 'interact':
+      return (
+        <InteractBody
+          action={step.action as Parameters<typeof InteractBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof InteractBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    case 'wait':
+      return (
+        <WaitBody
+          action={step.action as Parameters<typeof WaitBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof WaitBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    case 'extract':
+      return (
+        <ExtractBody
+          action={step.action as Parameters<typeof ExtractBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof ExtractBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    case 'tool_call':
+      return (
+        <ToolCallBody
+          action={step.action as Parameters<typeof ToolCallBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof ToolCallBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    case 'condition':
+      return (
+        <ConditionBody
+          action={step.action as Parameters<typeof ConditionBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof ConditionBody>[0]['onChange']}
+          errors={errors}
+          automation={automation}
+        />
+      );
+    case 'download':
+      return (
+        <DownloadBody
+          action={step.action as Parameters<typeof DownloadBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof DownloadBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    case 'loop':
+      return (
+        <LoopBody
+          action={step.action as Parameters<typeof LoopBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof LoopBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    case 'call':
+      return (
+        <CallBody
+          action={step.action as Parameters<typeof CallBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof CallBody>[0]['onChange']}
+          errors={errors}
+          automation={automation}
+        />
+      );
+    case 'goto':
+      return (
+        <GotoBody
+          action={step.action as Parameters<typeof GotoBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof GotoBody>[0]['onChange']}
+          errors={errors}
+          automation={automation}
+        />
+      );
+    case 'aiscope':
+      return (
+        <AiScopeBody
+          action={step.action as Parameters<typeof AiScopeBody>[0]['action']}
+          onChange={onActionChange as Parameters<typeof AiScopeBody>[0]['onChange']}
+          errors={errors}
+        />
+      );
+    default:
+      return <p className="muted">Unknown step type: {(step as Step).type}</p>;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// StepForm
+// ---------------------------------------------------------------------------
+
+export function StepForm({ step, path, functionIndex, dispatch, validation, automation }: StepFormProps) {
   // Build the Zod path prefix for this step's position
   const basePath: (string | number)[] =
     functionIndex !== undefined
@@ -151,12 +277,17 @@ export function StepForm({ step, path, functionIndex, dispatch, validation }: St
         placeholder="What this step does"
       />
 
-      {/* Type-specific body — Phase F will replace this placeholder */}
+      {/* Type-specific body */}
       <section className="form-section">
         <div className="form-section-title">Action</div>
-        <p className="muted">
-          Type-specific fields coming in Phase F for step type &ldquo;{step.type}&rdquo;
-        </p>
+        <TypeBody
+          step={step}
+          onActionChange={(partial) =>
+            updateStep({ action: { ...step.action, ...partial } as Step['action'] })
+          }
+          errors={actionErrors}
+          automation={automation ?? { id: '', name: '', description: '', goal: '', inputs: [], steps: [], version: '1.0.0' }}
+        />
       </section>
 
       {/* Common fields — collapsible */}
@@ -221,8 +352,6 @@ export function StepForm({ step, path, functionIndex, dispatch, validation }: St
         </div>
       </details>
 
-      {/* Suppress unused variable warning */}
-      {void actionErrors}
     </div>
   );
 }
