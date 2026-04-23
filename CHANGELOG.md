@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-04-24
+
+CLI and extension both pre-flight LLM connectivity and show a clear friendly message when the API is unreachable. LLM-agnostic — works on Anthropic, OpenAI, and every OpenAI-compatible shim.
+
+### Added
+
+- **`LlmProvider.ping()`** (`@portalflow/cli` 2.1.0, `@portalflow/extension` 1.3.0)
+  - New method on both CLI and extension provider interfaces that performs a cheap authenticated `GET /v1/models` against the configured endpoint. Never throws — all failures are captured in a `PingResult` with provider, model, HTTP status, a plain-English message, and a concrete remediation hint.
+  - Shared `ping-error.ts` helper maps the common failure cases (401 bad key, 403 model access, 404 wrong base-url, 429 rate limit, 5xx provider outage, network-level errors) to consistent user-facing messages.
+- **CLI pre-flight** (`@portalflow/cli` 2.1.0)
+  - `automation-runner.ts` now scans every automation for LLM-requiring steps (`aiscope`, `condition.ai`, `loop.items.description`, `loop.exitWhen.ai`) — recursively, including function bodies. If any is found it calls `llmService.verifyConnectivity()` BEFORE launching the browser or opening any windows. On failure the user sees a clean block on stderr and the run aborts with exit code 1 before any partial state exists. Deterministic-only automations skip the check entirely — no network round-trip.
+- **Extension banner** (`@portalflow/extension` 1.3.0)
+  - `AiAssistant` runs the same connectivity check when a provider is first configured and on every provider change. A dismissible red banner (`LlmConnectivityBanner`) renders with the same structured info as the CLI; the Polish / Improve / Chat Edit buttons are disabled until the banner clears.
+- **Why this exists**: users were hitting 401 errors mid-run (expired API keys) or watching aiscope fail with cryptic provider errors on a bad base-url. Surfacing "LLM is unreachable, here's why, here's how to fix it" before work begins is a much cleaner story than discovering it half-way through a login flow.
+
 ## [2.0.1] - 2026-04-23
 
 Patch fix: `portalflow --version` no longer lies.
