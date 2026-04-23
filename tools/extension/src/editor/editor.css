@@ -729,3 +729,239 @@ details[open] > .outline-section-header::before {
   color: #374151;
   line-height: 1.4;
 }
+
+/* ------------------------------------------------------------------ */
+/* Form sections                                                        */
+/* ------------------------------------------------------------------ */
+
+.form-section {
+  padding: 0 0 8px 0;
+}
+
+.form-section + .form-section {
+  border-top: 1px solid #f1f5f9;
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.form-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: #64748b;
+  margin-bottom: 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Field variants                                                       */
+/* ------------------------------------------------------------------ */
+
+.field-required {
+  color: #dc2626;
+  font-size: 11px;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.field-error {
+  font-size: 11px;
+  color: #dc2626;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.field-suffix {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.field-hint-template {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: -4px;
+  margin-bottom: 8px;
+}
+
+.field-hint-template code {
+  background: #f1f5f9;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+  font-size: 10px;
+  color: #475569;
+}
+
+/* Checkbox field layout */
+.field--checkbox {
+  flex-direction: column;
+}
+
+.field-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.field-checkbox-label input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.field-checkbox-text {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+/* ------------------------------------------------------------------ */
+/* Key-value list                                                       */
+/* ------------------------------------------------------------------ */
+
+.field--kv-list {
+  gap: 4px;
+}
+
+.kv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.kv-input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.kv-remove {
+  flex-shrink: 0;
+  padding: 3px 7px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.kv-remove:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.kv-add {
+  font-size: 12px;
+  color: #3b82f6;
+  padding: 3px 6px;
+  margin-top: 2px;
+}
+
+.kv-add:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Selectors / validation sub-editors                                  */
+/* ------------------------------------------------------------------ */
+
+.selectors-editor,
+.validation-editor {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fafbfc;
+}
+
+.selectors-editor-fields,
+.validation-editor-fields {
+  padding-top: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Collapsible details sections                                         */
+/* ------------------------------------------------------------------ */
+
+.form-details {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: #fafbfc;
+}
+
+.form-details-summary {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.form-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.form-details-summary::before {
+  content: '▸';
+  font-size: 9px;
+  color: #94a3b8;
+  margin-right: 6px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+
+.form-details[open] > .form-details-summary::before {
+  transform: rotate(90deg);
+}
+
+.form-details-body {
+  padding: 0 12px 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* ------------------------------------------------------------------ */
+/* Parameter rows (FunctionForm)                                        */
+/* ------------------------------------------------------------------ */
+
+.param-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: #ffffff;
+  position: relative;
+}
+
+.param-row-fields {
+  flex: 1;
+}
+
+.param-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.param-remove:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}

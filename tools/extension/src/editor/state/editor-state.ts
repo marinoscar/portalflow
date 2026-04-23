@@ -28,10 +28,10 @@ export type EditorAction =
   | { type: 'UPDATE_INPUT'; payload: { index: number; changes: Partial<Input> } }
   | { type: 'ADD_INPUT'; payload: Input }
   | { type: 'REMOVE_INPUT'; payload: { index: number } }
-  | { type: 'UPDATE_STEP'; payload: { path: number[]; changes: Partial<Step> } }
-  | { type: 'INSERT_STEP'; payload: { path: number[]; step: Step; position: 'before' | 'after' | 'append-substep' } }
-  | { type: 'MOVE_STEP'; payload: { path: number[]; direction: 'up' | 'down' } }
-  | { type: 'REMOVE_STEP'; payload: { path: number[] } }
+  | { type: 'UPDATE_STEP'; payload: { path: number[]; changes: Partial<Step>; functionIndex?: number } }
+  | { type: 'INSERT_STEP'; payload: { path: number[]; step: Step; position: 'before' | 'after' | 'append-substep'; functionIndex?: number } }
+  | { type: 'MOVE_STEP'; payload: { path: number[]; direction: 'up' | 'down'; functionIndex?: number } }
+  | { type: 'REMOVE_STEP'; payload: { path: number[]; functionIndex?: number } }
   | { type: 'UPDATE_FUNCTION'; payload: { index: number; changes: Partial<FunctionDefinition> } }
   | { type: 'ADD_FUNCTION'; payload: FunctionDefinition }
   | { type: 'REMOVE_FUNCTION'; payload: { index: number } };
@@ -231,10 +231,19 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
     case 'UPDATE_STEP': {
       if (!state.automation) return state;
+      const { path, changes, functionIndex } = action.payload;
+      if (functionIndex !== undefined) {
+        const functions = (state.automation.functions ?? []).map((fn, fi) => {
+          if (fi !== functionIndex) return fn;
+          return { ...fn, steps: mapStepAtPath(fn.steps, path, (s) => ({ ...s, ...changes })) };
+        });
+        const automation: Automation = { ...state.automation, functions };
+        return { ...state, automation, validation: revalidate(automation), dirty: true };
+      }
       const steps = mapStepAtPath(
         state.automation.steps,
-        action.payload.path,
-        (step) => ({ ...step, ...action.payload.changes }),
+        path,
+        (step) => ({ ...step, ...changes }),
       );
       const automation: Automation = { ...state.automation, steps };
       return { ...state, automation, validation: revalidate(automation), dirty: true };
@@ -242,11 +251,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
     case 'INSERT_STEP': {
       if (!state.automation) return state;
+      const { path: insertPath, step: insertedStep, position, functionIndex: insertFnIdx } = action.payload;
+      if (insertFnIdx !== undefined) {
+        const functions = (state.automation.functions ?? []).map((fn, fi) => {
+          if (fi !== insertFnIdx) return fn;
+          return { ...fn, steps: insertStepAtPath(fn.steps, insertPath, insertedStep, position) };
+        });
+        const automation: Automation = { ...state.automation, functions };
+        return { ...state, automation, validation: revalidate(automation), dirty: true };
+      }
       const steps = insertStepAtPath(
         state.automation.steps,
-        action.payload.path,
-        action.payload.step,
-        action.payload.position,
+        insertPath,
+        insertedStep,
+        position,
       );
       const automation: Automation = { ...state.automation, steps };
       return { ...state, automation, validation: revalidate(automation), dirty: true };
@@ -254,10 +272,19 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
     case 'MOVE_STEP': {
       if (!state.automation) return state;
+      const { path: movePath, direction, functionIndex: moveFnIdx } = action.payload;
+      if (moveFnIdx !== undefined) {
+        const functions = (state.automation.functions ?? []).map((fn, fi) => {
+          if (fi !== moveFnIdx) return fn;
+          return { ...fn, steps: moveStepAtPath(fn.steps, movePath, direction) };
+        });
+        const automation: Automation = { ...state.automation, functions };
+        return { ...state, automation, validation: revalidate(automation), dirty: true };
+      }
       const steps = moveStepAtPath(
         state.automation.steps,
-        action.payload.path,
-        action.payload.direction,
+        movePath,
+        direction,
       );
       const automation: Automation = { ...state.automation, steps };
       return { ...state, automation, validation: revalidate(automation), dirty: true };
@@ -265,7 +292,16 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
 
     case 'REMOVE_STEP': {
       if (!state.automation) return state;
-      const steps = removeStepAtPath(state.automation.steps, action.payload.path);
+      const { path: removePath, functionIndex: removeFnIdx } = action.payload;
+      if (removeFnIdx !== undefined) {
+        const functions = (state.automation.functions ?? []).map((fn, fi) => {
+          if (fi !== removeFnIdx) return fn;
+          return { ...fn, steps: removeStepAtPath(fn.steps, removePath) };
+        });
+        const automation: Automation = { ...state.automation, functions };
+        return { ...state, automation, validation: revalidate(automation), dirty: true };
+      }
+      const steps = removeStepAtPath(state.automation.steps, removePath);
       const automation: Automation = { ...state.automation, steps };
       return { ...state, automation, validation: revalidate(automation), dirty: true };
     }

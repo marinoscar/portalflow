@@ -8,6 +8,12 @@ import { Toolbar } from './components/Toolbar';
 import { Outline } from './components/Outline';
 import { JsonPreview } from './components/JsonPreview';
 import { IssuesPanel } from './components/IssuesPanel';
+import { parseNodeId, getStepAtPath, getFunctionStepAtPath } from './state/selection';
+import { MetadataForm } from './forms/MetadataForm';
+import { InputForm } from './forms/InputForm';
+import { FunctionForm } from './forms/FunctionForm';
+import { StepForm } from './forms/StepForm';
+import type { EditorState, EditorAction } from './state/editor-state';
 
 // ---------------------------------------------------------------------------
 // Upload-error modal
@@ -58,6 +64,86 @@ function UploadErrorModal({ errors, raw, onClose, onLoadAnyway }: UploadErrorMod
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// FormPane — routes selected node to the correct form
+// ---------------------------------------------------------------------------
+
+function FormPane({ state, dispatch }: { state: EditorState; dispatch: React.Dispatch<EditorAction> }) {
+  const { automation, selectedNodeId, validation } = state;
+
+  if (!automation) {
+    return <p className="pane-placeholder">Upload or create a new automation to get started</p>;
+  }
+
+  const node = parseNodeId(selectedNodeId);
+
+  switch (node.kind) {
+    case 'none':
+      return (
+        <p className="pane-placeholder">Select an item in the outline to edit it</p>
+      );
+
+    case 'metadata':
+      return (
+        <MetadataForm automation={automation} dispatch={dispatch} validation={validation} />
+      );
+
+    case 'input': {
+      const input = automation.inputs[node.index];
+      if (!input) return <p className="pane-placeholder">Input not found</p>;
+      return (
+        <InputForm
+          input={input}
+          index={node.index}
+          dispatch={dispatch}
+          validation={validation}
+        />
+      );
+    }
+
+    case 'step': {
+      const step = getStepAtPath(automation, node.path);
+      if (!step) return <p className="pane-placeholder">Step not found</p>;
+      return (
+        <StepForm
+          step={step}
+          path={node.path}
+          dispatch={dispatch}
+          validation={validation}
+        />
+      );
+    }
+
+    case 'function': {
+      const fn = (automation.functions ?? [])[node.index];
+      if (!fn) return <p className="pane-placeholder">Function not found</p>;
+
+      if (node.stepPath !== undefined) {
+        const step = getFunctionStepAtPath(automation, node.index, node.stepPath);
+        if (!step) return <p className="pane-placeholder">Step not found</p>;
+        return (
+          <StepForm
+            step={step}
+            path={node.stepPath}
+            functionIndex={node.index}
+            dispatch={dispatch}
+            validation={validation}
+          />
+        );
+      }
+
+      return (
+        <FunctionForm
+          fn={fn}
+          index={node.index}
+          dispatch={dispatch}
+          validation={validation}
+        />
+      );
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -268,23 +354,13 @@ export function App() {
           </div>
         </aside>
 
-        {/* Middle: Form editor (placeholder until Phase E) */}
+        {/* Middle: Form editor */}
         <main className="editor-pane editor-pane--form">
           <div className="pane-header">
             <span className="pane-title">Form Editor</span>
           </div>
           <div className="pane-body">
-            {state.automation ? (
-              <p className="pane-placeholder">
-                {state.selectedNodeId
-                  ? `Selected: ${state.selectedNodeId}`
-                  : 'Select a node from the outline to edit it'}
-              </p>
-            ) : (
-              <p className="pane-placeholder">
-                Upload or create a new automation to get started
-              </p>
-            )}
+            <FormPane state={state} dispatch={dispatch} />
           </div>
         </main>
 
