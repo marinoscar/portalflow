@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-23
+
+Tooling release: aiscope gains a true agent mode — planner + milestones + replan — while keeping fast mode as the cheap default. LLM-agnostic by design.
+
+### Added
+
+- **aiscope agent mode** (`@portalflow/schema` 1.2.0, `@portalflow/cli2` 1.2.0, `@portalflow/extension` 1.2.0)
+  - New `mode: 'fast' | 'agent'` field on aiscope actions (default `'fast'` — existing behavior, byte-identical). When `'agent'` is set, cli2 opens the step with a planning call that produces a linear list of 2–8 milestones, then drives the browser turn-by-turn with the plan visible in every prompt.
+  - New `maxReplans` cap (0–10, default 2). The LLM can emit `replan: true` mid-run when the plan is materially wrong; the runner rebuilds the plan via the planner, passing the old plan as context so the model avoids repeating failed milestones. Replan requests past the cap are ignored so the loop keeps working rather than failing the step.
+  - New `milestoneComplete` flag on action responses advances the runner's milestone pointer before dispatching the chosen action.
+  - Extension sidepanel exposes a new **Execution mode** dropdown (fast / agent) and a conditional **Max replans** input. Generator prompt gains a rule for picking fast vs agent.
+  - **Why this exists**: the original observe-act-repeat loop plateaus on goals with more than one distinct phase (login → navigate → extract → confirm) because the model only sees a 5-action history window — no long-term memory of the overall plan. Agent mode gives the model explicit planning + progress tracking for compound goals, while fast mode stays the right pick for single-phase goals like "dismiss the cookie banner" or "click Next".
+  - **LLM-agnostic by design**: every call is plain JSON in / plain JSON out over the existing provider interface. No provider-specific features (no extended thinking, no tool-use API). Works on Claude 3.5+, GPT-4o+, Gemini, Mistral, and local Llama via Ollama — anywhere the model can reliably emit structured JSON.
+
+### Documentation
+
+- `docs/AUTOMATION-JSON-SPEC.md` §6.11 extended with agent mode: new action-shape rows, a dedicated *Agent mode* section with a worked AT&T invoice example, agent-mode flag columns on the action vocabulary, updated cost notes.
+- `tools/cli2/README.md` parallel Agent mode section with a when-to-pick-which checklist and the LLM-agnostic guarantee explicitly called out.
+- New example: `tools/cli2/examples/aiscope-agent-demo.json` (runs against Wikipedia, no credentials needed).
+
 ## [1.1.0] - 2026-04-23
 
 Tooling release: aiscope can now self-terminate when the goal has no concrete success predicate.
