@@ -988,11 +988,13 @@ export class StepExecutor {
         `aiscope step "${step.id}" has no "goal" — an aiscope action requires a non-empty "goal" string describing what the LLM should accomplish.`,
       );
     }
-    if (!action.successCheck) {
-      throw new Error(
-        `aiscope step "${step.id}" has no "successCheck" — an aiscope action requires a "successCheck" with either {check, value} or {ai}.`,
-      );
-    }
+
+    // `successCheck` is optional. When present it is the authoritative oracle
+    // and the LLM's "done" is a hint the runner re-verifies against the
+    // check. When absent, the LLM self-terminates: its "done" ends the loop
+    // immediately, and the only other way out is budget exhaustion.
+    const successCheck = action.successCheck;
+    const selfTerminating = !successCheck;
 
     const startedAt = Date.now();
     const deadlineMs = startedAt + action.maxDurationSec * 1000;
@@ -1029,6 +1031,7 @@ export class StepExecutor {
         maxIterations: action.maxIterations,
         includeScreenshot: action.includeScreenshot,
         allowedActions,
+        selfTerminating,
       },
       'aiscope: start',
     );
@@ -1062,34 +1065,40 @@ export class StepExecutor {
 
       // 2. Success check + next-action strategy:
       //
-      // When `successCheck` is deterministic ({check, value}), the check
-      // is a cheap DOM query — run it first so we can short-circuit
-      // without paying for the LLM call when the goal is already reached.
+      // Three modes depending on successCheck shape:
       //
-      // When `successCheck.ai` is set, the check is itself a full LLM
-      // round-trip (with vision when includeScreenshot is true). Running
-      // the check and the next-action decision sequentially means every
-      // iteration pays TWO vision round-trips — 6–10 seconds for a
-      // model like Claude Opus. We speculatively run both in parallel
-      // via Promise.allSettled:
+      // - Self-terminating (successCheck omitted): one LLM call per
+      //   iteration to pick the next action. No pre-check; the loop ends
+      //   when the LLM emits `done` (authoritative) or a budget cap fires.
       //
-      //   - If the check wins (goal reached), we discard the decision.
-      //     One LLM call is wasted on the final iteration — negligible
-      //     cost compared to the ~50% latency reduction on every other
-      //     iteration.
-      //   - If the check fails, we already have the decision ready and
-      //     proceed straight to dispatch.
+      // - Deterministic ({check, value}): the check is a cheap DOM query —
+      //   run it first so we can short-circuit without paying for the LLM
+      //   call when the goal is already reached.
+      //
+      // - AI ({ai}): the check is itself a full LLM round-trip (with
+      //   vision when includeScreenshot is true). We speculatively run
+      //   both in parallel via Promise.allSettled — if the check wins
+      //   the decision is discarded (one wasted call on the final
+      //   iteration), else we dispatch the already-ready decision.
       //
       // Either the check or the decideNextAction call can legitimately
       // fail (provider error, JSON parse error, etc.). The sequential
       // path propagates whichever error fires; the parallel path uses
       // allSettled so a decideNextAction failure doesn't mask a
       // successful check.
-      const isAiSuccessCheck = action.successCheck.ai !== undefined;
       let decision: NextActionResult;
 
-      if (!isAiSuccessCheck) {
-        if (await this.evaluateSuccessCheck(action.successCheck, pageContext)) {
+      if (selfTerminating) {
+        decision = await this.llmService.decideNextAction({
+          goal: resolvedGoal,
+          pageContext,
+          allowedActions,
+          recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
+          availableInputs,
+          selfTerminating: true,
+        });
+      } else if (successCheck.ai === undefined) {
+        if (await this.evaluateSuccessCheck(successCheck, pageContext)) {
           const durationMs = Date.now() - startedAt;
           logger.info(
             { stepId: step.id, iteration, durationMs },
@@ -1109,7 +1118,7 @@ export class StepExecutor {
       } else {
         const t0 = Date.now();
         const [checkResult, decideResult] = await Promise.allSettled([
-          this.evaluateSuccessCheck(action.successCheck, pageContext),
+          this.evaluateSuccessCheck(successCheck, pageContext),
           this.llmService.decideNextAction({
             goal: resolvedGoal,
             pageContext,
@@ -1189,13 +1198,29 @@ export class StepExecutor {
       }
 
       if (decision.action === 'done') {
-        // Treat as a hint — the top of the next iteration re-runs the
-        // success check. If the model was wrong we keep trying.
         history.push({
           iteration,
           action: 'done',
           succeeded: true,
         });
+        if (selfTerminating) {
+          // No user success check — the LLM's "done" is the oracle.
+          // Trust it and terminate; budget caps are the only safety net.
+          const durationMs = Date.now() - startedAt;
+          logger.info(
+            {
+              stepId: step.id,
+              iteration,
+              durationMs,
+              reasoning: decision.reasoning,
+            },
+            'aiscope: goal achieved (LLM self-reported, no successCheck)',
+          );
+          this.presenter.aiscopeGoalReached(durationMs, iteration);
+          return;
+        }
+        // With a success check, "done" is a hint — the top of the next
+        // iteration re-runs the check. If the model was wrong we keep trying.
         continue;
       }
 
