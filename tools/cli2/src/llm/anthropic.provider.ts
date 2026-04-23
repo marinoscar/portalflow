@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import pino from 'pino';
 import type {
   ActionDecision,
+  AgentPlan,
   ConditionEvaluation,
   ConditionQuery,
   ElementQuery,
@@ -13,6 +14,7 @@ import type {
   NextActionQuery,
   NextActionResult,
   PageContext,
+  PlanQuery,
 } from './provider.interface.js';
 import { SYSTEM_PROMPTS } from './prompts.js';
 
@@ -299,8 +301,16 @@ Question: ${question}`;
    * screenshot. Parses the model's JSON response into a NextActionResult.
    */
   async decideNextAction(query: NextActionQuery): Promise<NextActionResult> {
-    const { goal, pageContext, allowedActions, recentHistory, availableInputs, selfTerminating } =
-      query;
+    const {
+      goal,
+      pageContext,
+      allowedActions,
+      recentHistory,
+      availableInputs,
+      selfTerminating,
+      plan,
+      currentMilestoneId,
+    } = query;
 
     const historyBlock =
       recentHistory.length > 0
@@ -331,6 +341,19 @@ Question: ${question}`;
       ? '\n## Termination mode\n"selfTerminating": true — this run has NO user success check. Your "done" is authoritative and will end the loop immediately. Only emit "done" when you have direct on-page evidence that the goal is complete.'
       : '';
 
+    const agentModeBlock =
+      plan && currentMilestoneId
+        ? `\n## Agent mode — current plan\n\nPlan summary: ${plan.summary}\n\n${plan.milestones
+            .map((m) => {
+              const marker = m.id === currentMilestoneId ? '▶ CURRENT' : '  ';
+              const done = m.doneWhen ? ` (done when: ${m.doneWhen})` : '';
+              return `${marker} ${m.id} — ${m.description}${done}`;
+            })
+            .join(
+              '\n',
+            )}\n\nCurrent milestone: ${currentMilestoneId}. Pick actions that advance it. Add "milestoneComplete": true when this milestone is done so the runner advances. Add "replan": true only if the plan is materially wrong (not just a single failed action).`
+        : '';
+
     const userText = `## Goal
 ${goal}
 
@@ -338,7 +361,7 @@ ${goal}
 ${allowedActions.join(', ')}
 
 ## Recent action history (oldest first)
-${historyBlock}${availableInputsBlock}${selfTerminatingBlock}
+${historyBlock}${availableInputsBlock}${selfTerminatingBlock}${agentModeBlock}
 
 ## Current page
 URL: ${pageContext.url}
@@ -397,6 +420,96 @@ Pick the single next action that best advances the goal. Return strict JSON only
       this.logger.error(
         { err, goal, operation: 'decideNextAction', latencyMs: Date.now() - t0 },
         'AnthropicProvider.decideNextAction failed',
+      );
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  /**
+   * Produce an agent-mode plan. Called once at aiscope step start, and
+   * again whenever the runner honors a replan (within maxReplans).
+   *
+   * LLM-agnostic contract: one user message with optional screenshot, a
+   * system prompt that asks for linear milestones, and a strict-JSON
+   * response. Every future provider (OpenAI, Gemini, Ollama, ...) must
+   * implement this with the same semantics.
+   */
+  async decidePlan(query: PlanQuery): Promise<AgentPlan> {
+    const { goal, pageContext, allowedActions, availableInputs, previousPlan } = query;
+
+    const availableInputsBlock =
+      availableInputs && availableInputs.length > 0
+        ? `\n## Available inputs\n${availableInputs.map((i) => `- ${i.name} (${i.type})${i.description ? ': ' + i.description : ''}`).join('\n')}`
+        : '';
+
+    const previousPlanBlock = previousPlan
+      ? `\n## Previous plan (REPLAN requested)\n\nSummary: ${previousPlan.plan.summary}\n\nMilestones:\n${previousPlan.plan.milestones
+          .map(
+            (m) =>
+              `- ${m.id}${previousPlan.attemptedMilestoneIds.includes(m.id) ? ' [attempted]' : ''} — ${m.description}`,
+          )
+          .join('\n')}\n\nReplan reason: ${previousPlan.reason}\n\nBuild a DIFFERENT plan that avoids whatever caused the replan. Do not repeat the attempted milestones verbatim.`
+      : '';
+
+    const userText = `## Goal
+${goal}
+
+## Allowed actions in executor vocabulary
+${allowedActions.join(', ')}${availableInputsBlock}${previousPlanBlock}
+
+## Current page
+URL: ${pageContext.url}
+Title: ${pageContext.title}
+
+HTML:
+${truncateHtml(pageContext.html)}
+
+Produce a linear plan of 2-8 milestones for completing the goal. Return strict JSON only.`;
+
+    const content: Array<
+      | { type: 'text'; text: string }
+      | {
+          type: 'image';
+          source: { type: 'base64'; media_type: 'image/png'; data: string };
+        }
+    > = [];
+    if (pageContext.screenshot) {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: pageContext.screenshot,
+        },
+      });
+    }
+    content.push({ type: 'text', text: userText });
+
+    const t0 = Date.now();
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 2048,
+        system: SYSTEM_PROMPTS.agentPlanner,
+        messages: [{ role: 'user', content }],
+      });
+
+      this.logCall('decidePlan', t0, response.usage, {
+        goal,
+        withScreenshot: !!pageContext.screenshot,
+        isReplan: !!previousPlan,
+      });
+
+      const text = response.content
+        .filter((b) => b.type === 'text')
+        .map((b) => (b as { type: 'text'; text: string }).text)
+        .join('');
+
+      return parseJsonResponse<AgentPlan>(text, 'decidePlan');
+    } catch (err) {
+      this.logger.error(
+        { err, goal, operation: 'decidePlan', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.decidePlan failed',
       );
       throw err instanceof Error ? err : new Error(String(err));
     }
