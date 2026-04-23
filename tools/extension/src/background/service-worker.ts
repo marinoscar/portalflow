@@ -328,6 +328,20 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
         }
         return;
       }
+      case 'LLM_VERIFY_CONNECTIVITY': {
+        // Ship the full PingResult back as `data` — the sidepanel reads
+        // `data.ok` and renders a banner from the other fields. Note: we
+        // intentionally always `ok: true` the envelope (the check itself
+        // completed) and let `data.ok` carry the actual outcome so a
+        // connectivity failure doesn't look like a message-passing error.
+        try {
+          const result = await llmService.verifyConnectivity();
+          sendResponse({ type: 'LLM_RESULT', ok: true, data: result });
+        } catch (err) {
+          sendResponse({ type: 'LLM_ERROR', ok: false, error: String(err) });
+        }
+        return;
+      }
       case 'LLM_IMPROVE_STEPS': {
         try {
           const a = msg.automation;

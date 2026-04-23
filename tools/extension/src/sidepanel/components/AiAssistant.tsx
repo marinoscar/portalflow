@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AutomationSchema, type Automation, type Step } from '@portalflow/schema';
-import { useHasActiveProvider, useLlmCall } from '../hooks/useLlm';
+import { useHasActiveProvider, useLlmCall, useVerifyConnectivity } from '../hooks/useLlm';
+import { LlmConnectivityBanner } from './LlmConnectivityBanner';
 
 interface Props {
   automation: Automation;
@@ -16,16 +17,37 @@ interface AiResult {
 export function AiAssistant({ automation, onUpdateMetadata, onReplaceSteps }: Props) {
   const hasProvider = useHasActiveProvider();
   const { call, loading, error } = useLlmCall();
+  const {
+    check: verifyConnectivity,
+    loading: verifying,
+    lastResult: pingResult,
+  } = useVerifyConnectivity();
   const [menuOpen, setMenuOpen] = useState(false);
   const [result, setResult] = useState<AiResult | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  const disabled = !hasProvider || loading || automation.steps.length === 0;
+  // Run a connectivity check once when the provider becomes configured,
+  // and every time the configured provider changes. This surfaces a
+  // broken API key / bad base-url / offline state BEFORE the user
+  // triggers a chat edit or metadata polish — matching the CLI's
+  // pre-flight behavior.
+  useEffect(() => {
+    if (!hasProvider) return;
+    setBannerDismissed(false);
+    verifyConnectivity();
+  }, [hasProvider, verifyConnectivity]);
+
+  const connectivityFailed = pingResult !== null && !pingResult.ok;
+  const disabled =
+    !hasProvider || loading || verifying || automation.steps.length === 0 || connectivityFailed;
   const disabledReason = !hasProvider
     ? 'Configure an LLM provider in settings'
     : automation.steps.length === 0
       ? 'Record some steps first'
-      : undefined;
+      : connectivityFailed
+        ? 'LLM connectivity check failed — see banner'
+        : undefined;
 
   const handleUpdateMetadata = async () => {
     setMenuOpen(false);
@@ -139,6 +161,13 @@ export function AiAssistant({ automation, onUpdateMetadata, onReplaceSteps }: Pr
           <span className="ai-loading-spinner" aria-hidden="true" />
           <span>AI is thinking... this may take 10-30 seconds for Improve Steps.</span>
         </div>
+      )}
+
+      {pingResult && !pingResult.ok && !bannerDismissed && (
+        <LlmConnectivityBanner
+          result={pingResult}
+          onDismiss={() => setBannerDismissed(true)}
+        />
       )}
 
       {error && <div className="error-inline">{error}</div>}

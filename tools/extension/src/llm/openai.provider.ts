@@ -1,9 +1,11 @@
 import { getModelCapabilities, isTokenParamError } from './model-capabilities';
+import { classifyFetchThrow, classifyHttpPingFailure } from './ping-error';
 import type {
   LlmCompletionRequest,
   LlmCompletionResponse,
   LlmProvider,
   LlmProviderConfig,
+  PingResult,
 } from './provider.interface';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
@@ -93,5 +95,39 @@ export class OpenAiProvider implements LlmProvider {
     };
     const text = data.choices?.[0]?.message?.content ?? '';
     return { ok: true, response: { text } };
+  }
+
+  /**
+   * Authenticated GET against /models — cheapest round-trip on any
+   * OpenAI-compatible API (OpenAI proper, Kimi, Together, local Ollama
+   * behind the OpenAI shim, ...). Never throws.
+   */
+  async ping(providerName: string, model: string): Promise<PingResult> {
+    const baseUrl = this.config.baseUrl ?? DEFAULT_BASE_URL;
+    const url = `${baseUrl.replace(/\/$/, '')}/models`;
+    const t0 = Date.now();
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.config.apiKey}` },
+      });
+      if (!response.ok) {
+        const bodyText = await response.text().catch(() => '');
+        return classifyHttpPingFailure({
+          providerName,
+          model,
+          status: response.status,
+          bodyText,
+        });
+      }
+      return {
+        ok: true,
+        providerName,
+        model,
+        latencyMs: Date.now() - t0,
+      };
+    } catch (err) {
+      return classifyFetchThrow({ providerName, model, err });
+    }
   }
 }

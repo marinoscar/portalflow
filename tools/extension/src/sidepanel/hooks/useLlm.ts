@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { sendMessage } from '../../shared/messaging';
 import type { Message } from '../../shared/messaging';
+import type { PingResult } from '../../llm/provider.interface';
 import { getActiveProviderConfig } from '../../storage/config.storage';
 
 export function useHasActiveProvider(): boolean {
@@ -47,4 +48,48 @@ export function useLlmCall() {
   };
 
   return { call, loading, error };
+}
+
+/**
+ * Cheap, opt-in connectivity check. Used by the AiAssistant banner to
+ * render a clear red block when the configured provider can't be reached
+ * BEFORE the user fires off a chat message or selector-improve action.
+ *
+ * `check()` returns the structured PingResult so callers can decide
+ * whether to gate a follow-up action on `result.ok`. `loading` and
+ * `lastResult` are also exposed for declarative UI use.
+ */
+export function useVerifyConnectivity() {
+  const [loading, setLoading] = useState(false);
+  const [lastResult, setLastResult] = useState<PingResult | null>(null);
+
+  const check = useCallback(async (): Promise<PingResult | null> => {
+    setLoading(true);
+    try {
+      const response = (await sendMessage({ type: 'LLM_VERIFY_CONNECTIVITY' })) as
+        | { type: 'LLM_RESULT'; ok: true; data: PingResult }
+        | { type: 'LLM_ERROR'; ok: false; error: string };
+      if (response && 'ok' in response && response.ok) {
+        setLastResult(response.data);
+        return response.data;
+      }
+      // Message passing itself failed — synthesize a PingResult so callers
+      // get the same shape in both failure modes.
+      const synthesized: PingResult = {
+        ok: false,
+        providerName: '(unknown)',
+        model: '(unknown)',
+        message:
+          'Could not reach the PortalFlow service worker to run the LLM connectivity check.',
+        hint: 'Reload the extension (chrome://extensions → reload) and try again.',
+        raw: response && 'error' in response ? response.error : 'no response',
+      };
+      setLastResult(synthesized);
+      return synthesized;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { check, loading, lastResult };
 }

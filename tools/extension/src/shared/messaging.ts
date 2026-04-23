@@ -37,6 +37,7 @@ export type Message =
   | { type: 'LLM_POLISH_METADATA'; steps: Array<{ name: string; type: string; description?: string }> }
   | { type: 'LLM_IMPROVE_STEPS'; automation: Automation }
   | { type: 'LLM_CHAT_EDIT'; request: ChatEditRequest }
+  | { type: 'LLM_VERIFY_CONNECTIVITY' }
   | { type: 'LLM_RESULT'; ok: true; data: unknown }
   | { type: 'LLM_ERROR'; ok: false; error: string };
 
