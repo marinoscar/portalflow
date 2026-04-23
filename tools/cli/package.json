@@ -1,10 +1,10 @@
 {
-  "name": "@portalflow/cli2",
-  "version": "1.2.0",
-  "description": "PortalFlow CLI v2 — executes browser automations via Chrome extension transport",
+  "name": "@portalflow/cli",
+  "version": "2.0.0",
+  "description": "PortalFlow CLI — executes browser automations via Chrome extension transport",
   "type": "module",
   "bin": {
-    "portalflow2": "dist/index.js"
+    "portalflow": "dist/index.js"
   },
   "scripts": {
     "build:schema": "cd ../schema && npm run build",
