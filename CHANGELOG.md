@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-23
+
+Tooling release: aiscope can now self-terminate when the goal has no concrete success predicate.
+
+### Added
+
+- **aiscope self-terminating mode** (`@portalflow/schema` 1.1.0, `@portalflow/cli2` 1.1.0, `@portalflow/extension` 1.1.0)
+  - `successCheck` is now optional on `aiscope` actions. When omitted, cli2's runner hands the completion decision to the LLM: it emits `done` when the goal is reached and the loop ends immediately. Budget caps (`maxDurationSec`, `maxIterations`) remain the only safety net.
+  - **Why this exists**: some goals (triage, fill-whatever-is-there, open-ended cleanup) cannot be expressed as a concrete yes/no predicate. Previously these forced users to write an AI predicate that was really just a second copy of the goal, paying two LLM calls per iteration for what was effectively one decision. Self-terminating mode drops the second call and accepts the trade that the LLM is the oracle.
+  - Extension sidepanel now offers an **"LLM decides"** option in the success-check editor that emits a `successCheck`-less aiscope step.
+  - System prompt tells the model whether its `done` is authoritative (self-terminating) or a hint (with `successCheck`) via a `selfTerminating: true` marker in the user message.
+  - **cli v1 is not updated** — it still throws `aiscope step has no successCheck` at runtime. Use an AI predicate (`{ "ai": "..." }`) for automations that need to run on both runners.
+
+### Changed
+
+- **CLAUDE.md**: new MANDATORY section requires version bumps on the relevant `tools/*/package.json` files and a CHANGELOG entry whenever a feature or fix ships. Closes the drift where tooling versions fell behind reality.
+
+### Documentation
+
+- `docs/AUTOMATION-JSON-SPEC.md` §6.11 now documents all three aiscope modes (deterministic, AI, self-terminating), including a worked inbox-triage example and per-mode cost notes.
+- `tools/cli2/README.md` gains a self-terminating section with a runnable example.
+- New example: `tools/cli2/examples/aiscope-self-terminating.json`.
+
 ## [1.0.1] - 2026-01-24
 
 ### Added

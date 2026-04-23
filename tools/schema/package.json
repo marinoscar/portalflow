@@ -1,6 +1,6 @@
 {
   "name": "@portalflow/schema",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Shared Zod schema and TypeScript types for PortalFlow automation JSON",
   "type": "module",
   "main": "dist/index.js",
