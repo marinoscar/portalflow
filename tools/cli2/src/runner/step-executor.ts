@@ -1399,9 +1399,12 @@ export class StepExecutor {
    * go through the existing `llmService.evaluateCondition` path used by
    * the condition step's `ai:` branch. Schema validation already
    * enforces that exactly one form is set.
+   *
+   * Callers narrow `action.successCheck` to non-undefined before invoking
+   * this method — self-terminating mode skips the call entirely.
    */
   private async evaluateSuccessCheck(
-    sc: AiScopeAction['successCheck'],
+    sc: NonNullable<AiScopeAction['successCheck']>,
     pageContext: PageContext,
   ): Promise<boolean> {
     if (sc.check !== undefined && sc.value !== undefined) {
