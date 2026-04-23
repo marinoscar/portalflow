@@ -2,7 +2,7 @@
  * Verifies that runner-bootstrap.ts registers declarative chrome.windows.onCreated
  * and chrome.tabs.onCreated listeners on module load. MV3 caches these declarative
  * registrations and uses them to wake the service worker when Chrome opens a new
- * window while already running (the `portalflow2 run` use-case where `onStartup`
+ * window while already running (the `portalflow run` use-case where `onStartup`
  * does not fire).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

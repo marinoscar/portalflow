@@ -1,8 +1,8 @@
 /**
- * WebSocket message contract between portalflow2 CLI (server) and the PortalFlow extension (client).
- * This file is the CLI side — import it inside `tools/cli2`.
+ * WebSocket message contract between portalflow CLI (server) and the PortalFlow extension (client).
+ * This file is the CLI side — import it inside the CLI.
  *
- * Keep `tools/cli2/src/browser/protocol.ts` and
+ * Keep `tools/cli/src/browser/protocol.ts` and
  * `tools/extension/src/shared/runner-protocol.ts` in perfect sync —
  * bump `RUNNER_PROTOCOL_VERSION` on any breaking change.
  */

@@ -2,7 +2,7 @@
   "id": "b2c3d4e5-f678-9012-3456-789abcdef012",
   "name": "aiscope agent-mode demo — read Wikipedia article and follow link",
   "version": "1.0.0",
-  "description": "Demonstrates cli2-only agent mode: a compound goal with multiple distinct phases. The planner decomposes the goal into milestones, then the executor drives the browser turn-by-turn against the plan. Uses Wikipedia so the run is deterministic and free.",
+  "description": "Demonstrates agent mode: a compound goal with multiple distinct phases. The planner decomposes the goal into milestones, then the executor drives the browser turn-by-turn against the plan. Uses Wikipedia so the run is deterministic and free.",
   "goal": "Navigate Wikipedia and confirm a multi-phase agent-mode loop completes.",
   "inputs": [],
   "steps": [

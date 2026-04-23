@@ -438,10 +438,11 @@ export class StepExecutor {
   /**
    * Discover loop items using the selector pattern or LLM.
    *
-   * The original cli implementation called `page.$$(selectorPattern)` to
-   * get element handles, then synthesised nth-of-type selectors from the
-   * resulting array length. In cli2, we have no element handles — the
-   * extension doesn't return them over the wire. Instead we:
+   * An element-handle-based implementation would call
+   * `page.$$(selectorPattern)` to get handles, then synthesise
+   * nth-of-type selectors from the resulting array length. Here we
+   * have no element handles — the extension doesn't return them over
+   * the wire. Instead we:
    *
    *   1. Call `pageClient.countMatching(selectorPattern)` to get the count.
    *   2. Synthesise `:nth-of-type(i+1)` selectors from that count — the

@@ -2,7 +2,7 @@
   "id": "a1b2c3d4-e5f6-7890-abcd-ef0123456789",
   "name": "aiscope self-terminating — read the example.com paragraph",
   "version": "1.0.0",
-  "description": "Demonstrates the cli2-only self-terminating aiscope mode: the step omits successCheck entirely, so the LLM decides when the goal is done by emitting 'done'. cli v1 rejects this at runtime.",
+  "description": "Demonstrates the self-terminating aiscope mode: the step omits successCheck entirely, so the LLM decides when the goal is done by emitting 'done'.",
   "goal": "Navigate to example.com and let the LLM self-terminate after confirming the main paragraph is visible.",
   "inputs": [],
   "steps": [
@@ -20,7 +20,7 @@
     {
       "id": "step-2",
       "name": "AI: confirm the page has loaded (LLM decides)",
-      "description": "Self-terminating aiscope: no successCheck. The LLM observes the page, satisfies the goal by simply recognizing the main paragraph, and emits 'done'. cli2 trusts that signal immediately and ends the loop. Budget caps (30s / 6 iterations) are the only safety net.",
+      "description": "Self-terminating aiscope: no successCheck. The LLM observes the page, satisfies the goal by simply recognizing the main paragraph, and emits 'done'. The runner trusts that signal immediately and ends the loop. Budget caps (30s / 6 iterations) are the only safety net.",
       "type": "aiscope",
       "action": {
         "goal": "Verify that example.com's main paragraph (starting with 'This domain is for use in illustrative examples') is visible on the page. Once you can see it, emit done.",

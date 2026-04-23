@@ -31,11 +31,11 @@ export function topLevelHelpText(): string {
       'for non-interactive/scripted use.',
     ]),
     section('Quick start:', [
-      'portalflow2                                         Launch interactive menu (recommended for new users)',
-      'portalflow2 provider                                Configure an LLM provider (Anthropic, OpenAI, Kimi, etc.)',
-      `portalflow2 run ${PORTALFLOW_HOME}/automations/demo-search.json`,
-      'portalflow2 validate automation.json',
-      'portalflow2 settings                                Configure storage paths and video recording',
+      'portalflow                                         Launch interactive menu (recommended for new users)',
+      'portalflow provider                                Configure an LLM provider (Anthropic, OpenAI, Kimi, etc.)',
+      `portalflow run ${PORTALFLOW_HOME}/automations/demo-search.json`,
+      'portalflow validate automation.json',
+      'portalflow settings                                Configure storage paths and video recording',
     ]),
     section('Config file location:', [
       `${PORTALFLOW_HOME}/config.json     Provider credentials, paths, video settings`,
@@ -61,10 +61,10 @@ export function topLevelHelpText(): string {
       'and the CLI launches a guided TUI wizard. Pass the argument for scripting/CI use.',
     ]),
     section('See also:', [
-      'portalflow2 run --help',
-      'portalflow2 validate --help',
-      'portalflow2 provider --help',
-      'portalflow2 settings --help',
+      'portalflow run --help',
+      'portalflow validate --help',
+      'portalflow provider --help',
+      'portalflow settings --help',
       '',
       'Full automation JSON reference:',
       '  https://github.com/marinoscar/portalflow/blob/main/docs/AUTOMATION-JSON-SPEC.md',
@@ -84,16 +84,16 @@ export function runHelpText(): string {
       'preview, and confirmation flow.',
     ]),
     section('Examples:', [
-      'portalflow2 run                                              Launch interactive TUI (file picker + preview + confirm)',
-      `portalflow2 run ${PORTALFLOW_HOME}/automations/demo-search.json   Run a specific automation`,
-      'portalflow2 run automation.json --video                      Enable video recording for this run only',
-      'portalflow2 run automation.json --no-video                   Force-disable video even if enabled in config',
-      'portalflow2 run automation.json --video-dir /tmp/vids        Override video directory for this run',
-      'portalflow2 run automation.json --screenshot-dir ./shots     Override screenshot directory',
-      'portalflow2 run automation.json --download-dir ~/my-downloads',
-      'portalflow2 run automation.json --automations-dir ./wf       Override automations lookup directory',
-      'portalflow2 run automation.json --input billCount=3                 Pass an input value',
-      "portalflow2 run automation.json --inputs-json '{\"user\":\"alice\"}'    Pass multiple inputs as JSON",
+      'portalflow run                                              Launch interactive TUI (file picker + preview + confirm)',
+      `portalflow run ${PORTALFLOW_HOME}/automations/demo-search.json   Run a specific automation`,
+      'portalflow run automation.json --video                      Enable video recording for this run only',
+      'portalflow run automation.json --no-video                   Force-disable video even if enabled in config',
+      'portalflow run automation.json --video-dir /tmp/vids        Override video directory for this run',
+      'portalflow run automation.json --screenshot-dir ./shots     Override screenshot directory',
+      'portalflow run automation.json --download-dir ~/my-downloads',
+      'portalflow run automation.json --automations-dir ./wf       Override automations lookup directory',
+      'portalflow run automation.json --input billCount=3                 Pass an input value',
+      "portalflow run automation.json --inputs-json '{\"user\":\"alice\"}'    Pass multiple inputs as JSON",
     ]),
     section('Precedence (highest wins):', [
       '1. CLI flag on this command (e.g., --video-dir)',
@@ -106,18 +106,18 @@ export function runHelpText(): string {
       'resolved at runtime. Pass them via one of these methods:',
       '',
       '1. CLI flag (per value, repeatable):',
-      '     portalflow2 run automation.json --input billCount=3 --input user=alice',
+      '     portalflow run automation.json --input billCount=3 --input user=alice',
       '',
       '2. JSON object (for scripting):',
-      "     portalflow2 run automation.json --inputs-json '{\"billCount\": 3, \"user\": \"alice\"}'",
+      "     portalflow run automation.json --inputs-json '{\"billCount\": 3, \"user\": \"alice\"}'",
       '',
       '3. Interactively:',
-      '     portalflow2 run                  # no file — launches the TUI',
+      '     portalflow run                  # no file — launches the TUI',
       '   The TUI detects missing required inputs and prompts you, using the',
       "   input's default value (if any) as the pre-filled value.",
       '',
       '4. Environment variables (for inputs with source="env"):',
-      '     APP_USER=alice portalflow2 run automation.json',
+      '     APP_USER=alice portalflow run automation.json',
       '',
       '  Inputs can also be referenced in step fields via template syntax:',
       '    "{{billCount}}"           - value or literal "{{billCount}}" if unset',
@@ -155,9 +155,9 @@ export function runHelpText(): string {
       'LOG_LEVEL                 pino log level (default: info)',
     ]),
     section('See also:', [
-      'portalflow2 validate <file>    Check JSON schema before running',
-      'portalflow2 settings           Change default storage paths or video settings',
-      'portalflow2 provider           Configure the LLM provider used during runs',
+      'portalflow validate <file>    Check JSON schema before running',
+      'portalflow settings           Change default storage paths or video settings',
+      'portalflow provider           Configure the LLM provider used during runs',
     ]),
   ]);
 }
@@ -172,9 +172,9 @@ export function validateHelpText(): string {
       'If FILE is omitted, a TUI file picker launches for interactive validation.',
     ]),
     section('Examples:', [
-      'portalflow2 validate                             Launch interactive TUI file picker',
-      'portalflow2 validate automation.json             Validate a specific file',
-      `portalflow2 validate ${PORTALFLOW_HOME}/automations/demo-search.json`,
+      'portalflow validate                             Launch interactive TUI file picker',
+      'portalflow validate automation.json             Validate a specific file',
+      `portalflow validate ${PORTALFLOW_HOME}/automations/demo-search.json`,
     ]),
     section('Schema (top-level fields):', [
       'id           Required. UUID string identifying the automation',
@@ -194,8 +194,8 @@ export function validateHelpText(): string {
       '1   Invalid — parse error, missing required field, or type mismatch',
     ]),
     section('See also:', [
-      'portalflow2 run <file>         Run the automation after validating',
-      'portalflow2 --help             Top-level overview',
+      'portalflow run <file>         Run the automation after validating',
+      'portalflow --help             Top-level overview',
     ]),
   ]);
 }
@@ -211,13 +211,13 @@ export function providerHelpText(): string {
       'Running this command without a subcommand launches a guided TUI menu.',
     ]),
     section('Examples:', [
-      'portalflow2 provider                             Launch interactive provider setup',
-      'portalflow2 provider list                        Show all configured providers',
-      'portalflow2 provider set kimi                    Switch the active provider',
-      'portalflow2 provider config anthropic --api-key sk-ant-... --model claude-sonnet-4-20250514',
-      'portalflow2 provider config openai --api-key sk-... --model gpt-4o',
-      'portalflow2 provider config kimi --kind openai-compatible --api-key sk-... --model moonshot-v1-32k --base-url https://api.moonshot.cn/v1',
-      'portalflow2 provider reset --yes                 Delete all provider config (destructive)',
+      'portalflow provider                             Launch interactive provider setup',
+      'portalflow provider list                        Show all configured providers',
+      'portalflow provider set kimi                    Switch the active provider',
+      'portalflow provider config anthropic --api-key sk-ant-... --model claude-sonnet-4-20250514',
+      'portalflow provider config openai --api-key sk-... --model gpt-4o',
+      'portalflow provider config kimi --kind openai-compatible --api-key sk-... --model moonshot-v1-32k --base-url https://api.moonshot.cn/v1',
+      'portalflow provider reset --yes                 Delete all provider config (destructive)',
     ]),
     section('Built-in presets (use with provider config):', [
       'anthropic     Anthropic Claude (native)',
@@ -243,9 +243,9 @@ export function providerHelpText(): string {
       'OPENAI_API_KEY            Fallback OpenAI key',
     ]),
     section('See also:', [
-      'portalflow2 provider config --help',
-      'portalflow2 provider reset --help',
-      'portalflow2 settings                Configure storage paths and video recording',
+      'portalflow provider config --help',
+      'portalflow provider reset --help',
+      'portalflow settings                Configure storage paths and video recording',
     ]),
   ]);
 }
@@ -257,14 +257,14 @@ export function providerListHelpText(): string {
       'configured provider. The currently active provider is marked with [active].',
     ]),
     section('Examples:', [
-      'portalflow2 provider list',
+      'portalflow provider list',
     ]),
     section('Exit codes:', [
       '0   Always (even when no providers are configured — prints an info message)',
     ]),
     section('See also:', [
-      'portalflow2 provider set <name>     Change which provider is active',
-      'portalflow2 provider config <name>  Add or update a provider',
+      'portalflow provider set <name>     Change which provider is active',
+      'portalflow provider config <name>  Add or update a provider',
     ]),
   ]);
 }
@@ -273,20 +273,20 @@ export function providerSetHelpText(): string {
   return assemble([
     section('Description:', [
       "Set the active LLM provider. The provider must already be configured",
-      "(use 'portalflow2 provider config <name>' first).",
+      "(use 'portalflow provider config <name>' first).",
     ]),
     section('Examples:', [
-      'portalflow2 provider set anthropic',
-      'portalflow2 provider set openai',
-      'portalflow2 provider set kimi',
+      'portalflow provider set anthropic',
+      'portalflow provider set openai',
+      'portalflow provider set kimi',
     ]),
     section('Exit codes:', [
       '0   Active provider updated',
       '1   Provider name not found in config',
     ]),
     section('See also:', [
-      'portalflow2 provider list           Show which provider is currently active',
-      'portalflow2 provider config <name>  Add or update a provider',
+      'portalflow provider list           Show which provider is currently active',
+      'portalflow provider config <name>  Add or update a provider',
     ]),
   ]);
 }
@@ -303,11 +303,11 @@ export function providerConfigHelpText(): string {
       'For custom names, pass --kind openai-compatible and --base-url.',
     ]),
     section('Examples:', [
-      'portalflow2 provider config anthropic --api-key sk-ant-... --model claude-sonnet-4-20250514',
-      'portalflow2 provider config openai --api-key sk-... --model gpt-4o',
-      'portalflow2 provider config kimi --api-key sk-... --model moonshot-v1-32k',
-      'portalflow2 provider config my-proxy --kind openai-compatible --api-key sk-... --model gpt-4o --base-url https://proxy.example.com/v1',
-      'portalflow2 provider config anthropic --model claude-opus-4-5                  Just update the model, keep the existing API key',
+      'portalflow provider config anthropic --api-key sk-ant-... --model claude-sonnet-4-20250514',
+      'portalflow provider config openai --api-key sk-... --model gpt-4o',
+      'portalflow provider config kimi --api-key sk-... --model moonshot-v1-32k',
+      'portalflow provider config my-proxy --kind openai-compatible --api-key sk-... --model gpt-4o --base-url https://proxy.example.com/v1',
+      'portalflow provider config anthropic --model claude-opus-4-5                  Just update the model, keep the existing API key',
     ]),
     section('Notes:', [
       '- The --kind flag is inferred from the name for built-in presets. You only',
@@ -321,9 +321,9 @@ export function providerConfigHelpText(): string {
       '1   Invalid --kind value or other validation error',
     ]),
     section('See also:', [
-      'portalflow2 provider list',
-      'portalflow2 provider set <name>',
-      'portalflow2 provider reset',
+      'portalflow provider list',
+      'portalflow provider set <name>',
+      'portalflow provider reset',
     ]),
   ]);
 }
@@ -337,12 +337,12 @@ export function providerResetHelpText(): string {
       '',
       'The --yes flag is REQUIRED for scripting safety. Without it, this command',
       "refuses to run and exits with code 1. For an interactive reset with a",
-      "safer two-step confirmation, run 'portalflow2 provider' and pick",
+      "safer two-step confirmation, run 'portalflow provider' and pick",
       '"Reset all configurations" from the menu.',
     ]),
     section('Examples:', [
-      'portalflow2 provider reset --yes                      Reset all provider config (non-interactive)',
-      'portalflow2 provider                                  Interactive reset (two-step confirmation)',
+      'portalflow provider reset --yes                      Reset all provider config (non-interactive)',
+      'portalflow provider                                  Interactive reset (two-step confirmation)',
     ]),
     section('Exit codes:', [
       '0   Reset completed (or nothing to reset)',
@@ -363,15 +363,15 @@ export function settingsHelpText(): string {
       'per-run.',
     ]),
     section('Examples:', [
-      'portalflow2 settings                                  Launch interactive settings menu',
-      'portalflow2 settings list                             Print current paths and video config',
-      'portalflow2 settings paths                            Print current paths (no flags)',
-      'portalflow2 settings paths --automations ~/my-flows   Update only the automations directory',
-      'portalflow2 settings paths --videos /data/recordings  Update only the videos directory',
-      'portalflow2 settings video                            Print current video config (no flags)',
-      'portalflow2 settings video --enable                   Enable video recording globally',
-      'portalflow2 settings video --disable                  Disable video recording globally',
-      'portalflow2 settings video --enable --width 1920 --height 1080   Enable with custom resolution',
+      'portalflow settings                                  Launch interactive settings menu',
+      'portalflow settings list                             Print current paths and video config',
+      'portalflow settings paths                            Print current paths (no flags)',
+      'portalflow settings paths --automations ~/my-flows   Update only the automations directory',
+      'portalflow settings paths --videos /data/recordings  Update only the videos directory',
+      'portalflow settings video                            Print current video config (no flags)',
+      'portalflow settings video --enable                   Enable video recording globally',
+      'portalflow settings video --disable                  Disable video recording globally',
+      'portalflow settings video --enable --width 1920 --height 1080   Enable with custom resolution',
     ]),
     section('Built-in default paths (used when not overridden):', [
       `automations    ${PORTALFLOW_HOME}/automations`,
@@ -380,7 +380,7 @@ export function settingsHelpText(): string {
       `downloads      ${PORTALFLOW_HOME}/artifacts/downloads`,
     ]),
     section('Precedence (highest wins):', [
-      "1. CLI flag on 'portalflow2 run' (e.g., --video-dir)",
+      "1. CLI flag on 'portalflow run' (e.g., --video-dir)",
       '2. settings.* in the automation JSON file',
       `3. paths.* / video.* in ${PORTALFLOW_HOME}/config.json (set by this command group)`,
       '4. Built-in defaults',
@@ -389,10 +389,10 @@ export function settingsHelpText(): string {
       `${PORTALFLOW_HOME}/config.json`,
     ]),
     section('See also:', [
-      'portalflow2 settings list --help',
-      'portalflow2 settings paths --help',
-      'portalflow2 settings video --help',
-      'portalflow2 run --help                 Per-run path overrides',
+      'portalflow settings list --help',
+      'portalflow settings paths --help',
+      'portalflow settings video --help',
+      'portalflow run --help                 Per-run path overrides',
     ]),
   ]);
 }
@@ -404,14 +404,14 @@ export function settingsListHelpText(): string {
       'Shows the merged view after applying user config over built-in defaults.',
     ]),
     section('Examples:', [
-      'portalflow2 settings list',
+      'portalflow settings list',
     ]),
     section('Exit codes:', [
       '0   Always',
     ]),
     section('See also:', [
-      'portalflow2 settings paths',
-      'portalflow2 settings video',
+      'portalflow settings paths',
+      'portalflow settings video',
     ]),
   ]);
 }
@@ -424,23 +424,23 @@ export function settingsPathsHelpText(): string {
       'any subset of flags updates only those paths (other values are preserved).',
     ]),
     section('Examples:', [
-      'portalflow2 settings paths                                     Print current paths',
-      'portalflow2 settings paths --automations ~/my-flows            Update one path',
-      'portalflow2 settings paths --videos /data/videos --downloads /data/downloads',
-      'portalflow2 settings paths --automations ~/flows --screenshots ~/shots --videos ~/videos --downloads ~/downloads',
+      'portalflow settings paths                                     Print current paths',
+      'portalflow settings paths --automations ~/my-flows            Update one path',
+      'portalflow settings paths --videos /data/videos --downloads /data/downloads',
+      'portalflow settings paths --automations ~/flows --screenshots ~/shots --videos ~/videos --downloads ~/downloads',
     ]),
     section('Notes:', [
       '- Directories are NOT created by this command. They are auto-created at',
       "  run time the first time PortalFlow needs them.",
       "- Relative paths are resolved relative to the directory where you run",
-      "  'portalflow2 run', not where you run this command. Prefer absolute paths.",
+      "  'portalflow run', not where you run this command. Prefer absolute paths.",
     ]),
     section('Exit codes:', [
       '0   Paths updated or printed',
     ]),
     section('See also:', [
-      'portalflow2 run --help                 Per-run path overrides',
-      'portalflow2 settings reset             Reset paths (via interactive TUI only)',
+      'portalflow run --help                 Per-run path overrides',
+      'portalflow settings reset             Reset paths (via interactive TUI only)',
     ]),
   ]);
 }
@@ -458,10 +458,10 @@ export function settingsVideoHelpText(): string {
       'the file may be empty or missing.',
     ]),
     section('Examples:', [
-      'portalflow2 settings video                                 Print current video config',
-      'portalflow2 settings video --enable                        Enable recording at default 1280x720',
-      'portalflow2 settings video --enable --width 1920 --height 1080',
-      'portalflow2 settings video --disable                       Disable recording',
+      'portalflow settings video                                 Print current video config',
+      'portalflow settings video --enable                        Enable recording at default 1280x720',
+      'portalflow settings video --enable --width 1920 --height 1080',
+      'portalflow settings video --disable                       Disable recording',
     ]),
     section('Common presets:', [
       '720p   1280 x 720   (default, smallest file size)',
@@ -472,8 +472,8 @@ export function settingsVideoHelpText(): string {
       '1   Invalid --width or --height value',
     ]),
     section('See also:', [
-      'portalflow2 run --video                Enable recording for a single run',
-      'portalflow2 run --no-video             Disable for a single run even if enabled in config',
+      'portalflow run --video                Enable recording for a single run',
+      'portalflow run --no-video             Disable for a single run even if enabled in config',
     ]),
   ]);
 }
@@ -500,14 +500,14 @@ export function settingsBrowserHelpText(): string {
       '',
       'Run with --list to scan installed Chrome / Brave / Chromium / Edge',
       'profiles on this machine and print them. Run with no flags to print the',
-      'current configuration. Run interactively via `portalflow2 settings` and',
+      'current configuration. Run interactively via `portalflow settings` and',
       'pick "Configure browser profile" for a guided flow.',
     ]),
     section('Examples:', [
-      'portalflow2 settings browser                                  Print current browser config',
-      'portalflow2 settings browser --list                           List installed browser profiles',
-      'portalflow2 settings browser --mode isolated                  Use a fresh context for every run (default)',
-      'portalflow2 settings browser --mode persistent \\',
+      'portalflow settings browser                                  Print current browser config',
+      'portalflow settings browser --list                           List installed browser profiles',
+      'portalflow settings browser --mode isolated                  Use a fresh context for every run (default)',
+      'portalflow settings browser --mode persistent \\',
       '    --channel chrome \\',
       '    --user-data-dir ~/.config/google-chrome \\',
       '    --profile-directory "Default"',
@@ -517,7 +517,7 @@ export function settingsBrowserHelpText(): string {
       '1   Invalid --mode or --channel value',
     ]),
     section('See also:', [
-      'portalflow2 run --help                         See transport-agnostic run options',
+      'portalflow run --help                         See transport-agnostic run options',
     ]),
   ]);
 }
@@ -544,20 +544,20 @@ export function settingsLoggingHelpText(): string {
       'internal detail.',
     ]),
     section('Examples:', [
-      'portalflow2 settings logging                                Print current logging config',
-      'portalflow2 settings logging --level debug                  Set level to debug',
-      'portalflow2 settings logging --file ~/.portalflow/run.log   Enable file logging',
-      'portalflow2 settings logging --no-file                      Disable file logging',
-      'portalflow2 settings logging --no-redact                    Stop redacting secrets (caution)',
-      'portalflow2 settings logging --no-pretty                    Emit raw JSON to stdout',
+      'portalflow settings logging                                Print current logging config',
+      'portalflow settings logging --level debug                  Set level to debug',
+      'portalflow settings logging --file ~/.portalflow/run.log   Enable file logging',
+      'portalflow settings logging --no-file                      Disable file logging',
+      'portalflow settings logging --no-redact                    Stop redacting secrets (caution)',
+      'portalflow settings logging --no-pretty                    Emit raw JSON to stdout',
     ]),
     section('Exit codes:', [
       '0   Logging config updated or printed',
       '1   Invalid --level value',
     ]),
     section('See also:', [
-      'portalflow2 run --log-level debug      Override level for a single run',
-      'LOG_LEVEL=debug portalflow2 run ...    Set level via env var',
+      'portalflow run --log-level debug      Override level for a single run',
+      'LOG_LEVEL=debug portalflow run ...    Set level via env var',
     ]),
   ]);
 }

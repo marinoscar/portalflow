@@ -1523,8 +1523,8 @@ This is **not** a general-purpose autonomous agent. The action vocabulary is fix
 | Field               | Type                       | Required | Default | Description |
 |---------------------|----------------------------|----------|---------|-------------|
 | `goal`              | `string` (min 1 char)      | Yes      | —       | Plain-English description of the goal the LLM should work toward. The LLM receives this verbatim on every iteration. |
-| `successCheck`      | `object` (see below)       | No       | —       | The predicate that decides whether the goal is reached. When set, exactly one of `{ check, value }` or `{ ai }` must be populated. When **omitted**, the runner enters self-terminating mode: the LLM ends the loop itself by emitting `done`, and only the budget caps can stop a confused model. Self-terminating mode is honored by **cli2 only** — cli v1 still throws at runtime when `successCheck` is absent. |
-| `mode`              | `'fast' \| 'agent'`        | No       | `'fast'` | Execution strategy. `'fast'` runs the default one-action-per-iteration loop. `'agent'` opens the step with a planning call that produces a linear list of 2–8 milestones, then reasons about the plan on every iteration (see *Agent mode* below). cli v1 ignores this field and always runs the fast loop. |
+| `successCheck`      | `object` (see below)       | No       | —       | The predicate that decides whether the goal is reached. When set, exactly one of `{ check, value }` or `{ ai }` must be populated. When **omitted**, the runner enters self-terminating mode: the LLM ends the loop itself by emitting `done`, and only the budget caps can stop a confused model. |
+| `mode`              | `'fast' \| 'agent'`        | No       | `'fast'` | Execution strategy. `'fast'` runs the default one-action-per-iteration loop. `'agent'` opens the step with a planning call that produces a linear list of 2–8 milestones, then reasons about the plan on every iteration (see *Agent mode* below). |
 | `maxReplans`        | `number` (int, 0–10)       | No       | `2`      | Agent mode only. How many times the LLM may emit `replan: true` to rebuild the plan mid-run. Additional replan requests after the cap are logged and ignored so the loop keeps making progress on the existing plan rather than failing the step. |
 | `maxDurationSec`    | `number` (int, 1–3600)     | No       | `300`   | Wall-clock budget in seconds. Whichever cap fires first aborts the step with a clear error. |
 | `maxIterations`     | `number` (int, 1–200)      | No       | `25`    | Maximum number of observe → decide → dispatch cycles. Whichever cap fires first aborts. In agent mode the initial planning call and any replan calls do NOT count against this budget — it counts *actions*, not *LLM calls*. |
@@ -1550,9 +1550,9 @@ Or an AI yes/no question (routed through the same AI evaluator the `condition.ai
 
 Setting both is a schema error. Setting the object with neither `check`+`value` nor `ai` is a schema error. Setting `check` without `value` is a schema error.
 
-**Omitting `successCheck` entirely (self-terminating mode, cli2 only):**
+**Omitting `successCheck` entirely (self-terminating mode):**
 
-When the `successCheck` field is not present on an aiscope action, cli2's runner hands the completion decision to the LLM itself. Every iteration costs exactly one `decideNextAction` call (no pre-check); when the LLM emits `done`, the loop trusts it immediately and terminates. The model is told so via a `selfTerminating: true` marker in the user message so it can calibrate its own confidence. Use this mode for goals you cannot state as a concrete yes/no predicate — "fill whatever fields this form has", "triage this inbox view". If the LLM is over-confident, the budget caps (`maxDurationSec`, `maxIterations`) are the only safety net, so keep them tight. **cli v1 rejects automations without `successCheck` at runtime** — use an AI check (`{ "ai": "..." }`) for anything that needs to run on both runners.
+When the `successCheck` field is not present on an aiscope action, the runner hands the completion decision to the LLM itself. Every iteration costs exactly one `decideNextAction` call (no pre-check); when the LLM emits `done`, the loop trusts it immediately and terminates. The model is told so via a `selfTerminating: true` marker in the user message so it can calibrate its own confidence. Use this mode for goals you cannot state as a concrete yes/no predicate — "fill whatever fields this form has", "triage this inbox view". If the LLM is over-confident, the budget caps (`maxDurationSec`, `maxIterations`) are the only safety net, so keep them tight.
 
 **Action vocabulary (the LLM picks one per iteration):**
 
@@ -1568,7 +1568,7 @@ When the `successCheck` field is not present on an aiscope action, cli2's runner
 | `focus`    | `selector`                             | Focuses the element without typing.                       |
 | `scroll`   | `value` = `up`/`down`/`top`/`bottom`   | Scrolls the page. No selector.                            |
 | `wait`     | `value` = milliseconds as string       | Pauses the loop for the given duration (useful mid-load). |
-| `done`     | —                                      | When `successCheck` is present, this is a hint: the runner re-verifies via the check on the next iteration, and if the check still fails the loop keeps going. When `successCheck` is omitted (cli2 self-terminating mode), `done` is authoritative and ends the loop immediately. In agent mode, `done` combined with `"milestoneComplete": true` on the *last* milestone advances the pointer past the plan, which is what triggers termination. |
+| `done`     | —                                      | When `successCheck` is present, this is a hint: the runner re-verifies via the check on the next iteration, and if the check still fails the loop keeps going. When `successCheck` is omitted (self-terminating mode), `done` is authoritative and ends the loop immediately. In agent mode, `done` combined with `"milestoneComplete": true` on the *last* milestone advances the pointer past the plan, which is what triggers termination. |
 
 In **agent mode** (`mode: "agent"`), the LLM may additionally include these flags alongside the action:
 
@@ -1615,7 +1615,7 @@ Cost trade-off: on the **final** iteration (the one where the check finally retu
 
 When `successCheck` is deterministic (`{ check, value }`), the check is a cheap DOM query and runs **first** — sequential is strictly better because a successful check skips the LLM call entirely. The parallelism optimization is AI-check-specific.
 
-When `successCheck` is **omitted** (cli2 self-terminating mode), each iteration makes exactly **one** LLM call — only `decideNextAction`. This is the cheapest of the three modes on a per-iteration basis, but it removes the independent success predicate: if the model over-confidently emits `done` early, the automation leaves aiscope without having actually reached the goal. Use only when the goal genuinely has no concrete finish condition.
+When `successCheck` is **omitted** (self-terminating mode), each iteration makes exactly **one** LLM call — only `decideNextAction`. This is the cheapest of the three modes on a per-iteration basis, but it removes the independent success predicate: if the model over-confidently emits `done` early, the automation leaves aiscope without having actually reached the goal. Use only when the goal genuinely has no concrete finish condition.
 
 **Worked example:**
 
@@ -1641,7 +1641,7 @@ When `successCheck` is **omitted** (cli2 self-terminating mode), each iteration 
 
 On a page with a typical cookie wall, the LLM sees the banner in the screenshot + its accept button in the simplified HTML and emits `{ action: "click", selector: "button:has-text('Accept')" }`. After the click, the next iteration captures a fresh page context, evaluates the AI success check (banner gone?), and returns. Even when the banner's exact markup changes between sites, the same step handles every variant.
 
-**Self-terminating example (cli2 only, no `successCheck`):**
+**Self-terminating example (no `successCheck`):**
 
 ```json
 {
@@ -1660,9 +1660,9 @@ On a page with a typical cookie wall, the LLM sees the banner in the screenshot 
 }
 ```
 
-The LLM iterates over the visible rows, archives each promotional one, and emits `done` when the list stops showing promotional items. cli2 trusts that signal immediately; cli v1 would throw at runtime.
+The LLM iterates over the visible rows, archives each promotional one, and emits `done` when the list stops showing promotional items. The runner trusts that signal immediately.
 
-**Agent mode (cli2 only, `mode: "agent"`):**
+**Agent mode (`mode: "agent"`):**
 
 The default `fast` mode asks the LLM for one action per iteration with no planning overhead. For compound goals that span multiple distinct phases (login → navigate → extract → confirm, or similar), a pure one-action-at-a-time loop can plateau — the model loses track of the larger structure or repeats work it already did. `mode: "agent"` adds an explicit planning layer on top of the same action vocabulary:
 
@@ -1733,8 +1733,7 @@ The executor then drives the browser turn-by-turn. If the site surprises the pla
 - `maxReplans` outside 0–10 — schema rejects.
 - `maxDurationSec` outside 1–3600 or `maxIterations` outside 1–200 — schema rejects.
 - `allowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`, `tool_call`).
-- cli v1 only: `successCheck` omitted at runtime — `aiscope step "<id>" has no "successCheck"` is thrown (self-terminating mode is cli2-only).
-- cli2 agent mode only: planner returns zero milestones at runtime — `aiscope step "<id>" agent-mode planner returned an empty plan` is thrown.
+- Agent mode only: planner returns zero milestones at runtime — `aiscope step "<id>" agent-mode planner returned an empty plan` is thrown.
 
 ---
 

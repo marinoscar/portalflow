@@ -15,7 +15,7 @@ import { join } from 'node:path';
  * instead of just "Profile 3".
  *
  * Note: the `channel` field present in tools/cli's BrowserProfile has been
- * intentionally omitted here. cli2 does not use Playwright channels — it
+ * intentionally omitted here. the CLI does not use Playwright channels — it
  * spawns Chrome directly as a plain binary.
  */
 export interface BrowserProfile {
@@ -42,7 +42,7 @@ export interface BrowserProfile {
  * %LOCALAPPDATA%\Google\Chrome\User Data on Windows). Adding platform
  * branches here is the only change needed.
  *
- * cli2 is Ubuntu-first per VISION.md so we cover Linux only for now.
+ * the CLI is Ubuntu-first per VISION.md so we cover Linux only for now.
  */
 interface BrowserInstall {
   browser: string;

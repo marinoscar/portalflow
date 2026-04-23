@@ -45,7 +45,7 @@ export interface CaptureOptions {
 }
 
 /**
- * PageContextCapture for cli2 — uses PageClient (WebSocket transport) instead
+ * PageContextCapture for the CLI — uses PageClient (WebSocket transport) instead
  * of Playwright's Page object.
  *
  * v1 limitations (task 7):

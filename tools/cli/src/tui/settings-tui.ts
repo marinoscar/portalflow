@@ -156,7 +156,7 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
 
       case 'exit':
         if (!options.nested) {
-          p.outro(pc.dim('Run portalflow2 settings --help for non-interactive configuration.'));
+          p.outro(pc.dim('Run portalflow settings --help for non-interactive configuration.'));
         } else {
           p.log.info(pc.dim('Returning to main menu...'));
         }

@@ -257,7 +257,7 @@ function AiScopeEditor({
 
   const setCheckMode = (mode: 'ai' | 'deterministic' | 'llm_decides') => {
     if (mode === 'llm_decides') {
-      // Omit successCheck entirely so the cli2 runner self-terminates
+      // Omit successCheck entirely so the runner self-terminates
       // on the LLM's `done` emission.
       const { successCheck: _dropped, ...rest } = action;
       onUpdate({ action: rest as Step['action'] });
@@ -298,7 +298,7 @@ function AiScopeEditor({
           }
         >
           <option value="fast">Fast — one action per iteration (default)</option>
-          <option value="agent">Agent — plan + milestones (cli2 only)</option>
+          <option value="agent">Agent — plan + milestones</option>
         </select>
       </label>
 
@@ -309,8 +309,7 @@ function AiScopeEditor({
             that produces a list of milestones, then reasons about the plan on every
             iteration. Roughly 1.5-3× the tokens of fast mode, but succeeds on compound
             goals (login + navigate + extract + confirm) where fast mode plateaus.
-            Use fast mode for single-phase goals. cli v1 ignores this field and
-            always runs the fast loop.
+            Use fast mode for single-phase goals.
           </p>
           <label className="field">
             <span>Max replans</span>
@@ -337,7 +336,7 @@ function AiScopeEditor({
         >
           <option value="deterministic">Deterministic (check + value)</option>
           <option value="ai">AI (plain-English question)</option>
-          <option value="llm_decides">LLM decides (cli2 only — no success check)</option>
+          <option value="llm_decides">LLM decides (no success check)</option>
         </select>
       </label>
 
@@ -346,7 +345,7 @@ function AiScopeEditor({
           No success check. The LLM terminates the loop by emitting <code>done</code> once
           it believes the goal is reached. Only budget caps (max duration / iterations)
           stop an over-confident model. Use when the goal is hard to state as a concrete
-          predicate. Honored by cli2; cli v1 will reject the automation.
+          predicate.
         </p>
       )}
 

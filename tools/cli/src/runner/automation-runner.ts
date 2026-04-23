@@ -83,7 +83,7 @@ function waitForExtensionConnection(
       reject(
         new Error(
           `Extension did not connect within ${timeoutMs}ms — see README for Chrome extension setup. ` +
-          `Ensure the PortalFlow extension is installed and Chrome is running before starting portalflow2.`,
+          `Ensure the PortalFlow extension is installed and Chrome is running before starting portalflow.`,
         ),
       );
     }, timeoutMs);
@@ -269,7 +269,7 @@ export class AutomationRunner {
       } else if (input.required) {
         throw new Error(
           `Required input "${input.name}" could not be resolved (source: ${input.source ?? 'literal'}).\n` +
-            `Provide a value via --input ${input.name}=<value> or run interactively with 'portalflow2 run' (no file argument) to be prompted.`,
+            `Provide a value via --input ${input.name}=<value> or run interactively with 'portalflow run' (no file argument) to be prompted.`,
         );
       } else {
         logger.debug({ input: input.name }, 'Optional input not resolved; skipping');

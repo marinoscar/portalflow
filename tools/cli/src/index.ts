@@ -29,8 +29,8 @@ program
   .showHelpAfterError('(use --help for more information)');
 
 program
-  .name('portalflow2')
-  .description('PortalFlow CLI v2 — executes browser automations via Chrome extension transport')
+  .name('portalflow')
+  .description('PortalFlow CLI — executes browser automations via Chrome extension transport')
   .version('1.0.8')
   .addHelpText('after', helpText.topLevelHelpText())
   .action(async () => {
@@ -103,7 +103,7 @@ program
     for (const kv of (opts.input ?? [])) {
       const eqIdx = kv.indexOf('=');
       if (eqIdx === -1) {
-        process.stderr.write(`portalflow2: invalid --input format (expected key=value): "${kv}"\n`);
+        process.stderr.write(`portalflow: invalid --input format (expected key=value): "${kv}"\n`);
         process.exit(1);
       }
       inputs.set(kv.slice(0, eqIdx), kv.slice(eqIdx + 1));
@@ -115,7 +115,7 @@ program
           inputs.set(k, v);
         }
       } catch {
-        process.stderr.write(`portalflow2: --inputs-json is not valid JSON\n`);
+        process.stderr.write(`portalflow: --inputs-json is not valid JSON\n`);
         process.exit(1);
       }
     }
@@ -126,8 +126,8 @@ program
     const extension = config.extension;
     if (!extension || extension.profileMode === 'unset') {
       process.stderr.write(
-        '\nportalflow2: Chrome profile mode is not configured.\n' +
-        'Run `portalflow2` (interactive TUI) or `portalflow2 settings extension` to configure it first.\n\n',
+        '\nportalflow: Chrome profile mode is not configured.\n' +
+        'Run `portalflow` (interactive TUI) or `portalflow settings extension` to configure it first.\n\n',
       );
       process.exit(1);
     }
@@ -154,7 +154,7 @@ program
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`\nportalflow2 run: ${msg}\n\n`);
+      process.stderr.write(`\nportalflow run: ${msg}\n\n`);
       process.exit(1);
     }
   });
@@ -182,16 +182,16 @@ program
       const result = AutomationSchema.safeParse(json);
       if (!result.success) {
         process.stderr.write(
-          `portalflow2 validate: schema validation failed\n${JSON.stringify(result.error.flatten(), null, 2)}\n`,
+          `portalflow validate: schema validation failed\n${JSON.stringify(result.error.flatten(), null, 2)}\n`,
         );
         process.exitCode = 1;
       } else {
         process.stdout.write(
-          `portalflow2 validate: OK — ${result.data.name} (${result.data.steps.length} steps)\n`,
+          `portalflow validate: OK — ${result.data.name} (${result.data.steps.length} steps)\n`,
         );
       }
     } catch (err) {
-      process.stderr.write(`portalflow2 validate: ${(err as Error).message}\n`);
+      process.stderr.write(`portalflow validate: ${(err as Error).message}\n`);
       process.exit(1);
     }
   });
@@ -257,7 +257,7 @@ provider
     const VALID_KINDS: ProviderKind[] = ['anthropic', 'openai-compatible'];
     if (options.kind !== undefined && !VALID_KINDS.includes(options.kind as ProviderKind)) {
       process.stderr.write(
-        `portalflow2: invalid --kind value. Must be one of: ${VALID_KINDS.join(', ')}\n`,
+        `portalflow: invalid --kind value. Must be one of: ${VALID_KINDS.join(', ')}\n`,
       );
       process.exit(1);
     }
@@ -296,7 +296,7 @@ provider
     if (!options.yes) {
       process.stderr.write(
         'Refusing to reset without confirmation. Pass --yes to proceed, or run ' +
-        '`portalflow2 provider` for the interactive TUI with a safer confirmation flow.\n',
+        '`portalflow provider` for the interactive TUI with a safer confirmation flow.\n',
       );
       process.exitCode = 1;
       return;
@@ -408,7 +408,7 @@ settings
     const VALID: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'];
     if (opts.level !== undefined && !VALID.includes(opts.level as LogLevel)) {
       process.stderr.write(
-        `portalflow2: invalid --level value. Must be one of: ${VALID.join(', ')}\n`,
+        `portalflow: invalid --level value. Must be one of: ${VALID.join(', ')}\n`,
       );
       process.exit(1);
     }
@@ -486,6 +486,6 @@ settings
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`\nportalflow2: unexpected error: ${msg}\n\n`);
+  process.stderr.write(`\nportalflow: unexpected error: ${msg}\n\n`);
   process.exit(1);
 });

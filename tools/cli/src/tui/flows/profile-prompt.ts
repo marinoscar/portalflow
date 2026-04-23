@@ -39,7 +39,7 @@ export async function selectRealProfile(): Promise<RealProfileSelection | undefi
 
   if (profiles.length === 0) {
     p.log.warn(
-      'No Chromium-family profiles found on this machine — portalflow2 will launch Chrome ' +
+      'No Chromium-family profiles found on this machine — portalflow will launch Chrome ' +
       'without a --profile-directory flag and use whatever profile Chrome picks. ' +
       'You may want to load the extension in a specific profile and re-run settings.',
     );
@@ -64,12 +64,12 @@ export async function selectRealProfile(): Promise<RealProfileSelection | undefi
   ];
 
   const selection = await p.select<BrowserProfile | null>({
-    message: 'Which Chrome profile should portalflow2 launch into?',
+    message: 'Which Chrome profile should portalflow launch into?',
     options,
   });
 
   if (p.isCancel(selection)) {
-    throw new Error('Profile setup cancelled. Run `portalflow2` again to configure.');
+    throw new Error('Profile setup cancelled. Run `portalflow` again to configure.');
   }
 
   p.log.info(
@@ -145,7 +145,7 @@ export async function ensureProfileChoice(
 
   if (p.isCancel(choice)) {
     throw new Error(
-      'Profile setup cancelled. Run `portalflow2` again to configure.',
+      'Profile setup cancelled. Run `portalflow` again to configure.',
     );
   }
 

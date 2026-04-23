@@ -108,7 +108,7 @@ chrome.runtime.onInstalled.addListener(() => {
   bootstrapRunner().catch((err) => console.error(PREFIX, 'onInstalled bootstrap failed:', err));
 });
 
-// MV3 service workers are evicted after ~30s idle. When `portalflow2` launches
+// MV3 service workers are evicted after ~30s idle. When `portalflow` launches
 // a new Chrome window while Chrome is already running, `onStartup` does NOT
 // fire. These listeners wake the SW on any new window/tab creation so the
 // offscreen doc (and its WebSocket client) can spin up in time for the CLI's

@@ -85,18 +85,17 @@ Every feature or fix MUST be developed in a Git worktree. The main checkout stay
 
 ## MANDATORY: Version Bumps on Features and Fixes
 
-Every feature or fix that touches the CLI, CLI2, extension, or shared schema MUST
+Every feature or fix that touches the CLI, extension, or shared schema MUST
 bump the corresponding `package.json` version and add a CHANGELOG entry on the
 same feature branch (same commit as the change, or the next immediate commit).
 
 ### Which packages to bump
 - `tools/cli/package.json` — `@portalflow/cli`
-- `tools/cli2/package.json` — `@portalflow/cli2`
 - `tools/extension/package.json` — `@portalflow/extension`
 - `tools/schema/package.json` — `@portalflow/schema`
 
 Bump every package actually modified by the change. If a schema field becomes
-optional and a CLI starts honoring it, bump both the schema and that CLI.
+optional and the CLI starts honoring it, bump both the schema and the CLI.
 
 ### Semver rules
 - **patch** — bug fixes, internal refactors, doc-only tweaks with no behavior change

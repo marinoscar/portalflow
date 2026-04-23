@@ -9,7 +9,7 @@ export interface ResolverResult {
 }
 
 /**
- * ElementResolver for cli2 — uses PageClient (WebSocket transport) instead of
+ * ElementResolver for the CLI — uses PageClient (WebSocket transport) instead of
  * Playwright's Page object.
  *
  * When the LLM suggests a selector, validation is attempted via

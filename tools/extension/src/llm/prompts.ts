@@ -355,9 +355,8 @@ replace the automation's steps array directly, so correctness matters.
        Only OMIT successCheck entirely when the goal is so open-ended
        you cannot state a completion predicate at all (e.g. "triage this
        inbox", "fill whatever fields this form has"). When omitted, the
-       cli2 runner trusts the LLM's \`done\` emission immediately — so
-       rely on the budget caps to contain an over-confident model, and
-       note that cli v1 will reject automations without a successCheck.
+       runner trusts the LLM's \`done\` emission immediately — so rely
+       on the budget caps to contain an over-confident model.
 
     e) includeScreenshot: true is the DEFAULT and should stay that
        way. Only set it to false when the user explicitly asks for
@@ -385,7 +384,7 @@ replace the automation's steps array directly, so correctness matters.
        AND confirm the download". Pick "fast" for single-phase goals
        like "dismiss the cookie banner", "click the Next button",
        "fill this one form". Adding mode: "agent" to a single-phase
-       goal wastes tokens for no benefit. cli v1 ignores this field.
+       goal wastes tokens for no benefit.
 
     Worked example: when the user says "add a step that figures out
     how to accept the cookie banner on this page, give it 45 seconds

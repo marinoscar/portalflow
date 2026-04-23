@@ -151,10 +151,9 @@ export const GotoActionSchema = z.object({
 // believes the goal is reached and the runner trusts it immediately. The
 // budget caps remain the only safety net in self-terminating mode — use it
 // only for goals whose completion condition is hard to write as a concrete
-// predicate. Self-terminating mode is honored by cli2; cli v1 still rejects
-// aiscope steps without a successCheck.
+// predicate.
 //
-// `mode` selects between two execution strategies (cli2 only):
+// `mode` selects between two execution strategies:
 //   - 'fast' (default) — one LLM call per iteration picks the next action.
 //     No planning phase, no milestone tracking. Cheapest; best for single-
 //     phase goals (dismiss a banner, click the visible next button).
@@ -164,8 +163,7 @@ export const GotoActionSchema = z.object({
 //     may emit `milestoneComplete: true` to advance, or `replan: true` to
 //     discard the plan and rebuild it. Replans are capped by `maxReplans`.
 //     Right for compound goals (login + navigate + extract + confirm) at
-//     roughly 1.5-3x the tokens of fast mode. cli v1 ignores this field
-//     and always runs the fast loop.
+//     roughly 1.5-3x the tokens of fast mode.
 export const AiScopeSuccessCheckSchema = z
   .object({
     check: z

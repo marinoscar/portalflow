@@ -1,7 +1,7 @@
 /**
- * run.ts (cli2 port)
+ * run.ts (CLI)
  *
- * Interactive run flow for portalflow2. Ported from tools/cli/src/tui/flows/run.ts
+ * Interactive run flow for portalflow. Ported from tools/cli/src/tui/flows/run.ts
  * with the BrowserService/PageService wiring replaced by ExtensionHost +
  * ChromeLauncher + AutomationRunner.
  *

@@ -195,7 +195,7 @@ export function launchChrome(opts: LaunchChromeOptions): ChildProcess {
     // Real mode with a specific sub-profile selected by the user.
     // --user-data-dir targets the browser's installation data dir.
     // --profile-directory picks the sub-folder within that dir.
-    // The singleton-forwarding path works fine here because cli2 doesn't
+    // The singleton-forwarding path works fine here because the CLI doesn't
     // use CDP — the extension opens the WebSocket from inside Chrome.
     args.push(`--user-data-dir=${opts.realProfile.userDataDir}`);
     args.push(`--profile-directory=${opts.realProfile.profileName}`);
@@ -230,7 +230,7 @@ function resolveExtensionDistPath(): string {
     // Only return the resolved path if the dist actually exists — otherwise the
     // user sees a misleading path in the error message.
     if (existsSync(resolved)) return resolved;
-    // Also try the alternative monorepo layout where cli2 and extension are peers
+    // Also try the alternative monorepo layout where the CLI and extension are peers
     // of the current working directory (e.g., running from a source checkout).
     const cwdFallback = pathResolve(process.cwd(), 'tools', 'extension', 'dist');
     if (existsSync(cwdFallback)) return cwdFallback;
@@ -275,7 +275,7 @@ export function waitForExtensionHandshake(
           `Extension did not connect within 30 seconds.\n` +
           `\n` +
           `Checklist:\n` +
-          `  1. Is Chrome running? (it should be — portalflow2 just launched it)\n` +
+          `  1. Is Chrome running? (it should be — portalflow just launched it)\n` +
           `  2. Is the PortalFlow extension loaded?\n` +
           `     → Open chrome://extensions\n` +
           `     → Enable Developer mode (top-right toggle)\n` +
@@ -286,7 +286,7 @@ export function waitForExtensionHandshake(
           `  4. Is another process holding port 7667?\n` +
           `     → Kill the other process or set extension.port in ~/.portalflow/config.json to a free port.\n` +
           `\n` +
-          `See tools/cli2/README.md for full setup instructions.\n` +
+          `See tools/cli/README.md for full setup instructions.\n` +
           realProfileNote,
         ),
       );

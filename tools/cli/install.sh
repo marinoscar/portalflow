@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
 #
-#  portalflow2 CLI + Chrome extension installer
+#  portalflow CLI + Chrome extension installer
 #
-#  Install:    curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli2/install.sh | bash
-#  Update:     portalflow2-update   (alias created during install)
-#  Uninstall:  curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli2/install.sh | bash -s -- --uninstall
+#  Install:    curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli/install.sh | bash
+#  Update:     portalflow-update   (alias created during install)
+#  Uninstall:  curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli/install.sh | bash -s -- --uninstall
 #
 #  Or run locally:
 #    ./install.sh
@@ -14,10 +14,10 @@
 #  The script is fully idempotent — run it again to update.
 #
 #  This installer builds both the Chrome extension (tools/extension/) and the
-#  portalflow2 CLI (tools/cli2/) from source, in dependency order:
+#  portalflow CLI (tools/cli/) from source, in dependency order:
 #    1. tools/schema  (shared schema package)
 #    2. tools/extension  (Chrome extension — produces dist/)
-#    3. tools/cli2   (portalflow2 binary)
+#    3. tools/cli   (portalflow binary)
 #
 #  After the script completes you still need to do the one-time
 #  "Load unpacked" step in Chrome:
@@ -34,9 +34,9 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 REPO_URL="https://github.com/marinoscar/portalflow.git"
-INSTALL_DIR="${PORTALFLOW2_INSTALL_DIR:-${HOME}/.portalflow-cli2}"
-LINK_TARGET="/usr/local/bin/portalflow2"
-UPDATE_LINK="/usr/local/bin/portalflow2-update"
+INSTALL_DIR="${PORTALFLOW_INSTALL_DIR:-${HOME}/.portalflow-cli}"
+LINK_TARGET="/usr/local/bin/portalflow"
+UPDATE_LINK="/usr/local/bin/portalflow-update"
 MIN_NODE_MAJOR=18
 BRANCH="main"
 
@@ -64,7 +64,7 @@ step()    { echo -e "\n${BOLD}$*${RESET}"; }
 
 if [ "${1:-}" = "--uninstall" ]; then
   echo ""
-  echo -e "${BOLD}portalflow2 — Uninstaller${RESET}"
+  echo -e "${BOLD}portalflow — Uninstaller${RESET}"
   echo ""
 
   for f in "${LINK_TARGET}" "${UPDATE_LINK}"; do
@@ -97,7 +97,7 @@ fi
 
 echo ""
 echo -e "${BOLD}  ┌──────────────────────────────────────┐${RESET}"
-echo -e "${BOLD}  │      portalflow2 CLI installer         │${RESET}"
+echo -e "${BOLD}  │      portalflow CLI installer         │${RESET}"
 echo -e "${BOLD}  └──────────────────────────────────────┘${RESET}"
 echo ""
 
@@ -181,10 +181,10 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ] && [ -f "${
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-# Check if SCRIPT_DIR is inside a valid tools/cli2 folder
+# Check if SCRIPT_DIR is inside a valid tools/cli folder
 if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/package.json" ] && [ -f "${SCRIPT_DIR}/src/index.ts" ]; then
   # Running from inside the repo (local install)
-  CLI2_DIR="${SCRIPT_DIR}"
+  CLI_DIR="${SCRIPT_DIR}"
   REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
   info "Running from local repo: ${REPO_ROOT}"
 
@@ -197,7 +197,7 @@ if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/package.json" ] && [ -f "${SCRI
 else
   # Running via curl pipe or from outside the repo — clone to INSTALL_DIR
   REPO_ROOT="${INSTALL_DIR}"
-  CLI2_DIR="${INSTALL_DIR}/tools/cli2"
+  CLI_DIR="${INSTALL_DIR}/tools/cli"
 
   if [ -d "${REPO_ROOT}/.git" ]; then
     info "Existing installation found at ${REPO_ROOT}"
@@ -215,12 +215,12 @@ EXT_DIR="${REPO_ROOT}/tools/extension"
 SCHEMA_DIR="${REPO_ROOT}/tools/schema"
 
 # Sanity checks
-if [ ! -f "${CLI2_DIR}/package.json" ]; then
-  fail "package.json not found at ${CLI2_DIR}. Installation may be corrupt."
+if [ ! -f "${CLI_DIR}/package.json" ]; then
+  fail "package.json not found at ${CLI_DIR}. Installation may be corrupt."
 fi
 
-if [ ! -f "${CLI2_DIR}/src/index.ts" ]; then
-  fail "src/index.ts not found at ${CLI2_DIR}. Installation may be corrupt."
+if [ ! -f "${CLI_DIR}/src/index.ts" ]; then
+  fail "src/index.ts not found at ${CLI_DIR}. Installation may be corrupt."
 fi
 
 if [ ! -f "${EXT_DIR}/manifest.json" ]; then
@@ -228,7 +228,7 @@ if [ ! -f "${EXT_DIR}/manifest.json" ]; then
 fi
 
 # First-install detection (used later in the done block)
-INSTALLED_MARKER="${CLI2_DIR}/.portalflow2-installed"
+INSTALLED_MARKER="${CLI_DIR}/.portalflow-installed"
 FIRST_INSTALL="false"
 if [ ! -f "${INSTALLED_MARKER}" ]; then
   FIRST_INSTALL="true"
@@ -241,7 +241,7 @@ fi
 
 step "[3/8] Installing dependencies"
 
-info "Monorepo install — this covers schema, extension, and cli2..."
+info "Monorepo install — this covers schema, extension, and cli..."
 run_step "npm install" bash -c "cd '${REPO_ROOT}' && npm install"
 success "Dependencies installed"
 
@@ -251,7 +251,7 @@ success "Dependencies installed"
 
 step "[4/8] Building schema"
 
-info "Building @portalflow/schema (required by extension and cli2)..."
+info "Building @portalflow/schema (required by extension and cli)..."
 run_step "schema build" bash -c "cd '${SCHEMA_DIR}' && npm run build"
 success "Schema built"
 
@@ -273,17 +273,17 @@ EXT_VERSION="$(node -e "try { console.log(require('${DIST_DIR}/manifest.json').v
 success "Extension built (v${EXT_VERSION})"
 
 # ---------------------------------------------------------------------------
-# Step 6 — Build cli2
+# Step 6 — Build cli
 # ---------------------------------------------------------------------------
 
-step "[6/8] Building cli2"
+step "[6/8] Building cli"
 
-info "Building portalflow2..."
-run_step "cli2 build" bash -c "cd '${CLI2_DIR}' && npm run build"
+info "Building portalflow..."
+run_step "cli build" bash -c "cd '${CLI_DIR}' && npm run build"
 
-BIN_SOURCE="${CLI2_DIR}/dist/index.js"
+BIN_SOURCE="${CLI_DIR}/dist/index.js"
 if [ ! -f "${BIN_SOURCE}" ]; then
-  fail "dist/index.js not found after cli2 build. Build may have failed."
+  fail "dist/index.js not found after cli build. Build may have failed."
 fi
 
 CLI2_VERSION="$(node "${BIN_SOURCE}" --version 2>/dev/null || echo "unknown")"
@@ -304,10 +304,10 @@ mkdir -p "${PORTALFLOW_HOME}/artifacts/videos"
 mkdir -p "${PORTALFLOW_HOME}/artifacts/downloads"
 
 # Copy bundled examples into ~/.portalflow/automations if it has no .json files yet
-if [ -d "${CLI2_DIR}/examples" ]; then
+if [ -d "${CLI_DIR}/examples" ]; then
   existing_json="$(find "${PORTALFLOW_HOME}/automations" -maxdepth 1 -name '*.json' 2>/dev/null | head -n 1)"
   if [ -z "${existing_json}" ]; then
-    cp "${CLI2_DIR}/examples/"*.json "${PORTALFLOW_HOME}/automations/" 2>/dev/null || true
+    cp "${CLI_DIR}/examples/"*.json "${PORTALFLOW_HOME}/automations/" 2>/dev/null || true
     success "Seeded example automations to ${PORTALFLOW_HOME}/automations"
   else
     info "Automations directory already has files — leaving it alone"
@@ -343,11 +343,11 @@ else
   success "Symlink created"
 fi
 
-# Create a convenience `portalflow2-update` command
-UPDATER_SCRIPT="${CLI2_DIR}/.portalflow2-update.sh"
+# Create a convenience `portalflow-update` command
+UPDATER_SCRIPT="${CLI_DIR}/.portalflow-update.sh"
 cat > "${UPDATER_SCRIPT}" << 'UPDATER'
 #!/usr/bin/env bash
-# Quick updater — pulls latest and reinstalls portalflow2 + extension
+# Quick updater — pulls latest and reinstalls portalflow + extension
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec bash "${SCRIPT_DIR}/install.sh"
 UPDATER
@@ -359,11 +359,11 @@ sudo ln -sf "${UPDATER_SCRIPT}" "${UPDATE_LINK}" 2>/dev/null || true
 # ---------------------------------------------------------------------------
 
 echo ""
-if command -v portalflow2 &>/dev/null; then
-  INSTALLED_VERSION="$(portalflow2 --version 2>/dev/null || echo "unknown")"
-  success "portalflow2 ${INSTALLED_VERSION} is installed and ready"
+if command -v portalflow &>/dev/null; then
+  INSTALLED_VERSION="$(portalflow --version 2>/dev/null || echo "unknown")"
+  success "portalflow ${INSTALLED_VERSION} is installed and ready"
 else
-  warn "portalflow2 was installed at ${LINK_TARGET} but is not in your PATH"
+  warn "portalflow was installed at ${LINK_TARGET} but is not in your PATH"
   warn "Add this to your shell profile:"
   echo '    export PATH="/usr/local/bin:$PATH"'
 fi
@@ -418,13 +418,13 @@ fi
 echo ""
 echo "  Get started:"
 echo ""
-echo "    ${DIM}\$${RESET} portalflow2                                                    ${DIM}# Interactive menu${RESET}"
-echo "    ${DIM}\$${RESET} portalflow2 provider config                                   ${DIM}# Set up an LLM provider${RESET}"
-echo "    ${DIM}\$${RESET} portalflow2 run ${HOME}/.portalflow/automations/<file>.json"
-echo "    ${DIM}\$${RESET} portalflow2 --help                                            ${DIM}# Show all commands${RESET}"
+echo "    ${DIM}\$${RESET} portalflow                                                    ${DIM}# Interactive menu${RESET}"
+echo "    ${DIM}\$${RESET} portalflow provider config                                   ${DIM}# Set up an LLM provider${RESET}"
+echo "    ${DIM}\$${RESET} portalflow run ${HOME}/.portalflow/automations/<file>.json"
+echo "    ${DIM}\$${RESET} portalflow --help                                            ${DIM}# Show all commands${RESET}"
 echo ""
 echo -e "  ${BOLD}Maintenance:${RESET}"
-echo -e "    Update:     ${DIM}portalflow2-update${RESET}"
-echo -e "    Update:     ${DIM}curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli2/install.sh | bash${RESET}"
-echo -e "    Uninstall:  ${DIM}${CLI2_DIR}/install.sh --uninstall${RESET}"
+echo -e "    Update:     ${DIM}portalflow-update${RESET}"
+echo -e "    Update:     ${DIM}curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli/install.sh | bash${RESET}"
+echo -e "    Uninstall:  ${DIM}${CLI_DIR}/install.sh --uninstall${RESET}"
 echo ""

@@ -5,7 +5,7 @@
  * client that replies to navigate/click/type/extract commands with canned
  * ok:true responses, and runs a 4-step automation through the StepExecutor.
  *
- * This proves the full cli2 pipeline (StepExecutor → PageClient →
+ * This proves the full CLI pipeline (StepExecutor → PageClient →
  * ExtensionHost → WS) end-to-end with no Chrome dependency.
  *
  * Each test sets a vitest timeout of 15 s to accommodate multiple WS
@@ -142,7 +142,7 @@ function buildStack(host: ExtensionHost): {
 // Integration tests
 // ---------------------------------------------------------------------------
 
-describe('cli2 pipeline integration', () => {
+describe('CLI pipeline integration', () => {
   let host: ExtensionHost;
   let fakeWs: WebSocket;
 
@@ -170,7 +170,7 @@ describe('cli2 pipeline integration', () => {
         extract: 'Hello from page', // reply for any extract command
       });
 
-      // 3. Build the cli2 service stack.
+      // 3. Build the CLI service stack.
       const { executor, runContext } = buildStack(host);
 
       // 4. Build a 4-step automation.

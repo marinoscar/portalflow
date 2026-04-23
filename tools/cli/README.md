@@ -1,6 +1,6 @@
-# portalflow2 — PortalFlow CLI v2
+# portalflow — PortalFlow CLI
 
-`portalflow2` is the second-generation PortalFlow CLI that executes browser automations through a WebSocket connection to the PortalFlow Chrome extension, eliminating every Playwright-based browser-launch failure mode catalogued in [`docs/BROWSER-CONTROL-STRATEGY.md §4`](../../docs/BROWSER-CONTROL-STRATEGY.md#4-the-recommended-path-forward-chrome-extension). Unlike the original `tools/cli/` (which drove Chrome via Playwright and is deprecated), `portalflow2` never touches a CDP channel — Chrome is a normal user-facing browser, and the extension is its automation runtime. The same `tools/extension/` package that records workflows also executes them; the two modes coexist without interference.
+`portalflow` is the PortalFlow CLI that executes browser automations through a WebSocket connection to the PortalFlow Chrome extension, eliminating every Playwright-based browser-launch failure mode catalogued in [`docs/BROWSER-CONTROL-STRATEGY.md §4`](../../docs/BROWSER-CONTROL-STRATEGY.md#4-the-recommended-path-forward-chrome-extension). The CLI never touches a CDP channel — Chrome is a normal user-facing browser, and the extension is its automation runtime. The same `tools/extension/` package that records workflows also executes them; the two modes coexist without interference.
 
 ---
 
@@ -15,7 +15,7 @@
 - [aiscope: credentials and tool integration](#aiscope-credentials-and-tool-integration)
 - [WebSocket protocol reference](#websocket-protocol-reference)
 - [Troubleshooting](#troubleshooting)
-- [Known limitations (v1)](#known-limitations-v1)
+- [Known limitations](#known-limitations)
 - [Development](#development)
 - [Relationship to other packages](#relationship-to-other-packages)
 - [Reporting issues / contributing](#reporting-issues--contributing)
@@ -60,32 +60,32 @@ This produces `tools/extension/dist/`. You will point Chrome at this directory i
 
 The PortalFlow toolbar icon appears. After any future rebuild of the extension, click the reload icon on the extension card — no need to Load unpacked again.
 
-### 4. Build cli2
+### 4. Build the CLI
 
 ```bash
-npm -w tools/cli2 run build
+npm -w tools/cli run build
 ```
 
 ### 5. (Optional) Link globally
 
 ```bash
-cd tools/cli2 && npm link
+cd tools/cli && npm link
 ```
 
-After this, `portalflow2 --help` works from any directory. Without it, invoke the CLI as `node tools/cli2/dist/index.js`.
+After this, `portalflow --help` works from any directory. Without it, invoke the CLI as `node tools/cli/dist/index.js`.
 
 ### 6. First run
 
 ```bash
-portalflow2
+portalflow
 ```
 
 Running with no arguments launches the interactive TUI. On the first invocation (or whenever `profileMode` is `unset`), the TUI asks which Chrome profile to use:
 
-- **Dedicated profile** (recommended): `portalflow2` spawns Chrome pointed at `~/.portalflow/chrome-profile/`, completely isolated from your day-to-day browsing. No SingletonLock conflicts, no session-restore surprises, fully reproducible. The extension must be loaded into this profile (the profile directory is created on first launch; after Chrome opens in the new profile, load the extension via `chrome://extensions` as described in step 3 above).
-- **Real profile**: `portalflow2` spawns Chrome with no `--user-data-dir` flag, so Chrome uses your system default profile. Your real cookies, saved passwords, and installed extensions are all available. Requirement: you must have installed the PortalFlow extension in that profile and Chrome must NOT already be running when `portalflow2` starts.
+- **Dedicated profile** (recommended): `portalflow` spawns Chrome pointed at `~/.portalflow/chrome-profile/`, completely isolated from your day-to-day browsing. No SingletonLock conflicts, no session-restore surprises, fully reproducible. The extension must be loaded into this profile (the profile directory is created on first launch; after Chrome opens in the new profile, load the extension via `chrome://extensions` as described in step 3 above).
+- **Real profile**: `portalflow` spawns Chrome with no `--user-data-dir` flag, so Chrome uses your system default profile. Your real cookies, saved passwords, and installed extensions are all available. Requirement: you must have installed the PortalFlow extension in that profile and Chrome must NOT already be running when `portalflow` starts.
 
-The choice is persisted to `~/.portalflow/config.json` and can be changed later with `portalflow2 settings extension`.
+The choice is persisted to `~/.portalflow/config.json` and can be changed later with `portalflow settings extension`.
 
 ---
 
@@ -94,17 +94,17 @@ The choice is persisted to `~/.portalflow/config.json` and can be changed later 
 Instead of following the manual steps above, you can run the installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli/install.sh | bash
 ```
 
-The script is idempotent — run it again to update. It clones the repo to `~/.portalflow-cli2/`, builds `@portalflow/schema`, the extension at `tools/extension/dist/`, and `portalflow2` itself, seeds `~/.portalflow/` default directories, and installs `portalflow2` + `portalflow2-update` to `/usr/local/bin/` (requires `sudo`).
+The script is idempotent — run it again to update. It clones the repo to `~/.portalflow-cli/`, builds `@portalflow/schema`, the extension at `tools/extension/dist/`, and `portalflow` itself, seeds `~/.portalflow/` default directories, and installs `portalflow` + `portalflow-update` to `/usr/local/bin/` (requires `sudo`).
 
 After the script completes you still need to do the one-time "Load unpacked" step in `chrome://extensions` — the installer prints the exact dist path and copies it to your clipboard.
 
 To uninstall:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli2/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cli/install.sh | bash -s -- --uninstall
 ```
 
 ---
@@ -116,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/marinoscar/portalflow/main/tools/cl
 **Interactive TUI** (no arguments):
 
 ```bash
-portalflow2
+portalflow
 ```
 
 Launches a menu. Choose "Run" to get a file picker for automation JSON files.
@@ -124,7 +124,7 @@ Launches a menu. Choose "Run" to get a file picker for automation JSON files.
 **Non-interactive with a file argument**:
 
 ```bash
-portalflow2 run path/to/automation.json
+portalflow run path/to/automation.json
 ```
 
 Runs the specified file without any TUI. Exits 0 on success, 1 on failure. Suitable for scripts and CI-like environments.
@@ -132,41 +132,41 @@ Runs the specified file without any TUI. Exits 0 on success, 1 on failure. Suita
 **TUI file picker** (run subcommand, no file):
 
 ```bash
-portalflow2 run
+portalflow run
 ```
 
 Opens the TUI file picker scoped to the configured automations directory.
 
 ### What happens during a run
 
-1. `portalflow2` reads `~/.portalflow/config.json` and verifies that `profileMode` is set. If it is `unset`, the CLI exits with instructions to configure it first.
-2. `portalflow2` starts the WebSocket server on `127.0.0.1:7667` (configurable).
-3. `portalflow2` detects the Chrome binary (via `detectChromeBinary`) or uses the `extension.chromeBinary` config override.
+1. `portalflow` reads `~/.portalflow/config.json` and verifies that `profileMode` is set. If it is `unset`, the CLI exits with instructions to configure it first.
+2. `portalflow` starts the WebSocket server on `127.0.0.1:7667` (configurable).
+3. `portalflow` detects the Chrome binary (via `detectChromeBinary`) or uses the `extension.chromeBinary` config override.
 4. If `--kill-chrome` was passed (or answered "Yes" in the TUI), all running Chrome/Chromium processes are terminated using `pkill` (Linux/macOS) or `taskkill` (Windows). The CLI waits 1.5 seconds afterward so that file locks on the Chrome profile are fully released before the new instance starts.
 5. Chrome is spawned with `--no-first-run --no-default-browser-check` and, for dedicated mode, `--user-data-dir=<profileDir>`. No headless, no CDP, no automation flags.
 6. The extension's offscreen document connects to the WebSocket and sends a `hello` event carrying the Chrome version, extension version, and protocol version.
-7. `portalflow2` validates the protocol version and replies with a `session` envelope carrying a UUID `runId`.
+7. `portalflow` validates the protocol version and replies with a `session` envelope carrying a UUID `runId`.
 8. If `--clear-history <range>` was passed with a value other than `none` (or a range was selected in the TUI), the CLI sends a `clearHistory` command to the extension, which calls `chrome.browsingData.remove()` to clear browsing history and cache for the requested time range. Cookies and saved passwords are not touched, so existing logged-in sessions survive.
-9. `portalflow2` sends an `openWindow` command; the extension opens a new dedicated browser window.
+9. `portalflow` sends an `openWindow` command; the extension opens a new dedicated browser window.
 10. Automation steps execute one at a time over the WebSocket, each as a typed command. The extension performs the DOM action in the run window and replies with a `result` or `error` envelope.
-11. On completion, `portalflow2` either closes the run window (if `extension.closeWindowOnFinish: true`) or leaves it open for inspection.
+11. On completion, `portalflow` either closes the run window (if `extension.closeWindowOnFinish: true`) or leaves it open for inspection.
 
 ---
 
 ## Commands
 
-### `portalflow2`
+### `portalflow`
 
 Launches the interactive TUI. Covers all subcommands below in menu form. On first use, prompts for the Chrome profile mode.
 
-### `portalflow2 run [file]`
+### `portalflow run [file]`
 
 Executes an automation from a JSON file. Omit `file` to use the interactive file picker.
 
 ```bash
-portalflow2 run ~/automations/my-flow.json
-portalflow2 run ~/automations/login.json --input username=alice --input password=s3cr3t
-portalflow2 run ~/automations/export.json --download-dir ~/Downloads/reports
+portalflow run ~/automations/my-flow.json
+portalflow run ~/automations/login.json --input username=alice --input password=s3cr3t
+portalflow run ~/automations/export.json --download-dir ~/Downloads/reports
 ```
 
 | Flag | Type | Default | Description |
@@ -187,42 +187,42 @@ portalflow2 run ~/automations/export.json --download-dir ~/Downloads/reports
 
 > **Note:** `--kill-chrome` and `--clear-history` are per-run runtime options. They are not persisted in `~/.portalflow/config.json`. Pass them on the command line each time, or answer the corresponding TUI prompts before each run.
 
-### `portalflow2 validate [file]`
+### `portalflow validate [file]`
 
 Validates an automation JSON file against `AutomationSchema`. Omit `file` to use the interactive file picker.
 
 ```bash
-portalflow2 validate ~/automations/my-flow.json
+portalflow validate ~/automations/my-flow.json
 # OK — My Flow (12 steps)
 ```
 
 Exits 0 on valid, 1 on invalid, with structured validation errors to stderr.
 
-### `portalflow2 provider list`
+### `portalflow provider list`
 
 Lists all configured LLM providers and marks the active one.
 
 ```bash
-portalflow2 provider list
+portalflow provider list
 #   anthropic [active]   kind: anthropic   model: claude-opus-4-5
 #   openai               kind: openai-compatible   model: gpt-4o
 ```
 
-### `portalflow2 provider set <name>`
+### `portalflow provider set <name>`
 
 Sets the active LLM provider.
 
 ```bash
-portalflow2 provider set anthropic
+portalflow provider set anthropic
 ```
 
-### `portalflow2 provider config <name>`
+### `portalflow provider config <name>`
 
 Adds or edits a provider's credentials.
 
 ```bash
-portalflow2 provider config anthropic --api-key sk-ant-... --model claude-opus-4-5
-portalflow2 provider config local --kind openai-compatible --base-url http://localhost:11434/v1 --model llama3
+portalflow provider config anthropic --api-key sk-ant-... --model claude-opus-4-5
+portalflow provider config local --kind openai-compatible --base-url http://localhost:11434/v1 --model llama3
 ```
 
 | Flag | Description |
@@ -232,28 +232,28 @@ portalflow2 provider config local --kind openai-compatible --base-url http://loc
 | `--base-url <url>` | Base URL (for openai-compatible endpoints) |
 | `--kind <kind>` | Provider kind: `anthropic` or `openai-compatible` |
 
-### `portalflow2 provider reset`
+### `portalflow provider reset`
 
 Deletes all provider configuration. Destructive — requires `--yes` for non-interactive use.
 
 ```bash
-portalflow2 provider reset --yes
+portalflow provider reset --yes
 ```
 
-### `portalflow2 settings list`
+### `portalflow settings list`
 
 Prints the current configuration: paths, video, logging, and extension settings.
 
 ```bash
-portalflow2 settings list
+portalflow settings list
 ```
 
-### `portalflow2 settings paths`
+### `portalflow settings paths`
 
 Sets storage directory paths. Any subset of flags is accepted; omit all flags to print current values.
 
 ```bash
-portalflow2 settings paths --automations ~/automations --downloads ~/Downloads/portalflow
+portalflow settings paths --automations ~/automations --downloads ~/Downloads/portalflow
 ```
 
 | Flag | Description |
@@ -263,13 +263,13 @@ portalflow2 settings paths --automations ~/automations --downloads ~/Downloads/p
 | `--videos <dir>` | Directory for recorded videos |
 | `--downloads <dir>` | Directory for downloaded files |
 
-### `portalflow2 settings logging`
+### `portalflow settings logging`
 
 Configures log level, output file, formatting, and secret redaction.
 
 ```bash
-portalflow2 settings logging --level debug --file ~/logs/portalflow.log
-portalflow2 settings logging --no-pretty --no-redact
+portalflow settings logging --level debug --file ~/logs/portalflow.log
+portalflow settings logging --no-pretty --no-redact
 ```
 
 | Flag | Description |
@@ -280,23 +280,23 @@ portalflow2 settings logging --no-pretty --no-redact
 | `--pretty` / `--no-pretty` | Pretty-print stdout (default: on) |
 | `--redact` / `--no-redact` | Redact secret inputs in log output (default: on) |
 
-### `portalflow2 settings extension`
+### `portalflow settings extension`
 
 Opens the interactive TUI for configuring the Chrome extension transport: profile mode, host, port, Chrome binary override, and close-on-finish behavior.
 
 ```bash
-portalflow2 settings extension
+portalflow settings extension
 ```
 
 All `ExtensionConfig` fields are editable here. See the [Configuration reference](#configuration-reference) for the full field list.
 
-### `portalflow2 settings video`
+### `portalflow settings video`
 
 Enables or disables video recording and sets resolution.
 
 ```bash
-portalflow2 settings video --enable --width 1920 --height 1080
-portalflow2 settings video --disable
+portalflow settings video --enable --width 1920 --height 1080
+portalflow settings video --disable
 ```
 
 | Flag | Description |
@@ -314,16 +314,16 @@ All configuration lives in `~/.portalflow/config.json`. The file is created auto
 
 ### `extension` section
 
-This is the primary new section introduced by cli2.
+This is the section that configures the WebSocket-based extension transport.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `host` | `string` | `127.0.0.1` | Bind address for the WebSocket server |
 | `port` | `number` | `7667` | WebSocket port (1024–65535) |
-| `chromeBinary` | `string \| undefined` | auto-detect | Override Chrome binary path. When unset, cli2 probes platform-specific locations (see Troubleshooting). |
+| `chromeBinary` | `string \| undefined` | auto-detect | Override Chrome binary path. When unset, the CLI probes platform-specific locations (see Troubleshooting). |
 | `profileMode` | `'dedicated' \| 'real' \| 'unset'` | `unset` | `unset` triggers the first-run prompt. `dedicated` uses an isolated profile at `profileDir`. `real` uses a Chrome profile — either the specific one recorded in `realProfile`, or Chrome's default if `realProfile` is undefined. |
 | `profileDir` | `string \| undefined` | `~/.portalflow/chrome-profile/` | Profile directory when `profileMode` is `dedicated` |
-| `realProfile` | `object \| undefined` | `undefined` | Which Chrome sub-profile to launch into when `profileMode` is `real`. Selected interactively via the first-run prompt or `portalflow2 settings extension`; if undefined, Chrome picks its default profile. Object shape: `{ userDataDir, profileName, displayName, browser }`. |
+| `realProfile` | `object \| undefined` | `undefined` | Which Chrome sub-profile to launch into when `profileMode` is `real`. Selected interactively via the first-run prompt or `portalflow settings extension`; if undefined, Chrome picks its default profile. Object shape: `{ userDataDir, profileName, displayName, browser }`. |
 | `closeWindowOnFinish` | `boolean` | `false` | Close the run window when the automation completes |
 
 ### `paths` section
@@ -354,7 +354,7 @@ This is the primary new section introduced by cli2.
 
 ### `providers` and `activeProvider`
 
-LLM provider credentials and the active provider name. Managed via `portalflow2 provider` subcommands.
+LLM provider credentials and the active provider name. Managed via `portalflow provider` subcommands.
 
 ---
 
@@ -362,8 +362,8 @@ LLM provider credentials and the active provider name. Managed via `portalflow2 
 
 ```
 ┌─────────────────────┐    ws://127.0.0.1:7667   ┌──────────────────────┐
-│  portalflow2 CLI    │ ◀──────────────────────▶ │  User's Chrome       │
-│  (tools/cli2)       │     command/response     │  + PortalFlow ext    │
+│  portalflow CLI    │ ◀──────────────────────▶ │  User's Chrome       │
+│  (tools/cli)       │     command/response     │  + PortalFlow ext    │
 │                     │     + event + log        │  (tools/extension)   │
 │  AutomationRunner   │                          │  ┌────────────────┐  │
 │  StepExecutor       │                          │  │ service worker │  │
@@ -376,7 +376,7 @@ LLM provider credentials and the active provider name. Managed via `portalflow2 
               (plain binary + dedicated profile)
 ```
 
-**portalflow2 CLI** owns automation state, step dispatch, LLM calls, condition evaluation, loops, gotos, and aiscope orchestration. It also runs the WebSocket server that the extension connects to.
+**portalflow CLI** owns automation state, step dispatch, LLM calls, condition evaluation, loops, gotos, and aiscope orchestration. It also runs the WebSocket server that the extension connects to.
 
 **ExtensionHost** (WS server) manages the connection lifecycle: handshake, session assignment, reconnect window, and the four-state machine (`idle → connected → reconnect_pending → aborted`).
 
@@ -467,7 +467,7 @@ Vault-sourced inputs are exploded into per-field variables at load time. If the 
 
 ### Self-terminating aiscope (no `successCheck`)
 
-Some goals are hard to state as a concrete yes/no predicate — "fill whatever fields this form has", "triage this inbox view", "dismiss every overlay you can find". For those, cli2 accepts aiscope steps **without** a `successCheck`. Each iteration makes a single `decideNextAction` LLM call and the loop ends when the model emits `done`. The model is told so via a `selfTerminating: true` marker in the user message, and the budget caps (`maxDurationSec`, `maxIterations`) are the only safety net — so keep them tight.
+Some goals are hard to state as a concrete yes/no predicate — "fill whatever fields this form has", "triage this inbox view", "dismiss every overlay you can find". For those, the CLI accepts aiscope steps **without** a `successCheck`. Each iteration makes a single `decideNextAction` LLM call and the loop ends when the model emits `done`. The model is told so via a `selfTerminating: true` marker in the user message, and the budget caps (`maxDurationSec`, `maxIterations`) are the only safety net — so keep them tight.
 
 ```json
 {
@@ -486,7 +486,7 @@ Some goals are hard to state as a concrete yes/no predicate — "fill whatever f
 }
 ```
 
-Use this sparingly. When you can write a predicate, prefer a deterministic `successCheck`; when you can state a yes/no question, prefer an AI `successCheck`. Self-terminating mode trades safety for flexibility and is **cli2-only** — cli v1 will throw at runtime when `successCheck` is missing.
+Use this sparingly. When you can write a predicate, prefer a deterministic `successCheck`; when you can state a yes/no question, prefer an AI `successCheck`. Self-terminating mode trades safety for flexibility.
 
 ### Agent mode (`mode: "agent"`)
 
@@ -531,13 +531,12 @@ Agent mode is **LLM-agnostic**. Every provider call is plain JSON in / plain JSO
 
 - Single-phase goals ("dismiss the cookie banner", "click Next", "fill this one form").
 - Cost-sensitive runs where the planning call and per-iteration plan serialization aren't worth the extra tokens.
-- cli v1 compatibility — cli v1 ignores the field and always runs fast mode.
 
 ---
 
 ## WebSocket protocol reference
 
-Defined in `tools/cli2/src/browser/protocol.ts` (CLI side) and mirrored in `tools/extension/src/shared/runner-protocol.ts` (extension side).
+Defined in `tools/cli/src/browser/protocol.ts` (CLI side) and mirrored in `tools/extension/src/shared/runner-protocol.ts` (extension side).
 
 **Current version:** `RUNNER_PROTOCOL_VERSION = '2'`
 
@@ -773,7 +772,7 @@ The exact error message from `chrome-launcher.ts`:
 Extension did not connect within 30 seconds.
 
 Checklist:
-  1. Is Chrome running? (it should be — portalflow2 just launched it)
+  1. Is Chrome running? (it should be — portalflow just launched it)
   2. Is the PortalFlow extension loaded?
      → Open chrome://extensions
      → Enable Developer mode (top-right toggle)
@@ -802,7 +801,7 @@ The binary search order on each platform:
 To set a custom path:
 
 ```bash
-portalflow2 settings extension
+portalflow settings extension
 # select "Chrome binary" and enter the path
 ```
 
@@ -830,7 +829,7 @@ The offscreen doc dropped between steps and did not reconnect within the 30-seco
 
 ### Extension not loaded in the selected profile
 
-Chrome extensions are per-profile: an extension loaded in "Default" is invisible to "Profile 1" and vice versa. When `profileMode` is `real` and you have selected a specific profile via `portalflow2 settings extension`, portalflow2 launches Chrome with `--user-data-dir=<path>` and `--profile-directory=<name>`, which opens Chrome in exactly that profile. If the PortalFlow extension was only installed in a different profile, Chrome will open correctly but the extension will not be present, and the 30-second handshake will time out. Fix: switch to the chosen profile in Chrome's profile picker (the round avatar icon in the top-right corner), then go to `chrome://extensions`, enable Developer mode, click Load unpacked, and select `tools/extension/dist/`. After that re-run `portalflow2`.
+Chrome extensions are per-profile: an extension loaded in "Default" is invisible to "Profile 1" and vice versa. When `profileMode` is `real` and you have selected a specific profile via `portalflow settings extension`, portalflow launches Chrome with `--user-data-dir=<path>` and `--profile-directory=<name>`, which opens Chrome in exactly that profile. If the PortalFlow extension was only installed in a different profile, Chrome will open correctly but the extension will not be present, and the 30-second handshake will time out. Fix: switch to the chosen profile in Chrome's profile picker (the round avatar icon in the top-right corner), then go to `chrome://extensions`, enable Developer mode, click Load unpacked, and select `tools/extension/dist/`. After that re-run `portalflow`.
 
 ### Yellow "Developer mode extensions" balloon
 
@@ -845,7 +844,7 @@ Chrome always shows this notification bar when unpacked extensions are loaded. I
 Set `extension.port` to a free port:
 
 ```bash
-portalflow2 settings extension
+portalflow settings extension
 # select "WebSocket port" and enter a new value (1024–65535)
 ```
 
@@ -876,7 +875,7 @@ Yes. The extension is bi-modal. The recorder side panel and the runtime command 
 
 ---
 
-## Known limitations (v1)
+## Known limitations
 
 These are explicit non-goals for the current release. Each has a brief note on why it is deferred.
 
@@ -886,7 +885,7 @@ These are explicit non-goals for the current release. Each has a brief note on w
 - **Full-page screenshots**: `chrome.tabs.captureVisibleTab` captures only the visible viewport. Full-page capture requires multiple captures and stitching. The `extract: screenshot` step produces viewport-only screenshots for now.
 - **Headless operation**: the extension requires a visible Chrome window — MV3 extensions cannot run in `--headless=new` without additional infrastructure. Headless CI support is a future roadmap item.
 - **Signed CRX distribution**: the extension is loaded unpacked (developer mode). Distributing as a signed CRX via the Chrome Web Store or a private channel requires additional infra. No timeline.
-- **Concurrent runs**: `ExtensionHost` enforces a single active run per extension instance. A second `portalflow2 run` while one is active will be rejected. Queuing concurrent runs is a future roadmap item.
+- **Concurrent runs**: `ExtensionHost` enforces a single active run per extension instance. A second `portalflow run` while one is active will be rejected. Queuing concurrent runs is a future roadmap item.
 - **Mid-step reconnect recovery**: if the extension disconnects while a command is in flight, the run is aborted. Only step-boundary reconnect is supported. Mid-step recovery would require idempotency guarantees per command type — deferred.
 
 ---
@@ -897,13 +896,13 @@ These are explicit non-goals for the current release. Each has a brief note on w
 
 ```bash
 # TypeScript build (produces dist/)
-npm -w tools/cli2 run build
+npm -w tools/cli run build
 
 # Watch mode via tsx (no build step required)
-npm -w tools/cli2 run dev
+npm -w tools/cli run dev
 
 # Run tests via vitest
-npm -w tools/cli2 run test
+npm -w tools/cli run test
 
 # Rebuild the extension (required after editing tools/extension/src/)
 npm -w tools/extension run build
@@ -916,18 +915,14 @@ You do not need to "Load unpacked" again. After rebuilding, click the circular r
 
 ### Test structure
 
-- `tools/cli2/src/runner/checkpoint.ts` — `CheckpointStore` and snapshot helpers; covered by unit tests
-- `tools/cli2/src/browser/extension-host.ts` — `ExtensionHost` state machine; covered by mock WebSocket tests
-- `tools/cli2/src/browser/chrome-launcher.ts` — `detectChromeBinary`; covered with injected platform stubs
+- `tools/cli/src/runner/checkpoint.ts` — `CheckpointStore` and snapshot helpers; covered by unit tests
+- `tools/cli/src/browser/extension-host.ts` — `ExtensionHost` state machine; covered by mock WebSocket tests
+- `tools/cli/src/browser/chrome-launcher.ts` — `detectChromeBinary`; covered with injected platform stubs
 - `tools/extension/src/shared/selector-resolver.ts` — selector cascade; covered by parity tests against the recorder's selector-builder
 
 ---
 
 ## Relationship to other packages
-
-### `tools/cli/` — deprecated Playwright CLI
-
-The original `@portalflow/cli` package (`portalflow` binary) executes automations via Playwright, launching Chrome with a CDP channel. After five versions of persistent-mode fixes documented in [`docs/BROWSER-CONTROL-STRATEGY.md §2`](../../docs/BROWSER-CONTROL-STRATEGY.md#2-attempts-log), the approach was abandoned because every fix revealed a deeper incompatibility between Playwright's CDP contract and the user's real Chrome environment. `tools/cli/` remains fully functional for users who do not need real-profile automation (e.g. simple sites, isolated test runs), but it is scheduled for removal once `portalflow2` has been in active use for a few releases. Do not add new features to it.
 
 ### `tools/extension/` — PortalFlow Recorder (bi-modal)
 
@@ -935,7 +930,7 @@ The same extension that records workflows now also executes them. The recorder (
 
 ### `tools/schema/` — shared schema
 
-Both `tools/cli/` and `tools/cli2/` import `@portalflow/schema` for automation validation and step-type definitions. The schema is the single source of truth for every field both tools produce and consume. See [`docs/AUTOMATION-JSON-SPEC.md`](../../docs/AUTOMATION-JSON-SPEC.md) for the full reference.
+Both `tools/cli/` and `tools/extension/` import `@portalflow/schema` for automation validation and step-type definitions. The schema is the single source of truth for every field both tools produce and consume. See [`docs/AUTOMATION-JSON-SPEC.md`](../../docs/AUTOMATION-JSON-SPEC.md) for the full reference.
 
 ---
 
@@ -944,7 +939,7 @@ Both `tools/cli/` and `tools/cli2/` import `@portalflow/schema` for automation v
 Open an issue on GitHub with:
 
 - The exact error message (copy from the terminal — do not paraphrase)
-- The full `portalflow2 run` command you ran
+- The full `portalflow run` command you ran
 - Your OS, Chrome version (`chrome://settings/help`), and Node.js version (`node --version`)
 - The contents of `~/.portalflow/config.json` (redact any API keys)
 - The automation JSON file if the issue is step-specific (remove any real credentials first)
