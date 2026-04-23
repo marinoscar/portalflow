@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-04-23
+
+Tooling release: the Playwright-based CLI is removed and the extension-transport CLI (formerly `@portalflow/cli2`) is now the one and only CLI under the `@portalflow/cli` name.
+
+### Changed (breaking)
+
+- **Removed `@portalflow/cli` v1** — the original Playwright-based CLI at `tools/cli/` is gone. The last commit where it existed is preserved as the `cli1-version` tag for historical reference.
+- **Renamed `@portalflow/cli2` → `@portalflow/cli`** (`tools/cli2/` → `tools/cli/`). Binary renamed from `portalflow2` → `portalflow`. Anyone scripting against `@portalflow/cli2` or the `portalflow2` binary needs to update imports and command invocations.
+- **Major version bump to 2.0.0** signals the breaking rename.
+
+### Removed
+
+- All `cli v1` / `cli2 only` / `cli2-only` compatibility qualifiers in docs, prompts, examples, and comments — there's one CLI now, so the distinctions are moot.
+- The `tools/cli/README.md` "deprecated Playwright CLI" section.
+- **Why this exists**: keeping two CLIs (one Playwright, one extension-transport) sharing aiscope behavior but diverging on self-terminating / agent-mode support was confusing for new users and doubled the maintenance surface. Every post-1.0.x aiscope feature was extension-transport-only anyway.
+
+### Patch
+
+- `@portalflow/schema` 1.2.0 → 1.2.1 — JSDoc updated to drop the v1-vs-v2 distinctions; no behavioral change.
+- `@portalflow/extension` 1.2.0 → 1.2.1 — sidepanel dropdown option labels and hint text updated; no behavioral change.
+- `@portalflow/cli` 1.2.0 → **2.0.0** (rename + all the above).
+
 ## [1.2.0] - 2026-04-23
 
 Tooling release: aiscope gains a true agent mode — planner + milestones + replan — while keeping fast mode as the cheap default. LLM-agnostic by design.
