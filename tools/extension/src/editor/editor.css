@@ -264,3 +264,137 @@ body {
   font-size: 12px;
   margin: 4px 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Toolbar extras: dirty dot, name separator, validate toast           */
+/* ------------------------------------------------------------------ */
+
+.toolbar-name-separator {
+  font-weight: 400;
+  font-size: 13px;
+  color: #94a3b8;
+  margin-left: 4px;
+}
+
+.dirty-dot {
+  color: #f59e0b;
+  font-size: 10px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.validate-toast {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.validate-toast--ok {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+
+.validate-toast--err {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Modal overlay                                                       */
+/* ------------------------------------------------------------------ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 480px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.modal-close {
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-error-intro {
+  font-size: 13px;
+  color: #475569;
+  margin: 0 0 8px 0;
+}
+
+.modal-error-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 12px;
+  color: #dc2626;
+  line-height: 1.7;
+}
+
+.modal-error-more {
+  color: #94a3b8;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* ------------------------------------------------------------------ */
+/* JSON preview (raw pre block in right pane)                          */
+/* ------------------------------------------------------------------ */
+
+.json-preview-raw {
+  margin: 0;
+  font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #1e293b;
+  white-space: pre;
+  overflow: visible;
+}
+
+/* ------------------------------------------------------------------ */
+/* Drag-over highlight on the editor root                              */
+/* ------------------------------------------------------------------ */
+
+.editor-root.drag-over {
+  outline: 3px dashed #3b82f6;
+  outline-offset: -3px;
+}
