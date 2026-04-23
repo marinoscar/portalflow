@@ -275,6 +275,8 @@ function AiScopeEditor({
     }
   };
 
+  const executionMode = action.mode ?? 'fast';
+
   return (
     <>
       <label className="field">
@@ -286,6 +288,44 @@ function AiScopeEditor({
           rows={2}
         />
       </label>
+
+      <label className="field">
+        <span>Execution mode</span>
+        <select
+          value={executionMode}
+          onChange={(e) =>
+            updateAction({ mode: e.target.value as 'fast' | 'agent' } as Partial<AiScopeAction>)
+          }
+        >
+          <option value="fast">Fast — one action per iteration (default)</option>
+          <option value="agent">Agent — plan + milestones (cli2 only)</option>
+        </select>
+      </label>
+
+      {executionMode === 'agent' && (
+        <>
+          <p className="hint">
+            Agent mode opens the step with a planning call (one extra LLM round-trip)
+            that produces a list of milestones, then reasons about the plan on every
+            iteration. Roughly 1.5-3× the tokens of fast mode, but succeeds on compound
+            goals (login + navigate + extract + confirm) where fast mode plateaus.
+            Use fast mode for single-phase goals. cli v1 ignores this field and
+            always runs the fast loop.
+          </p>
+          <label className="field">
+            <span>Max replans</span>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={action.maxReplans ?? 2}
+              onChange={(e) =>
+                updateAction({ maxReplans: parseInt(e.target.value, 10) || 2 })
+              }
+            />
+          </label>
+        </>
+      )}
 
       <label className="field">
         <span>Success check mode</span>

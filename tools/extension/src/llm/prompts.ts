@@ -376,6 +376,17 @@ replace the automation's steps array directly, so correctness matters.
        AVOID "retry" — it restarts the whole budget from zero and
        is usually more expensive than just bumping maxDurationSec.
 
+    h) mode: choose "fast" (default, cheaper, one LLM call per iteration)
+       vs. "agent" (opens with a planning call that decomposes the goal
+       into ordered milestones, then reasons about the plan each turn;
+       ~1.5-3x the tokens). Pick "agent" ONLY when the goal clearly has
+       multiple distinct phases that must happen in sequence — e.g.
+       "login AND navigate to billing AND download the latest invoice
+       AND confirm the download". Pick "fast" for single-phase goals
+       like "dismiss the cookie banner", "click the Next button",
+       "fill this one form". Adding mode: "agent" to a single-phase
+       goal wastes tokens for no benefit. cli v1 ignores this field.
+
     Worked example: when the user says "add a step that figures out
     how to accept the cookie banner on this page, give it 45 seconds
     and 8 iterations", emit:
