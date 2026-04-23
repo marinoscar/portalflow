@@ -1,0 +1,266 @@
+/* ------------------------------------------------------------------ */
+/* Base reset + variables (mirrored from sidepanel palette)           */
+/* ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Full-page editor shell                                              */
+/* ------------------------------------------------------------------ */
+
+.editor-root {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar                                                             */
+/* ------------------------------------------------------------------ */
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 20px;
+  background: #0f172a;
+  color: #ffffff;
+  border-bottom: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+
+.editor-toolbar-title h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #ffffff;
+}
+
+.editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Toolbar button overrides for dark bg context */
+.editor-toolbar .btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.editor-toolbar .btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.editor-toolbar .btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Three-pane layout                                                   */
+/* ------------------------------------------------------------------ */
+
+.editor-panes {
+  display: grid;
+  grid-template-columns: 260px 1fr 360px;
+  grid-template-rows: 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Individual panes                                                    */
+/* ------------------------------------------------------------------ */
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.editor-pane--outline {
+  border-right: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.editor-pane--form {
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.editor-pane--preview {
+  background: #f8fafc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pane header                                                         */
+/* ------------------------------------------------------------------ */
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+  background: #ffffff;
+}
+
+.pane-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #64748b;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pane body (scrollable)                                              */
+/* ------------------------------------------------------------------ */
+
+.pane-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 14px;
+}
+
+.pane-placeholder {
+  color: #94a3b8;
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared component classes (card, buttons, field)                     */
+/* Mirrors sidepanel app.css so future pane components can reuse them. */
+/* ------------------------------------------------------------------ */
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.card-title {
+  font-size: 11px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: #0f172a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.btn-secondary {
+  background: #e2e8f0;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #cbd5e1;
+}
+
+.btn-ghost {
+  padding: 4px 8px;
+  font-size: 13px;
+  background: transparent;
+  color: #475569;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.btn-ghost:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.field > span {
+  color: #475569;
+  margin-bottom: 3px;
+  font-weight: 500;
+}
+
+.field input[type='text'],
+.field input[type='number'],
+.field textarea,
+.field select {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #ffffff;
+  color: #0f172a;
+  width: 100%;
+}
+
+.field textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.muted {
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 4px 0;
+}
