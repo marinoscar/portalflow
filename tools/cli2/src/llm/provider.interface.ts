@@ -103,6 +103,76 @@ export interface NextActionQuery {
    * confidence before emitting `done`.
    */
   selfTerminating?: boolean;
+  /**
+   * In agent mode: the current plan the runner is executing. Providers
+   * surface this to the model on every turn so the next action is chosen
+   * in the context of the broader plan, not just the immediate goal.
+   */
+  plan?: AgentPlan;
+  /**
+   * In agent mode: the id of the milestone the runner considers "current".
+   * The model reads this to know which step to advance, and can emit
+   * `milestoneComplete: true` to move the runner's pointer forward, or
+   * `replan: true` to discard the plan entirely.
+   */
+  currentMilestoneId?: string;
+}
+
+/**
+ * A linear, ordered list of milestones describing how the LLM intends to
+ * accomplish the goal. Produced once by `decidePlan` at step start and
+ * (optionally) re-produced when the model emits `replan`. Each milestone
+ * has a stable id the runner uses to track progress — the descriptions
+ * are prose for both humans and the LLM.
+ *
+ * Linear (not DAG): for browser automation one page usually leads to the
+ * next, so dependencies are implicit in order. Simpler prompt, easier to
+ * present in the TUI, works identically on every model that can produce
+ * structured JSON.
+ */
+export interface AgentPlan {
+  /** Short plain-English summary of the plan as a whole. Shown in logs. */
+  summary: string;
+  milestones: Milestone[];
+  /** Short explanation for the chosen shape, primarily for logs/debugging. */
+  reasoning: string;
+}
+
+export interface Milestone {
+  /** Stable id the runner uses to track progress ('m1', 'm2', ...). */
+  id: string;
+  /** Plain-English description of what completing this milestone looks like. */
+  description: string;
+  /**
+   * Optional plain-English self-check the LLM can evaluate to decide
+   * whether the milestone is done, separate from the overall goal's
+   * successCheck. Not machine-validated — the LLM inspects it when
+   * choosing whether to emit `milestoneComplete: true`.
+   */
+  doneWhen?: string;
+}
+
+/**
+ * Query sent to the LLM's planning method at the start of an agent-mode
+ * aiscope step (and whenever a `replan` is triggered). Contains the user's
+ * goal and the initial page context so the model can build a plan that
+ * reflects where the browser currently is, not a context-free decomposition.
+ */
+export interface PlanQuery {
+  goal: string;
+  pageContext: PageContext;
+  allowedActions: string[];
+  availableInputs?: NextActionQuery['availableInputs'];
+  /**
+   * When replanning, the old plan plus the reason the runner (or the LLM)
+   * asked for a fresh one. Helps the model avoid re-emitting the same
+   * broken milestones.
+   */
+  previousPlan?: {
+    plan: AgentPlan;
+    reason: string;
+    attemptedMilestoneIds: string[];
+  };
 }
 
 /**
@@ -133,6 +203,21 @@ export interface NextActionResult {
     args?: Record<string, string>;
   };
   reasoning: string;
+  /**
+   * Agent mode only. When true, the runner marks the currentMilestoneId as
+   * complete and advances the pointer to the next milestone BEFORE
+   * dispatching the chosen `action`. If the action is `done`, the runner
+   * treats the whole step as finished via the usual successCheck / self-
+   * terminating paths. Ignored outside agent mode.
+   */
+  milestoneComplete?: boolean;
+  /**
+   * Agent mode only. When true, the runner discards the current plan, calls
+   * `decidePlan` again with the current page context (passing the old plan
+   * as `previousPlan`), and resumes the loop on the new plan's first
+   * milestone. Subject to the `maxReplans` cap. Ignored outside agent mode.
+   */
+  replan?: boolean;
 }
 
 export interface LlmProvider {
@@ -158,6 +243,13 @@ export interface LlmProvider {
    * model.
    */
   decideNextAction(query: NextActionQuery): Promise<NextActionResult>;
+  /**
+   * Produce a linear plan for an agent-mode aiscope step. Called once at
+   * step start, and again whenever the runner honors a `replan` emission
+   * (within the maxReplans cap). LLM-agnostic: implementations MUST return
+   * plain JSON the runner can validate with no provider-specific features.
+   */
+  decidePlan(query: PlanQuery): Promise<AgentPlan>;
   interpretPage(pageContext: PageContext, question: string): Promise<string>;
   extractData(pageContext: PageContext, schema: string): Promise<unknown>;
 }

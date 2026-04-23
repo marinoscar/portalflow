@@ -15,6 +15,8 @@ import type {
   LlmProviderConfig,
   NextActionQuery,
   NextActionResult,
+  PlanQuery,
+  AgentPlan,
   PageContext,
 } from './provider.interface.js';
 
@@ -137,6 +139,16 @@ export class LlmService {
    */
   async decideNextAction(query: NextActionQuery): Promise<NextActionResult> {
     return this.getProvider().decideNextAction(query);
+  }
+
+  /**
+   * Ask the active provider to produce (or replan) a plan for an agent-mode
+   * aiscope step. The provider emits a linear list of milestones in strict
+   * JSON — no provider-specific features, so every concrete provider can
+   * implement this with identical prompt semantics.
+   */
+  async decidePlan(query: PlanQuery): Promise<AgentPlan> {
+    return this.getProvider().decidePlan(query);
   }
 
   async interpretPage(pageContext: PageContext, question: string): Promise<string> {
