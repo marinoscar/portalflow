@@ -15,6 +15,7 @@ import type {
   LlmProviderConfig,
   NextActionQuery,
   NextActionResult,
+  PingResult,
   PlanQuery,
   AgentPlan,
   PageContext,
@@ -109,6 +110,20 @@ export class LlmService {
       throw new Error('LlmService not initialized. Call initialize() first.');
     }
     return this.provider;
+  }
+
+  /**
+   * Lightweight connectivity check against the active provider's API. Used
+   * as a pre-flight before a run: the CLI scans the automation for any
+   * LLM-using step (aiscope / condition.ai / ai-based extract) and, if
+   * found, calls this once before dispatching the first step. On failure
+   * the caller prints a friendly remediation message and aborts cleanly,
+   * so the user never sees a cryptic error midway through a run.
+   *
+   * Never throws — any failure is captured in the returned `PingResult`.
+   */
+  async verifyConnectivity(): Promise<PingResult> {
+    return this.getProvider().ping();
   }
 
   async findElement(query: ElementQuery): Promise<ElementResult> {

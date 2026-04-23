@@ -220,8 +220,44 @@ export interface NextActionResult {
   replan?: boolean;
 }
 
+/**
+ * Structured outcome of a provider connectivity check. Providers MUST NOT
+ * throw from `ping()` — any network, auth, or config failure is captured
+ * in the `PingFailure` shape so the caller (LlmService and ultimately the
+ * CLI/extension pre-flight) can render a stable friendly message without
+ * provider-specific try/catch plumbing.
+ */
+export type PingResult =
+  | { ok: true; providerName: string; model: string; latencyMs: number }
+  | {
+      ok: false;
+      providerName: string;
+      model: string;
+      /**
+       * HTTP status if the provider replied (401, 403, 429, 5xx, ...).
+       * Undefined for network-level errors (DNS, ECONNREFUSED, timeout).
+       */
+      status?: number;
+      /** Short one-line summary — what went wrong in plain English. */
+      message: string;
+      /** Best-guess remediation hint — safe to show to the user. */
+      hint: string;
+      /** Raw error text for logs — NEVER include secret values. */
+      raw?: string;
+    };
+
 export interface LlmProvider {
   readonly name: string;
+
+  /**
+   * Lightweight authenticated round-trip that confirms the configured
+   * API key + base URL can reach the provider. Implementations should
+   * pick the cheapest authenticated GET the provider supports (for
+   * Anthropic / OpenAI / OpenAI-compatible: `models.list()`). MUST NOT
+   * throw — any failure is returned as `{ ok: false, ... }` with a
+   * user-friendly `message` and `hint`.
+   */
+  ping(): Promise<PingResult>;
 
   findElement(query: ElementQuery): Promise<ElementResult>;
   findItems(query: ItemsQuery): Promise<ItemsResult>;

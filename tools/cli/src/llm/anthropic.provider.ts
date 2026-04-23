@@ -14,8 +14,10 @@ import type {
   NextActionQuery,
   NextActionResult,
   PageContext,
+  PingResult,
   PlanQuery,
 } from './provider.interface.js';
+import { classifyPingError } from './ping-error.js';
 import { SYSTEM_PROMPTS } from './prompts.js';
 
 const MAX_HTML_CHARS = 50_000;
@@ -70,6 +72,31 @@ export class AnthropicProvider implements LlmProvider {
       },
       'llm call',
     );
+  }
+
+  /**
+   * Connectivity probe — a cheap authenticated GET against `models.list()`.
+   * Catches every error internally and returns a structured `PingResult`;
+   * the caller (LlmService.verifyConnectivity) renders a friendly message
+   * from the result. Never throws.
+   */
+  async ping(): Promise<PingResult> {
+    const t0 = Date.now();
+    try {
+      await this.client.models.list({ limit: 1 });
+      return {
+        ok: true,
+        providerName: this.name,
+        model: this.model,
+        latencyMs: Date.now() - t0,
+      };
+    } catch (err) {
+      this.logger.warn(
+        { err, operation: 'ping', latencyMs: Date.now() - t0 },
+        'AnthropicProvider.ping failed',
+      );
+      return classifyPingError({ providerName: this.name, model: this.model, err });
+    }
   }
 
   async findElement(query: ElementQuery): Promise<ElementResult> {
