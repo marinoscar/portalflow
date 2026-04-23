@@ -1,0 +1,40 @@
+{
+  "id": "b2c3d4e5-f678-9012-3456-789abcdef012",
+  "name": "aiscope agent-mode demo — read Wikipedia article and follow link",
+  "version": "1.0.0",
+  "description": "Demonstrates cli2-only agent mode: a compound goal with multiple distinct phases. The planner decomposes the goal into milestones, then the executor drives the browser turn-by-turn against the plan. Uses Wikipedia so the run is deterministic and free.",
+  "goal": "Navigate Wikipedia and confirm a multi-phase agent-mode loop completes.",
+  "inputs": [],
+  "steps": [
+    {
+      "id": "step-1",
+      "name": "Start at Wikipedia main page",
+      "type": "navigate",
+      "action": { "url": "https://en.wikipedia.org/wiki/Main_Page" },
+      "validation": { "type": "url_contains", "value": "Main_Page" },
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 15000
+    },
+    {
+      "id": "step-2",
+      "name": "Agent: search, open an article, follow one link",
+      "description": "A goal with three distinct phases. Fast mode tends to either skip straight to the final step or loop on the search. Agent mode opens with a planning call that produces explicit milestones ('use search', 'open top result', 'follow first internal link') and drives the browser against them.",
+      "type": "aiscope",
+      "action": {
+        "goal": "Use the Wikipedia search box to look up 'browser automation', open the top search result's article, and then click any internal (in-site) article link from within that article's body to land on a second Wikipedia page.",
+        "mode": "agent",
+        "maxReplans": 2,
+        "successCheck": {
+          "ai": "The current URL is on en.wikipedia.org and is a different Wikipedia article than the search results page — i.e. we followed a link from within the first article to a second article."
+        },
+        "maxDurationSec": 120,
+        "maxIterations": 20,
+        "includeScreenshot": true
+      },
+      "onFailure": "abort",
+      "maxRetries": 0,
+      "timeout": 180000
+    }
+  ]
+}

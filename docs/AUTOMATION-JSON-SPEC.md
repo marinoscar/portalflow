@@ -1524,8 +1524,10 @@ This is **not** a general-purpose autonomous agent. The action vocabulary is fix
 |---------------------|----------------------------|----------|---------|-------------|
 | `goal`              | `string` (min 1 char)      | Yes      | —       | Plain-English description of the goal the LLM should work toward. The LLM receives this verbatim on every iteration. |
 | `successCheck`      | `object` (see below)       | No       | —       | The predicate that decides whether the goal is reached. When set, exactly one of `{ check, value }` or `{ ai }` must be populated. When **omitted**, the runner enters self-terminating mode: the LLM ends the loop itself by emitting `done`, and only the budget caps can stop a confused model. Self-terminating mode is honored by **cli2 only** — cli v1 still throws at runtime when `successCheck` is absent. |
+| `mode`              | `'fast' \| 'agent'`        | No       | `'fast'` | Execution strategy. `'fast'` runs the default one-action-per-iteration loop. `'agent'` opens the step with a planning call that produces a linear list of 2–8 milestones, then reasons about the plan on every iteration (see *Agent mode* below). cli v1 ignores this field and always runs the fast loop. |
+| `maxReplans`        | `number` (int, 0–10)       | No       | `2`      | Agent mode only. How many times the LLM may emit `replan: true` to rebuild the plan mid-run. Additional replan requests after the cap are logged and ignored so the loop keeps making progress on the existing plan rather than failing the step. |
 | `maxDurationSec`    | `number` (int, 1–3600)     | No       | `300`   | Wall-clock budget in seconds. Whichever cap fires first aborts the step with a clear error. |
-| `maxIterations`     | `number` (int, 1–200)      | No       | `25`    | Maximum number of observe → decide → dispatch cycles. Whichever cap fires first aborts. |
+| `maxIterations`     | `number` (int, 1–200)      | No       | `25`    | Maximum number of observe → decide → dispatch cycles. Whichever cap fires first aborts. In agent mode the initial planning call and any replan calls do NOT count against this budget — it counts *actions*, not *LLM calls*. |
 | `allowedActions`    | `string[]`                 | No       | (all)   | Whitelist restricting which actions the LLM may emit. When omitted, the full vocabulary (see below) is permitted. |
 | `includeScreenshot` | `boolean`                  | No       | `true`  | When true, a base64 PNG viewport screenshot is sent to the LLM on every iteration alongside the HTML. Requires a vision-capable model (Claude 3.5+ / GPT-4o+). Set to `false` for text-only. |
 
@@ -1566,7 +1568,14 @@ When the `successCheck` field is not present on an aiscope action, cli2's runner
 | `focus`    | `selector`                             | Focuses the element without typing.                       |
 | `scroll`   | `value` = `up`/`down`/`top`/`bottom`   | Scrolls the page. No selector.                            |
 | `wait`     | `value` = milliseconds as string       | Pauses the loop for the given duration (useful mid-load). |
-| `done`     | —                                      | When `successCheck` is present, this is a hint: the runner re-verifies via the check on the next iteration, and if the check still fails the loop keeps going. When `successCheck` is omitted (cli2 self-terminating mode), `done` is authoritative and ends the loop immediately. |
+| `done`     | —                                      | When `successCheck` is present, this is a hint: the runner re-verifies via the check on the next iteration, and if the check still fails the loop keeps going. When `successCheck` is omitted (cli2 self-terminating mode), `done` is authoritative and ends the loop immediately. In agent mode, `done` combined with `"milestoneComplete": true` on the *last* milestone advances the pointer past the plan, which is what triggers termination. |
+
+In **agent mode** (`mode: "agent"`), the LLM may additionally include these flags alongside the action:
+
+| Flag | Type | When to set |
+|------|------|-------------|
+| `milestoneComplete` | `boolean` | The current milestone is finished. The runner advances the pointer before dispatching the chosen action. Chain with the first action of the next milestone, or with `done` if it was the last milestone. |
+| `replan` | `boolean` | The plan is materially wrong (not just a single failed action). The runner rebuilds the plan via `decidePlan`, passing the old plan as `previousPlan`, and resumes on the new plan's first milestone. Capped by `maxReplans`. |
 
 When `allowedActions` is set, only actions in the list (plus implicit `done`) are dispatched. The LLM is told about the restriction and any out-of-list emissions are logged as warnings and fed back as failures in the recent-history buffer on the next iteration.
 
@@ -1653,9 +1662,63 @@ On a page with a typical cookie wall, the LLM sees the banner in the screenshot 
 
 The LLM iterates over the visible rows, archives each promotional one, and emits `done` when the list stops showing promotional items. cli2 trusts that signal immediately; cli v1 would throw at runtime.
 
+**Agent mode (cli2 only, `mode: "agent"`):**
+
+The default `fast` mode asks the LLM for one action per iteration with no planning overhead. For compound goals that span multiple distinct phases (login → navigate → extract → confirm, or similar), a pure one-action-at-a-time loop can plateau — the model loses track of the larger structure or repeats work it already did. `mode: "agent"` adds an explicit planning layer on top of the same action vocabulary:
+
+1. At step start the runner calls the planner with the goal plus the initial page context. The planner produces a linear list of **milestones** — 2-8 outcome-shaped units of work, each with a stable id, plain-English description, and an optional `doneWhen` self-check.
+2. On every iteration the LLM sees the full plan, which milestone is currently active (marked `▶ CURRENT` in the prompt), recent action history, and the current page. It picks one action from the fixed vocabulary exactly as in fast mode.
+3. The LLM may add `"milestoneComplete": true` to its response to mark the current milestone done and advance the runner's pointer before the next iteration.
+4. The LLM may add `"replan": true` (usually alongside `"action": "done"`) to request a new plan. The runner calls the planner again, passing the old plan and the reason, and resumes on the fresh plan's first milestone. Capped by `action.maxReplans` (default 2) — additional replan requests past the cap are logged and ignored, and the loop continues on the existing plan.
+5. When the runner walks past the last milestone while the LLM is still proposing actions, the action is converted to `done` so the existing termination path (successCheck re-verify or self-terminating immediate exit) fires naturally.
+
+Agent mode uses the same providers and message format as fast mode — plain JSON in, plain JSON out. **LLM-agnostic** by design: any model that reliably emits structured JSON (Claude 3.5+, GPT-4o+, Gemini, Mistral, local Llama via Ollama) can drive agent mode without provider-specific features like extended thinking or the tool-use API.
+
+**Agent-mode worked example:**
+
+```json
+{
+  "id": "step-download-att-invoice",
+  "name": "Download current month AT&T invoice",
+  "type": "aiscope",
+  "action": {
+    "goal": "Log into att.com, navigate to the billing history, and download the most recent invoice PDF to the user's Downloads folder.",
+    "mode": "agent",
+    "maxReplans": 2,
+    "successCheck": {
+      "ai": "The most recent invoice PDF has finished downloading and is visible in the Downloads folder."
+    },
+    "maxDurationSec": 300,
+    "maxIterations": 50,
+    "includeScreenshot": true
+  },
+  "onFailure": "abort",
+  "maxRetries": 1,
+  "timeout": 600000
+}
+```
+
+On the first iteration the planner might emit something like:
+
+```json
+{
+  "summary": "Login to AT&T, reach billing, download latest invoice",
+  "milestones": [
+    { "id": "m1", "description": "Sign in with the stored credentials", "doneWhen": "the account dashboard is visible" },
+    { "id": "m2", "description": "Navigate to the Billing & Payments section", "doneWhen": "the billing history table is visible" },
+    { "id": "m3", "description": "Click the download icon on the most recent invoice row", "doneWhen": "the browser has begun downloading a PDF" },
+    { "id": "m4", "description": "Confirm the PDF finished downloading", "doneWhen": "the Downloads area shows the new PDF with 100% progress" }
+  ],
+  "reasoning": "Goal has four distinct sequential phases; decomposing lets the executor focus on one phase at a time and detect plan-level failures."
+}
+```
+
+The executor then drives the browser turn-by-turn. If the site surprises the planner — say the billing section has moved behind an additional verification step — the LLM emits `{ "action": "done", "replan": true, "reasoning": "found an unexpected 2FA step before billing" }` and the runner asks the planner for a new plan with that context.
+
 **Cost and safety notes:**
 
-- Each iteration makes **one LLM call for a deterministic `successCheck`** (the check itself is a DOM query), **one LLM call for a self-terminating step** (no check — just the next-action decision), or **two parallel LLM calls for an AI `successCheck`** (one for the check, one speculatively for the next action — see "Performance" above). The `inputTokens` / `outputTokens` / `latencyMs` are captured per call via the existing observability pipeline (see §19.3 Troubleshooting).
+- Each iteration makes **one LLM call for a deterministic `successCheck`** (the check itself is a DOM query), **one LLM call for a self-terminating step** (no check — just the next-action decision), or **two parallel LLM calls for an AI `successCheck`** (one for the check, one speculatively for the next action — see "Performance" above). **Agent mode** adds one planning call at step start and one per honored replan, but does not change the per-iteration call count. The `inputTokens` / `outputTokens` / `latencyMs` are captured per call via the existing observability pipeline (see §19.3 Troubleshooting).
+- Agent mode's per-iteration prompt is ~1.5-3× larger than fast mode because the plan is serialized into every `decideNextAction` call. Worth the extra tokens for goals with 3+ distinct phases; wasted overhead for single-phase goals. Pick `mode: "fast"` unless the goal genuinely needs decomposition.
 - Screenshots are sent as base64 PNGs in a single vision content block per call. A viewport screenshot at default resolution is roughly 1,500–3,000 tokens on Anthropic / OpenAI vision models. Budget your `maxIterations` accordingly if cost matters.
 - Set `includeScreenshot: false` when using models without vision or when you want a pure-HTML observation path.
 - The action vocabulary is intentionally bounded. There is no `eval` or raw JavaScript escape hatch. If you need something outside the list, drop out of aiscope and use explicit `extract` / `interact` steps after it.
@@ -1666,9 +1729,12 @@ The LLM iterates over the visible rows, archives each promotional one, and emits
 - Missing `goal` or empty string — schema rejects at parse time.
 - `successCheck` present but populated with neither `check` nor `ai`, or both — schema rejects. (Omitting the `successCheck` field entirely is valid — see self-terminating mode above.)
 - `successCheck` with `check` but no `value` — schema rejects.
+- `mode` outside `'fast' | 'agent'` — schema rejects.
+- `maxReplans` outside 0–10 — schema rejects.
 - `maxDurationSec` outside 1–3600 or `maxIterations` outside 1–200 — schema rejects.
 - `allowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`, `tool_call`).
 - cli v1 only: `successCheck` omitted at runtime — `aiscope step "<id>" has no "successCheck"` is thrown (self-terminating mode is cli2-only).
+- cli2 agent mode only: planner returns zero milestones at runtime — `aiscope step "<id>" agent-mode planner returned an empty plan` is thrown.
 
 ---
 

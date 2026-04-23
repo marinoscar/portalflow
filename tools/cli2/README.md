@@ -488,6 +488,51 @@ Some goals are hard to state as a concrete yes/no predicate — "fill whatever f
 
 Use this sparingly. When you can write a predicate, prefer a deterministic `successCheck`; when you can state a yes/no question, prefer an AI `successCheck`. Self-terminating mode trades safety for flexibility and is **cli2-only** — cli v1 will throw at runtime when `successCheck` is missing.
 
+### Agent mode (`mode: "agent"`)
+
+The default execution mode, `fast`, asks the LLM for a single next action each iteration. For goals with multiple distinct phases (login → navigate → extract → confirm) a one-action-at-a-time loop can plateau because the model has no explicit long-term memory beyond a 5-action history window.
+
+`mode: "agent"` turns aiscope into a planner-executor agent:
+
+1. **Planning phase** — before the first iteration the runner calls `decidePlan` with the goal and initial page context. The planner emits a linear list of 2–8 milestones, each with a stable id, description, and optional `doneWhen` self-check.
+2. **Oriented execution** — every iteration the LLM sees the full plan, which milestone is active (marked `▶ CURRENT`), the recent action history, and the current page. It picks one action from the exact same vocabulary as fast mode (navigate, click, type, ...).
+3. **Milestone progress** — the LLM adds `"milestoneComplete": true` to its response when the current milestone is done. The runner advances the pointer before dispatching the chosen action.
+4. **Replanning** — when the LLM realizes the plan is materially wrong (page changed, missed a prerequisite, etc.) it emits `"replan": true` (usually alongside `"action": "done"`). The runner asks the planner for a new plan, passing the old plan + reason as context so the model avoids repeating broken milestones. Capped by `maxReplans` (default 2).
+
+Agent mode is **LLM-agnostic**. Every provider call is plain JSON in / plain JSON out with no provider-specific features (no extended thinking, no tool-use API). Works identically on Claude 3.5+, GPT-4o+, Gemini, Mistral, and local Llama via Ollama — anywhere the model can reliably emit structured JSON.
+
+```json
+{
+  "id": "att-download-invoice",
+  "name": "Download current AT&T invoice",
+  "type": "aiscope",
+  "action": {
+    "goal": "Log into att.com, navigate to billing history, and download the most recent invoice PDF.",
+    "mode": "agent",
+    "maxReplans": 2,
+    "successCheck": { "ai": "The most recent invoice PDF has finished downloading." },
+    "maxDurationSec": 300,
+    "maxIterations": 50,
+    "includeScreenshot": true
+  },
+  "onFailure": "abort",
+  "maxRetries": 1,
+  "timeout": 600000
+}
+```
+
+**When to pick agent over fast:**
+
+- Multiple distinct phases that must happen in order (login + navigate + extract + confirm).
+- The LLM needs to revise its approach mid-run based on what it discovers.
+- Previous fast-mode runs of the same goal plateaued or looped.
+
+**When fast is strictly better:**
+
+- Single-phase goals ("dismiss the cookie banner", "click Next", "fill this one form").
+- Cost-sensitive runs where the planning call and per-iteration plan serialization aren't worth the extra tokens.
+- cli v1 compatibility — cli v1 ignores the field and always runs fast mode.
+
 ---
 
 ## WebSocket protocol reference
