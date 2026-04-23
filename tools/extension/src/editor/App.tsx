@@ -4,7 +4,10 @@ import { editorReducer, initialState, newEmptyAutomation } from './state/editor-
 import { readAutomationFile, attachFileDrop } from './io/upload';
 import { downloadAutomation } from './io/download';
 import { AutomationSchema } from '@portalflow/schema';
-import type { Automation } from '@portalflow/schema';
+import { Toolbar } from './components/Toolbar';
+import { Outline } from './components/Outline';
+import { JsonPreview } from './components/JsonPreview';
+import { IssuesPanel } from './components/IssuesPanel';
 
 // ---------------------------------------------------------------------------
 // Upload-error modal
@@ -61,6 +64,8 @@ function UploadErrorModal({ errors, raw, onClose, onLoadAnyway }: UploadErrorMod
 // App
 // ---------------------------------------------------------------------------
 
+type RightTab = 'json' | 'issues';
+
 export function App() {
   const [state, dispatch] = useReducer(editorReducer, initialState);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +81,9 @@ export function App() {
   // Validate toast state
   const [validateToast, setValidateToast] = useState<string | null>(null);
   const validateToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Right pane tab
+  const [rightTab, setRightTab] = useState<RightTab>('json');
 
   // -------------------------------------------------------------------------
   // File processing (shared between picker and drag-drop)
@@ -150,7 +158,7 @@ export function App() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = ''; // reset so same file can be re-selected
+    e.target.value = '';
     await processFile(file);
   };
 
@@ -187,21 +195,19 @@ export function App() {
   };
 
   const handleLoadAnyway = (raw: unknown) => {
-    // Cast raw as Automation (user acknowledges it may be invalid)
-    const asAutomation = raw as Automation;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const asAutomation = raw as any;
     dispatch({ type: 'LOAD', payload: asAutomation });
-    // Mark dirty immediately since the schema is invalid
+    // Mark dirty so the user knows edits are needed
     dispatch({ type: 'UPDATE_METADATA', payload: {} });
     setUploadError(null);
   };
 
   // -------------------------------------------------------------------------
-  // Derived display values
+  // Derived values
   // -------------------------------------------------------------------------
 
-  const automationName = state.automation?.name ?? 'No automation loaded';
-  const isValid = state.validation.success;
-  const downloadDisabled = !state.automation || !isValid;
+  const issueCount = state.validation.success ? 0 : state.validation.error.issues.length;
 
   // -------------------------------------------------------------------------
   // Render
@@ -229,60 +235,16 @@ export function App() {
       )}
 
       {/* Toolbar */}
-      <header className="editor-toolbar">
-        <div className="editor-toolbar-title">
-          <h1>
-            PortalFlow Automation Editor
-            {state.automation && (
-              <span className="toolbar-name-separator"> &mdash; {automationName}</span>
-            )}
-            {state.dirty && <span className="dirty-dot" title="Unsaved changes">●</span>}
-          </h1>
-        </div>
-        <div className="editor-toolbar-actions">
-          <button
-            className="btn-secondary"
-            type="button"
-            title="Upload automation JSON (Ctrl+O)"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            &#8593; Upload
-          </button>
-          <button
-            className="btn-secondary"
-            type="button"
-            title={downloadDisabled ? 'Fix validation errors before downloading' : 'Download automation JSON (Ctrl+S)'}
-            disabled={downloadDisabled}
-            onClick={handleDownload}
-          >
-            &#8595; Download
-          </button>
-          <button
-            className="btn-secondary"
-            type="button"
-            title="New automation"
-            onClick={handleNew}
-          >
-            &#10011; New
-          </button>
-          <button
-            className="btn-secondary"
-            type="button"
-            title="Validate automation against schema"
-            disabled={!state.automation}
-            onClick={handleValidate}
-          >
-            &#10003; Validate
-          </button>
-          {validateToast && (
-            <span
-              className={`validate-toast ${validateToast === 'All good' ? 'validate-toast--ok' : 'validate-toast--err'}`}
-            >
-              {validateToast}
-            </span>
-          )}
-        </div>
-      </header>
+      <Toolbar
+        automation={state.automation}
+        dirty={state.dirty}
+        validation={state.validation}
+        validateToast={validateToast}
+        onUpload={() => fileInputRef.current?.click()}
+        onDownload={handleDownload}
+        onNew={handleNew}
+        onValidate={handleValidate}
+      />
 
       {/* Three panes */}
       <div className="editor-panes">
@@ -291,16 +253,22 @@ export function App() {
           <div className="pane-header">
             <span className="pane-title">Outline</span>
           </div>
-          <div className="pane-body">
+          <div className="pane-body pane-body--outline">
             {state.automation ? (
-              <p className="pane-placeholder">Outline coming in next phase</p>
+              <Outline
+                automation={state.automation}
+                selectedNodeId={state.selectedNodeId}
+                dispatch={dispatch}
+              />
             ) : (
-              <p className="pane-placeholder">No automation loaded — upload a file or click New</p>
+              <p className="pane-placeholder">
+                No automation loaded — upload a file or click New
+              </p>
             )}
           </div>
         </aside>
 
-        {/* Middle: Form */}
+        {/* Middle: Form editor (placeholder until Phase E) */}
         <main className="editor-pane editor-pane--form">
           <div className="pane-header">
             <span className="pane-title">Form Editor</span>
@@ -308,26 +276,60 @@ export function App() {
           <div className="pane-body">
             {state.automation ? (
               <p className="pane-placeholder">
-                Select a node from the outline to edit it
+                {state.selectedNodeId
+                  ? `Selected: ${state.selectedNodeId}`
+                  : 'Select a node from the outline to edit it'}
               </p>
             ) : (
-              <p className="pane-placeholder">Upload or create a new automation to get started</p>
+              <p className="pane-placeholder">
+                Upload or create a new automation to get started
+              </p>
             )}
           </div>
         </main>
 
-        {/* Right: JSON Preview */}
+        {/* Right: JSON / Issues tabs */}
         <aside className="editor-pane editor-pane--preview">
-          <div className="pane-header">
-            <span className="pane-title">JSON Preview</span>
+          {/* Tab strip */}
+          <div className="pane-header pane-header--tabs">
+            <button
+              className={`tab-btn ${rightTab === 'json' ? 'tab-btn--active' : ''}`}
+              type="button"
+              onClick={() => setRightTab('json')}
+            >
+              JSON
+            </button>
+            <button
+              className={`tab-btn ${rightTab === 'issues' ? 'tab-btn--active' : ''}`}
+              type="button"
+              onClick={() => setRightTab('issues')}
+            >
+              Issues
+              {issueCount > 0 && (
+                <span className="tab-badge">{issueCount}</span>
+              )}
+            </button>
           </div>
-          <div className="pane-body">
+
+          <div className="pane-body pane-body--preview">
             {state.automation ? (
-              <pre className="json-preview-raw">
-                {JSON.stringify(state.automation, null, 2)}
-              </pre>
+              rightTab === 'json' ? (
+                <JsonPreview
+                  automation={state.automation}
+                  validation={state.validation}
+                />
+              ) : (
+                <IssuesPanel
+                  validation={state.validation}
+                  dispatch={dispatch}
+                />
+              )
             ) : (
-              <p className="pane-placeholder">JSON output will appear here</p>
+              <p className="pane-placeholder">
+                {rightTab === 'json'
+                  ? 'JSON output will appear here'
+                  : 'No automation loaded'}
+              </p>
             )}
           </div>
         </aside>
