@@ -94,13 +94,23 @@ export interface NextActionQuery {
     type: string;
     description?: string;
   }>;
+  /**
+   * When true, the aiscope step has no successCheck and the LLM's `done`
+   * emission is authoritative — the runner terminates immediately. When
+   * false or undefined, `done` is a hint and the runner re-verifies with
+   * the user's successCheck before terminating. Providers should surface
+   * this to the model in the user message so it can calibrate its own
+   * confidence before emitting `done`.
+   */
+  selfTerminating?: boolean;
 }
 
 /**
  * The LLM's decision for the next iteration. `action` must be one of
  * the names in `allowedActions` OR `"done"`. `"done"` is a hint that
- * the model believes the goal is reached; the loop always re-runs the
- * successCheck before trusting it.
+ * the model believes the goal is reached; the loop re-verifies the
+ * successCheck before trusting it UNLESS the query was self-terminating
+ * (no successCheck), in which case `done` ends the loop immediately.
  */
 export interface NextActionResult {
   action: string;

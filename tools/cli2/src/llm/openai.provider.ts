@@ -287,7 +287,8 @@ Question: ${question}`;
    * to dispatch directly.
    */
   async decideNextAction(query: NextActionQuery): Promise<NextActionResult> {
-    const { goal, pageContext, allowedActions, recentHistory, availableInputs } = query;
+    const { goal, pageContext, allowedActions, recentHistory, availableInputs, selfTerminating } =
+      query;
 
     const historyBlock =
       recentHistory.length > 0
@@ -314,6 +315,10 @@ Question: ${question}`;
         ? `\n## Available inputs\n\nThe following inputs are available for use with inputRef in type actions:\n\n| Name | Type | Description |\n|------|------|-------------|\n${availableInputs.map((i) => `| ${i.name} | ${i.type} | ${i.description ?? ''} |`).join('\n')}\n\nFor inputs marked "secret", ALWAYS use inputRef — never put the actual value in your response.`
         : '';
 
+    const selfTerminatingBlock = selfTerminating
+      ? '\n## Termination mode\n"selfTerminating": true — this run has NO user success check. Your "done" is authoritative and will end the loop immediately. Only emit "done" when you have direct on-page evidence that the goal is complete.'
+      : '';
+
     const userText = `## Goal
 ${goal}
 
@@ -321,7 +326,7 @@ ${goal}
 ${allowedActions.join(', ')}
 
 ## Recent action history (oldest first)
-${historyBlock}${availableInputsBlock}
+${historyBlock}${availableInputsBlock}${selfTerminatingBlock}
 
 ## Current page
 URL: ${pageContext.url}
