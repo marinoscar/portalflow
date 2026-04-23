@@ -22,6 +22,7 @@ import type { PageContextCapture } from '../browser/context.js';
 import type { LlmService } from '../llm/llm.service.js';
 import type {
   AgentActionHistoryEntry,
+  AgentPlan,
   NextActionQuery,
   NextActionResult,
   PageContext,
@@ -996,6 +997,11 @@ export class StepExecutor {
     const successCheck = action.successCheck;
     const selfTerminating = !successCheck;
 
+    // Agent mode orchestrates via an explicit plan of milestones. Fast mode
+    // runs the original one-action-per-iteration loop with no planner.
+    const isAgentMode = action.mode === 'agent';
+    const maxReplans = action.maxReplans ?? 2;
+
     const startedAt = Date.now();
     const deadlineMs = startedAt + action.maxDurationSec * 1000;
     const history: AgentActionHistoryEntry[] = [];
@@ -1023,12 +1029,87 @@ export class StepExecutor {
       }),
     );
 
+    // Agent-mode state. All unused in fast mode.
+    let plan: AgentPlan | undefined;
+    let currentMilestoneIndex = 0;
+    let replansUsed = 0;
+    const attemptedMilestoneIds = new Set<string>();
+
+    const advanceMilestone = (reason: string) => {
+      if (!plan) return;
+      const current = plan.milestones[currentMilestoneIndex];
+      if (current) {
+        attemptedMilestoneIds.add(current.id);
+        logger.info(
+          {
+            stepId: step.id,
+            milestoneId: current.id,
+            nextMilestoneIndex: currentMilestoneIndex + 1,
+            totalMilestones: plan.milestones.length,
+            reason,
+          },
+          'aiscope: milestone complete, advancing',
+        );
+        this.presenter.aiscopeDecision(
+          'milestone_complete',
+          undefined,
+          `milestone ${current.id} complete — ${reason}`,
+        );
+      }
+      currentMilestoneIndex += 1;
+    };
+
+    const rebuildPlan = async (
+      reason: string,
+      pageContext: PageContext,
+    ): Promise<AgentPlan> => {
+      const previousPlan = plan
+        ? {
+            plan,
+            reason,
+            attemptedMilestoneIds: Array.from(attemptedMilestoneIds),
+          }
+        : undefined;
+      logger.info(
+        { stepId: step.id, reason, replanCount: replansUsed, maxReplans },
+        previousPlan ? 'aiscope: replan' : 'aiscope: planning',
+      );
+      this.presenter.aiscopeDecision(
+        previousPlan ? 'replan' : 'plan',
+        undefined,
+        previousPlan ? `replanning: ${reason}` : 'building initial plan',
+      );
+      const newPlan = await this.llmService.decidePlan({
+        goal: resolvedGoal,
+        pageContext,
+        allowedActions,
+        availableInputs,
+        previousPlan,
+      });
+      if (!newPlan.milestones || newPlan.milestones.length === 0) {
+        throw new Error(
+          `aiscope step "${step.id}" agent-mode planner returned an empty plan (goal: ${resolvedGoal}). The model must emit at least one milestone.`,
+        );
+      }
+      logger.info(
+        {
+          stepId: step.id,
+          summary: newPlan.summary,
+          milestones: newPlan.milestones.map((m) => ({ id: m.id, description: m.description })),
+        },
+        'aiscope: plan ready',
+      );
+      return newPlan;
+    };
+
     logger.info(
       {
         stepId: step.id,
         goal: resolvedGoal,
+        mode: isAgentMode ? 'agent' : 'fast',
         maxDurationSec: action.maxDurationSec,
         maxIterations: action.maxIterations,
+        maxReplans: isAgentMode ? maxReplans : undefined,
         includeScreenshot: action.includeScreenshot,
         allowedActions,
         selfTerminating,
@@ -1037,6 +1118,17 @@ export class StepExecutor {
     );
 
     this.presenter.aiscopeStart(step.id, action.maxIterations);
+
+    // Agent mode: open the step with a planning call against the initial
+    // page context. Counts against the wall-clock budget but not the
+    // iteration budget, so the iteration count means "actions taken",
+    // not "LLM calls made".
+    if (isAgentMode) {
+      const initialPageContext = await this.contextCapture.capture({
+        includeScreenshot: action.includeScreenshot,
+      });
+      plan = await rebuildPlan('initial plan', initialPageContext);
+    }
 
     for (let iteration = 1; iteration <= action.maxIterations; iteration++) {
       const remainingMs = deadlineMs - Date.now();
@@ -1088,6 +1180,14 @@ export class StepExecutor {
       // successful check.
       let decision: NextActionResult;
 
+      // Build the plan-context piece of the query once per iteration. In fast
+      // mode these fields are undefined and spreading them is a no-op.
+      const currentMilestone =
+        isAgentMode && plan ? plan.milestones[currentMilestoneIndex] : undefined;
+      const agentContext = currentMilestone
+        ? { plan, currentMilestoneId: currentMilestone.id }
+        : {};
+
       if (selfTerminating) {
         decision = await this.llmService.decideNextAction({
           goal: resolvedGoal,
@@ -1096,6 +1196,7 @@ export class StepExecutor {
           recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
           availableInputs,
           selfTerminating: true,
+          ...agentContext,
         });
       } else if (successCheck.ai === undefined) {
         if (await this.evaluateSuccessCheck(successCheck, pageContext)) {
@@ -1114,6 +1215,7 @@ export class StepExecutor {
           allowedActions,
           recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
           availableInputs,
+          ...agentContext,
         });
       } else {
         const t0 = Date.now();
@@ -1125,6 +1227,7 @@ export class StepExecutor {
             allowedActions,
             recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
             availableInputs,
+            ...agentContext,
           }),
         ]);
 
@@ -1163,6 +1266,8 @@ export class StepExecutor {
           selector: decision.selector ?? null,
           value: decision.value ?? null,
           reasoning: decision.reasoning,
+          milestoneComplete: decision.milestoneComplete ?? false,
+          replan: decision.replan ?? false,
         },
         'aiscope: decided',
       );
@@ -1172,6 +1277,60 @@ export class StepExecutor {
         decision.selector,
         decision.reasoning ?? '',
       );
+
+      // Agent mode flag: replan. When the LLM asks for a new plan, rebuild
+      // it before dispatching anything else this iteration. The old plan
+      // is retained briefly so we can pass it as `previousPlan` to help
+      // the planner avoid repeating failed milestones. Subject to the
+      // maxReplans cap — exceeding it degrades to "continue with the
+      // existing plan" rather than failing the whole step.
+      if (isAgentMode && decision.replan) {
+        if (replansUsed >= maxReplans) {
+          logger.warn(
+            {
+              stepId: step.id,
+              iteration,
+              replansUsed,
+              maxReplans,
+            },
+            'aiscope: replan requested but maxReplans cap already reached — ignoring',
+          );
+          history.push({
+            iteration,
+            action: decision.action,
+            succeeded: false,
+            error: `replan ignored: maxReplans=${maxReplans} reached`,
+          });
+          continue;
+        }
+        replansUsed += 1;
+        plan = await rebuildPlan(decision.reasoning ?? 'LLM requested replan', pageContext);
+        currentMilestoneIndex = 0;
+        attemptedMilestoneIds.clear();
+        history.push({
+          iteration,
+          action: 'replan',
+          succeeded: true,
+        });
+        continue;
+      }
+
+      // Agent mode flag: milestoneComplete. Advance the pointer BEFORE
+      // dispatching the action so the next iteration sees the new current
+      // milestone. If the advance walks past the last milestone AND the
+      // chosen action is not already `done`, treat the plan as exhausted
+      // and convert the action to `done` (fast-terminate via the normal
+      // done handling below).
+      if (isAgentMode && decision.milestoneComplete) {
+        advanceMilestone(decision.reasoning ?? 'LLM marked milestone complete');
+        if (plan && currentMilestoneIndex >= plan.milestones.length && decision.action !== 'done') {
+          logger.info(
+            { stepId: step.id, iteration },
+            'aiscope: final milestone complete and LLM still proposing an action — converting to done',
+          );
+          decision = { ...decision, action: 'done' };
+        }
+      }
 
       // 4. Dispatch — validate against the allowed list FIRST so that a
       // user who explicitly excludes `done` from `allowedActions` actually
