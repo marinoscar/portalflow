@@ -144,6 +144,15 @@ export const GotoActionSchema = z.object({
 // context, and the scope is a single goal with a hard ceiling. Use it for
 // "figure out how to dismiss the cookie banner" style deviations from an
 // otherwise deterministic flow, not for open-ended tasks.
+//
+// `successCheck` is optional. When present it is the authoritative oracle
+// (the LLM's `done` emission is treated as a hint and re-verified against
+// the check). When absent, the LLM self-terminates: it emits `done` when it
+// believes the goal is reached and the runner trusts it immediately. The
+// budget caps remain the only safety net in self-terminating mode — use it
+// only for goals whose completion condition is hard to write as a concrete
+// predicate. Self-terminating mode is honored by cli2; cli v1 still rejects
+// aiscope steps without a successCheck.
 export const AiScopeSuccessCheckSchema = z
   .object({
     check: z
@@ -170,7 +179,7 @@ export const AiScopeSuccessCheckSchema = z
 
 export const AiScopeActionSchema = z.object({
   goal: z.string().min(1),
-  successCheck: AiScopeSuccessCheckSchema,
+  successCheck: AiScopeSuccessCheckSchema.optional(),
   maxDurationSec: z.number().int().min(1).max(3600).default(300),
   maxIterations: z.number().int().min(1).max(200).default(25),
   allowedActions: z
