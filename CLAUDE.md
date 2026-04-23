@@ -83,6 +83,36 @@ Every feature or fix MUST be developed in a Git worktree. The main checkout stay
 - One worktree per feature branch (Git enforces this)
 - If the worktree already exists for the requested feature, work inside it (don't recreate)
 
+## MANDATORY: Version Bumps on Features and Fixes
+
+Every feature or fix that touches the CLI, CLI2, extension, or shared schema MUST
+bump the corresponding `package.json` version and add a CHANGELOG entry on the
+same feature branch (same commit as the change, or the next immediate commit).
+
+### Which packages to bump
+- `tools/cli/package.json` — `@portalflow/cli`
+- `tools/cli2/package.json` — `@portalflow/cli2`
+- `tools/extension/package.json` — `@portalflow/extension`
+- `tools/schema/package.json` — `@portalflow/schema`
+
+Bump every package actually modified by the change. If a schema field becomes
+optional and a CLI starts honoring it, bump both the schema and that CLI.
+
+### Semver rules
+- **patch** — bug fixes, internal refactors, doc-only tweaks with no behavior change
+- **minor** — new features or backward-compatible behavior changes (e.g. a field
+  becoming optional, a new allowed action)
+- **major** — breaking changes to the schema, CLI flags, or extension messaging
+
+### CHANGELOG
+Add an entry to the root `CHANGELOG.md` under a new semver heading using
+[Keep a Changelog](https://keepachangelog.com/) format. Include a short
+"why this exists" line in addition to "what changed", so future readers
+understand the motivation.
+
+### Golden rule
+If you shipped a feat or fix and did **not** bump a version, you are not done.
+
 ## MANDATORY: Claude Commit-Only Git Rules
 
 Claude: these rules are **MANDATORY**. Follow them exactly.  
