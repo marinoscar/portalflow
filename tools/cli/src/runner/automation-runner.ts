@@ -7,6 +7,7 @@ import { PageClient } from '../browser/page-client.js';
 import { PageContextCapture } from '../browser/context.js';
 import { ElementResolver } from '../browser/element-resolver.js';
 import { LlmService } from '../llm/llm.service.js';
+import { preflightLlm, formatPingFailure } from './llm-preflight.js';
 import { ToolExecutor } from '../tools/tool-executor.js';
 import { SmscliAdapter } from '../tools/smscli.adapter.js';
 import { VaultcliAdapter } from '../tools/vaultcli.adapter.js';
@@ -287,6 +288,63 @@ export class AutomationRunner {
         { err },
         'LLM service initialization failed — AI element resolution will not be available',
       );
+    }
+
+    // ------------------------------------------------------------------
+    // 6b. LLM pre-flight: if the automation contains any step that
+    //     REQUIRES an LLM (aiscope, condition.ai, loop.items.description),
+    //     verify connectivity against the configured provider BEFORE we
+    //     start launching browsers and opening windows. Users who see
+    //     "401 Unauthorized" after a browser opens and two deterministic
+    //     steps run have a bad time; the pre-flight fails fast with a
+    //     friendly remediation block instead.
+    //
+    //     Deterministic-only automations skip this check — no wasted
+    //     network round-trip. If the LLM service failed to initialize
+    //     above, the pre-flight also bails with the same error shape
+    //     (a synthesized failure so the message is uniform).
+    // ------------------------------------------------------------------
+    try {
+      const preflight = await preflightLlm(automation, llmService);
+      if (!preflight.skipped && !preflight.result.ok) {
+        process.stderr.write(formatPingFailure(preflight.result));
+        logger.error(
+          {
+            providerName: preflight.result.providerName,
+            model: preflight.result.model,
+            status: preflight.result.status,
+            error: preflight.result.message,
+          },
+          'aborting run: LLM connectivity pre-flight failed',
+        );
+        throw new Error(
+          `LLM connectivity check failed (${preflight.result.providerName}): ${preflight.result.message}`,
+        );
+      }
+      if (!preflight.skipped && preflight.result.ok) {
+        logger.info(
+          {
+            providerName: preflight.result.providerName,
+            model: preflight.result.model,
+            latencyMs: preflight.result.latencyMs,
+          },
+          'LLM pre-flight OK',
+        );
+      }
+    } catch (err) {
+      // Re-throw the abort signal above; anything else here is
+      // unexpected and should bubble up as a clean failure.
+      if (err instanceof Error && err.message.startsWith('LLM connectivity check failed')) {
+        throw err;
+      }
+      // Any other failure (e.g. the LLM service wasn't initialized and
+      // verifyConnectivity threw) is treated like a pre-flight miss.
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `\n✗ LLM pre-flight failed: ${message}\n\n` +
+          '  Fix your provider configuration with: portalflow provider list\n',
+      );
+      throw err;
     }
 
     // ------------------------------------------------------------------
