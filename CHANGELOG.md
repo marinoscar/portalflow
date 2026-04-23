@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-04-23
+
+Patch fix: `portalflow --version` no longer lies.
+
+### Fixed
+
+- `portalflow --version` printed a hardcoded `1.0.8` regardless of the installed version — the string was written when cli2 was at 1.0.8 and silently outlived every bump through 1.1.0, 1.2.0, and 2.0.0. Now reads from `tools/cli/package.json` at startup via `fs.readFileSync`, so it can never drift again.
+- **Why this exists**: a user running `portalflow --version` on a fresh `install.sh` from main saw `1.0.8` and reasonably assumed the install was broken. The binary was fine — only the version string was stale.
+
 ## [2.0.0] - 2026-04-23
 
 Tooling release: the Playwright-based CLI is removed and the extension-transport CLI (formerly `@portalflow/cli2`) is now the one and only CLI under the `@portalflow/cli` name.

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import * as helpText from './help-text.js';
 import {
@@ -10,6 +13,16 @@ import {
 } from './config/config.service.js';
 import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
 import { resolvePaths, resolveVideo } from './runner/paths.js';
+
+// Read the CLI version from package.json at startup so `--version` can never
+// drift from the published package. Works in both the built dist layout
+// (dist/index.js → ../package.json) and under tsx dev (src/index.ts →
+// ../package.json). Reading once at module load is fine — this file is the
+// CLI entry point and runs exactly once per invocation.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const { version: CLI_VERSION } = JSON.parse(
+  readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'),
+) as { version: string };
 
 function parseIntArg(v: string): number {
   const n = parseInt(v, 10);
@@ -31,7 +44,7 @@ program
 program
   .name('portalflow')
   .description('PortalFlow CLI — executes browser automations via Chrome extension transport')
-  .version('1.0.8')
+  .version(CLI_VERSION)
   .addHelpText('after', helpText.topLevelHelpText())
   .action(async () => {
     const { runMainTui } = await import('./tui/main-tui.js');
