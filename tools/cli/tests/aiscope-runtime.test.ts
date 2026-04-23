@@ -687,4 +687,36 @@ describe('StepExecutor · executeAiScope', () => {
     expect(outcome).toBe('abort');
     expect(envB.ctx.getVariable('step-aiscope_error') ?? '').toContain('provider 500');
   });
+
+  // Regression: schema v1.1.0 made successCheck optional on AiScopeAction,
+  // but cli v1's Playwright runner intentionally keeps the hard throw —
+  // self-terminating mode is cli2-only. If someone accidentally ships an
+  // automation authored in the extension's "LLM decides" mode into cli v1,
+  // we want a clear runtime error, not silent divergence.
+  it('rejects at runtime when successCheck is missing (cli v1 does not support self-terminating mode)', async () => {
+    const env = buildEnv({
+      decideSequence: [{ action: 'done', reasoning: 'trying to self-terminate' }],
+      successCheckResults: [],
+    });
+    const step: Step = {
+      id: 'step-aiscope',
+      name: 'Aiscope self-terminating',
+      type: 'aiscope',
+      // Intentionally cast through unknown — schema allows omitting
+      // successCheck; the runner is what enforces the cli-v1 restriction.
+      action: {
+        goal: 'Self-terminate via LLM done',
+        maxDurationSec: 300,
+        maxIterations: 25,
+        includeScreenshot: true,
+      } as unknown as Step['action'],
+      onFailure: 'abort',
+      maxRetries: 0,
+      timeout: 0,
+    };
+
+    const outcome = await env.exec.executeWithPolicy(step);
+    expect(outcome).toBe('abort');
+    expect(env.ctx.getVariable('step-aiscope_error') ?? '').toContain('successCheck');
+  });
 });

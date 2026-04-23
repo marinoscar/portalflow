@@ -415,6 +415,118 @@ describe('StepExecutor — loop discoverItems', () => {
 });
 
 // ---------------------------------------------------------------------------
+// aiscope — self-terminating mode (no successCheck)
+// ---------------------------------------------------------------------------
+
+function aiscopeSelfTerminatingStep(overrides?: Partial<{ maxIterations: number }>): Step {
+  return {
+    id: 'step-aiscope',
+    name: 'Aiscope self-terminating',
+    type: 'aiscope',
+    action: {
+      goal: 'Do the thing',
+      maxDurationSec: 60,
+      maxIterations: overrides?.maxIterations ?? 5,
+      includeScreenshot: false,
+      // successCheck intentionally omitted — the LLM's `done` is authoritative.
+    },
+    onFailure: 'abort',
+    maxRetries: 0,
+    timeout: 0,
+  } as Step;
+}
+
+describe('StepExecutor — aiscope self-terminating mode', () => {
+  it('terminates immediately when the LLM emits "done" on iteration 1', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decideNextAction).mockResolvedValueOnce({
+      action: 'done',
+      reasoning: 'goal reached',
+    });
+
+    await expect(executor.execute(aiscopeSelfTerminatingStep())).resolves.toBeUndefined();
+
+    // Only one LLM call — no re-verification, no second iteration.
+    expect(llmService.decideNextAction).toHaveBeenCalledTimes(1);
+    // successCheck was never consulted because there is no check.
+    expect(llmService.evaluateCondition).not.toHaveBeenCalled();
+  });
+
+  it('passes selfTerminating:true to decideNextAction when successCheck is omitted', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decideNextAction).mockResolvedValueOnce({
+      action: 'done',
+      reasoning: 'done',
+    });
+
+    await executor.execute(aiscopeSelfTerminatingStep());
+
+    const firstCall = vi.mocked(llmService.decideNextAction).mock.calls[0][0];
+    expect(firstCall.selfTerminating).toBe(true);
+  });
+
+  it('throws with a budget-exhaustion error when the LLM never emits "done"', async () => {
+    const { executor, llmService } = makeExecutor();
+    // Every iteration picks a no-op wait — model keeps thinking it's not done.
+    vi.mocked(llmService.decideNextAction).mockResolvedValue({
+      action: 'wait',
+      value: '100',
+      reasoning: 'still working',
+    });
+
+    await expect(executor.execute(aiscopeSelfTerminatingStep({ maxIterations: 3 }))).rejects.toThrow(
+      /exhausted the 3-iteration budget without reaching the goal/,
+    );
+    expect(llmService.decideNextAction).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aiscope — successCheck present (done remains a hint)
+// ---------------------------------------------------------------------------
+
+describe('StepExecutor — aiscope with successCheck treats done as a hint', () => {
+  it('continues looping when the LLM emits "done" but the deterministic check disagrees', async () => {
+    const { executor, llmService, pageClient } = makeExecutor();
+
+    // Iteration 1: check fails (element not on page), LLM emits "done".
+    //  → with successCheck present, "done" is a hint → loop continues.
+    // Iteration 2: check passes → loop exits.
+    vi.mocked(pageClient.elementExists)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    vi.mocked(llmService.decideNextAction).mockResolvedValueOnce({
+      action: 'done',
+      reasoning: 'I think we are done',
+    });
+
+    const step: Step = {
+      id: 'step-aiscope',
+      name: 'Aiscope with check',
+      type: 'aiscope',
+      action: {
+        goal: 'Click accept',
+        successCheck: { check: 'element_exists', value: 'button.accepted' },
+        maxDurationSec: 60,
+        maxIterations: 5,
+        includeScreenshot: false,
+      },
+      onFailure: 'abort',
+      maxRetries: 0,
+      timeout: 0,
+    } as Step;
+
+    await expect(executor.execute(step)).resolves.toBeUndefined();
+
+    // elementExists called twice: once per iteration's pre-check.
+    expect(pageClient.elementExists).toHaveBeenCalledTimes(2);
+    // LLM called exactly once — the "done" on iter 1; iter 2 short-circuits
+    // before decideNextAction because the deterministic check already passed.
+    expect(llmService.decideNextAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // JumpOutOfBlockError
 // ---------------------------------------------------------------------------
 

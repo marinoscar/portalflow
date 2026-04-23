@@ -937,6 +937,8 @@ describe('AutomationSchema · aiscope step type', () => {
   });
 
   it('rejects an aiscope step with neither check nor ai in successCheck', () => {
+    // Note: this rejects an *empty object* for successCheck. Omitting the
+    // field entirely is now valid (LLM self-terminates — see below).
     const result = AutomationSchema.safeParse({
       ...BASE_AUTOMATION,
       steps: [
@@ -947,6 +949,26 @@ describe('AutomationSchema · aiscope step type', () => {
       ],
     });
     expect(result.success).toBe(false);
+  });
+
+  it('validates an aiscope step with successCheck omitted (LLM self-terminates)', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Triage the inbox',
+          // successCheck intentionally omitted — the cli2 runner will
+          // trust the LLM's `done` emission to end the loop.
+        }),
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const action = result.data.steps[0].action as {
+        successCheck?: unknown;
+      };
+      expect(action.successCheck).toBeUndefined();
+    }
   });
 
   it('rejects an aiscope step with both check and ai in successCheck', () => {
