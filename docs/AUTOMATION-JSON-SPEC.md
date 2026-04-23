@@ -1523,7 +1523,7 @@ This is **not** a general-purpose autonomous agent. The action vocabulary is fix
 | Field               | Type                       | Required | Default | Description |
 |---------------------|----------------------------|----------|---------|-------------|
 | `goal`              | `string` (min 1 char)      | Yes      | —       | Plain-English description of the goal the LLM should work toward. The LLM receives this verbatim on every iteration. |
-| `successCheck`      | `object` (see below)       | Yes      | —       | The predicate that decides whether the goal is reached. Exactly one of `{ check, value }` or `{ ai }` must be set. |
+| `successCheck`      | `object` (see below)       | No       | —       | The predicate that decides whether the goal is reached. When set, exactly one of `{ check, value }` or `{ ai }` must be populated. When **omitted**, the runner enters self-terminating mode: the LLM ends the loop itself by emitting `done`, and only the budget caps can stop a confused model. Self-terminating mode is honored by **cli2 only** — cli v1 still throws at runtime when `successCheck` is absent. |
 | `maxDurationSec`    | `number` (int, 1–3600)     | No       | `300`   | Wall-clock budget in seconds. Whichever cap fires first aborts the step with a clear error. |
 | `maxIterations`     | `number` (int, 1–200)      | No       | `25`    | Maximum number of observe → decide → dispatch cycles. Whichever cap fires first aborts. |
 | `allowedActions`    | `string[]`                 | No       | (all)   | Whitelist restricting which actions the LLM may emit. When omitted, the full vocabulary (see below) is permitted. |
@@ -1546,7 +1546,11 @@ Or an AI yes/no question (routed through the same AI evaluator the `condition.ai
 { "ai": "Is the user currently logged in and viewing an authenticated account page?" }
 ```
 
-Setting both is a schema error. Setting neither is a schema error. Setting `check` without `value` is a schema error.
+Setting both is a schema error. Setting the object with neither `check`+`value` nor `ai` is a schema error. Setting `check` without `value` is a schema error.
+
+**Omitting `successCheck` entirely (self-terminating mode, cli2 only):**
+
+When the `successCheck` field is not present on an aiscope action, cli2's runner hands the completion decision to the LLM itself. Every iteration costs exactly one `decideNextAction` call (no pre-check); when the LLM emits `done`, the loop trusts it immediately and terminates. The model is told so via a `selfTerminating: true` marker in the user message so it can calibrate its own confidence. Use this mode for goals you cannot state as a concrete yes/no predicate — "fill whatever fields this form has", "triage this inbox view". If the LLM is over-confident, the budget caps (`maxDurationSec`, `maxIterations`) are the only safety net, so keep them tight. **cli v1 rejects automations without `successCheck` at runtime** — use an AI check (`{ "ai": "..." }`) for anything that needs to run on both runners.
 
 **Action vocabulary (the LLM picks one per iteration):**
 
@@ -1562,7 +1566,7 @@ Setting both is a schema error. Setting neither is a schema error. Setting `chec
 | `focus`    | `selector`                             | Focuses the element without typing.                       |
 | `scroll`   | `value` = `up`/`down`/`top`/`bottom`   | Scrolls the page. No selector.                            |
 | `wait`     | `value` = milliseconds as string       | Pauses the loop for the given duration (useful mid-load). |
-| `done`     | —                                      | Hint from the LLM that it believes the goal is reached. The runner always re-verifies via `successCheck` on the next iteration — if the check still fails, the loop keeps going until the budget is exhausted. |
+| `done`     | —                                      | When `successCheck` is present, this is a hint: the runner re-verifies via the check on the next iteration, and if the check still fails the loop keeps going. When `successCheck` is omitted (cli2 self-terminating mode), `done` is authoritative and ends the loop immediately. |
 
 When `allowedActions` is set, only actions in the list (plus implicit `done`) are dispatched. The LLM is told about the restriction and any out-of-list emissions are logged as warnings and fed back as failures in the recent-history buffer on the next iteration.
 
@@ -1602,6 +1606,8 @@ Cost trade-off: on the **final** iteration (the one where the check finally retu
 
 When `successCheck` is deterministic (`{ check, value }`), the check is a cheap DOM query and runs **first** — sequential is strictly better because a successful check skips the LLM call entirely. The parallelism optimization is AI-check-specific.
 
+When `successCheck` is **omitted** (cli2 self-terminating mode), each iteration makes exactly **one** LLM call — only `decideNextAction`. This is the cheapest of the three modes on a per-iteration basis, but it removes the independent success predicate: if the model over-confidently emits `done` early, the automation leaves aiscope without having actually reached the goal. Use only when the goal genuinely has no concrete finish condition.
+
 **Worked example:**
 
 ```json
@@ -1626,9 +1632,30 @@ When `successCheck` is deterministic (`{ check, value }`), the check is a cheap 
 
 On a page with a typical cookie wall, the LLM sees the banner in the screenshot + its accept button in the simplified HTML and emits `{ action: "click", selector: "button:has-text('Accept')" }`. After the click, the next iteration captures a fresh page context, evaluates the AI success check (banner gone?), and returns. Even when the banner's exact markup changes between sites, the same step handles every variant.
 
+**Self-terminating example (cli2 only, no `successCheck`):**
+
+```json
+{
+  "id": "step-triage-inbox",
+  "name": "Triage the inbox",
+  "type": "aiscope",
+  "action": {
+    "goal": "Archive every promotional email in the currently-visible inbox page and stop when no more promotional rows are visible.",
+    "maxDurationSec": 90,
+    "maxIterations": 12,
+    "includeScreenshot": true
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 120000
+}
+```
+
+The LLM iterates over the visible rows, archives each promotional one, and emits `done` when the list stops showing promotional items. cli2 trusts that signal immediately; cli v1 would throw at runtime.
+
 **Cost and safety notes:**
 
-- Each iteration makes **one LLM call for a deterministic `successCheck`** (the check itself is a DOM query), and **two parallel LLM calls for an AI `successCheck`** (one for the check, one speculatively for the next action — see "Performance" above). The `inputTokens` / `outputTokens` / `latencyMs` are captured per call via the existing observability pipeline (see §19.3 Troubleshooting).
+- Each iteration makes **one LLM call for a deterministic `successCheck`** (the check itself is a DOM query), **one LLM call for a self-terminating step** (no check — just the next-action decision), or **two parallel LLM calls for an AI `successCheck`** (one for the check, one speculatively for the next action — see "Performance" above). The `inputTokens` / `outputTokens` / `latencyMs` are captured per call via the existing observability pipeline (see §19.3 Troubleshooting).
 - Screenshots are sent as base64 PNGs in a single vision content block per call. A viewport screenshot at default resolution is roughly 1,500–3,000 tokens on Anthropic / OpenAI vision models. Budget your `maxIterations` accordingly if cost matters.
 - Set `includeScreenshot: false` when using models without vision or when you want a pure-HTML observation path.
 - The action vocabulary is intentionally bounded. There is no `eval` or raw JavaScript escape hatch. If you need something outside the list, drop out of aiscope and use explicit `extract` / `interact` steps after it.
@@ -1637,10 +1664,11 @@ On a page with a typical cookie wall, the LLM sees the banner in the screenshot 
 **Validation errors you may see:**
 
 - Missing `goal` or empty string — schema rejects at parse time.
-- `successCheck` missing both `check` and `ai`, or having both — schema rejects.
+- `successCheck` present but populated with neither `check` nor `ai`, or both — schema rejects. (Omitting the `successCheck` field entirely is valid — see self-terminating mode above.)
 - `successCheck` with `check` but no `value` — schema rejects.
 - `maxDurationSec` outside 1–3600 or `maxIterations` outside 1–200 — schema rejects.
-- `allowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`).
+- `allowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`, `tool_call`).
+- cli v1 only: `successCheck` omitted at runtime — `aiscope step "<id>" has no "successCheck"` is thrown (self-terminating mode is cli2-only).
 
 ---
 

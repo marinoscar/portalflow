@@ -465,6 +465,29 @@ Secret values are never included in the LLM prompt. The LLM sees only the input 
 
 Vault-sourced inputs are exploded into per-field variables at load time. If the input is named `credentials` and the vault entry returns `{ username, password }`, the available `inputRef` names are `credentials` (the raw secret string, if applicable), `credentials_username`, and `credentials_password`. Tool call results are stored as `<tool>_<command>_result` — for example, a `smscli:get-otp` call produces `smscli_get_otp_result`. Use these exact names in `inputRef` fields.
 
+### Self-terminating aiscope (no `successCheck`)
+
+Some goals are hard to state as a concrete yes/no predicate — "fill whatever fields this form has", "triage this inbox view", "dismiss every overlay you can find". For those, cli2 accepts aiscope steps **without** a `successCheck`. Each iteration makes a single `decideNextAction` LLM call and the loop ends when the model emits `done`. The model is told so via a `selfTerminating: true` marker in the user message, and the budget caps (`maxDurationSec`, `maxIterations`) are the only safety net — so keep them tight.
+
+```json
+{
+  "id": "triage-inbox",
+  "name": "Triage the inbox",
+  "type": "aiscope",
+  "action": {
+    "goal": "Archive every promotional email visible on the current inbox page and stop when none remain.",
+    "maxDurationSec": 90,
+    "maxIterations": 12,
+    "includeScreenshot": true
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 120000
+}
+```
+
+Use this sparingly. When you can write a predicate, prefer a deterministic `successCheck`; when you can state a yes/no question, prefer an AI `successCheck`. Self-terminating mode trades safety for flexibility and is **cli2-only** — cli v1 will throw at runtime when `successCheck` is missing.
+
 ---
 
 ## WebSocket protocol reference
