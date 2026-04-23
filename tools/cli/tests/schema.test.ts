@@ -1033,11 +1033,64 @@ describe('AutomationSchema · aiscope step type', () => {
         maxDurationSec: number;
         maxIterations: number;
         includeScreenshot: boolean;
+        mode: string;
+        maxReplans: number;
       };
       expect(action.maxDurationSec).toBe(300);
       expect(action.maxIterations).toBe(25);
       expect(action.includeScreenshot).toBe(true);
+      expect(action.mode).toBe('fast');
+      expect(action.maxReplans).toBe(2);
     }
+  });
+
+  it('accepts mode: "agent" with a custom maxReplans cap', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Log in and download the invoice',
+          successCheck: { ai: 'Is the invoice PDF visible in Downloads?' },
+          mode: 'agent',
+          maxReplans: 4,
+        }),
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const action = result.data.steps[0].action as { mode: string; maxReplans: number };
+      expect(action.mode).toBe('agent');
+      expect(action.maxReplans).toBe(4);
+    }
+  });
+
+  it('rejects an invalid mode value', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Bad mode',
+          successCheck: { check: 'element_exists', value: 'button' },
+          mode: 'super-agent',
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects maxReplans outside 0-10', () => {
+    const result = AutomationSchema.safeParse({
+      ...BASE_AUTOMATION,
+      steps: [
+        aiscopeStep({
+          goal: 'Too many replans',
+          successCheck: { check: 'element_exists', value: 'button' },
+          mode: 'agent',
+          maxReplans: 11,
+        }),
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 
   it('accepts a custom allowedActions whitelist', () => {

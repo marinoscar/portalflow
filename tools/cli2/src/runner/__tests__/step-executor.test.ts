@@ -77,6 +77,11 @@ function makeLlmService(): LlmService {
       action: 'done',
       reasoning: 'goal achieved',
     }),
+    decidePlan: vi.fn().mockResolvedValue({
+      summary: 'default mock plan',
+      milestones: [{ id: 'm1', description: 'complete the goal' }],
+      reasoning: 'mock',
+    }),
     evaluateCondition: vi.fn().mockResolvedValue({ result: true, confidence: 0.9 }),
     findItems: vi.fn().mockResolvedValue({ items: [], explanation: '' }),
   } as unknown as LlmService;
@@ -523,6 +528,184 @@ describe('StepExecutor — aiscope with successCheck treats done as a hint', () 
     // LLM called exactly once — the "done" on iter 1; iter 2 short-circuits
     // before decideNextAction because the deterministic check already passed.
     expect(llmService.decideNextAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aiscope — agent mode (planner + milestones + replan)
+// ---------------------------------------------------------------------------
+
+function aiscopeAgentStep(overrides?: Partial<{
+  maxIterations: number;
+  maxReplans: number;
+}>): Step {
+  return {
+    id: 'step-aiscope-agent',
+    name: 'Aiscope agent',
+    type: 'aiscope',
+    action: {
+      goal: 'Log in and download the invoice',
+      mode: 'agent',
+      maxReplans: overrides?.maxReplans ?? 2,
+      maxDurationSec: 60,
+      maxIterations: overrides?.maxIterations ?? 10,
+      includeScreenshot: false,
+      // successCheck intentionally omitted — terminate on LLM "done".
+    },
+    onFailure: 'abort',
+    maxRetries: 0,
+    timeout: 0,
+  } as Step;
+}
+
+describe('StepExecutor — aiscope agent mode', () => {
+  it('calls decidePlan once up front and passes the plan to every decideNextAction', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decidePlan).mockResolvedValueOnce({
+      summary: 'Log in then download',
+      milestones: [
+        { id: 'm1', description: 'Log in' },
+        { id: 'm2', description: 'Download invoice' },
+      ],
+      reasoning: 'two phases',
+    });
+    vi.mocked(llmService.decideNextAction)
+      .mockResolvedValueOnce({
+        action: 'click',
+        selector: '#submit',
+        milestoneComplete: true,
+        reasoning: 'logged in',
+      })
+      .mockResolvedValueOnce({
+        action: 'done',
+        reasoning: 'invoice downloaded, goal complete',
+      });
+
+    await expect(executor.execute(aiscopeAgentStep())).resolves.toBeUndefined();
+
+    expect(llmService.decidePlan).toHaveBeenCalledTimes(1);
+    const planCall = vi.mocked(llmService.decidePlan).mock.calls[0][0];
+    expect(planCall.goal).toBe('Log in and download the invoice');
+    expect(planCall.previousPlan).toBeUndefined();
+
+    const firstDecideCall = vi.mocked(llmService.decideNextAction).mock.calls[0][0];
+    expect(firstDecideCall.plan?.summary).toBe('Log in then download');
+    expect(firstDecideCall.currentMilestoneId).toBe('m1');
+  });
+
+  it('advances to the next milestone when milestoneComplete is true', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decidePlan).mockResolvedValueOnce({
+      summary: 'Two steps',
+      milestones: [
+        { id: 'm1', description: 'First' },
+        { id: 'm2', description: 'Second' },
+      ],
+      reasoning: 'ok',
+    });
+    vi.mocked(llmService.decideNextAction)
+      .mockResolvedValueOnce({
+        action: 'click',
+        selector: '#a',
+        milestoneComplete: true,
+        reasoning: 'first done',
+      })
+      .mockResolvedValueOnce({
+        action: 'done',
+        reasoning: 'second done, wrapping up',
+      });
+
+    await executor.execute(aiscopeAgentStep());
+
+    const secondCall = vi.mocked(llmService.decideNextAction).mock.calls[1][0];
+    expect(secondCall.currentMilestoneId).toBe('m2');
+  });
+
+  it('honors replan by calling decidePlan again with previousPlan populated', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decidePlan)
+      .mockResolvedValueOnce({
+        summary: 'Original plan',
+        milestones: [{ id: 'm1', description: 'First try' }],
+        reasoning: 'ok',
+      })
+      .mockResolvedValueOnce({
+        summary: 'Revised plan',
+        milestones: [{ id: 'n1', description: 'New approach' }],
+        reasoning: 'learned more',
+      });
+    vi.mocked(llmService.decideNextAction)
+      .mockResolvedValueOnce({
+        action: 'done',
+        replan: true,
+        reasoning: 'page is different than planned',
+      })
+      .mockResolvedValueOnce({
+        action: 'done',
+        reasoning: 'goal reached on new plan',
+      });
+
+    await executor.execute(aiscopeAgentStep());
+
+    expect(llmService.decidePlan).toHaveBeenCalledTimes(2);
+    const replanCall = vi.mocked(llmService.decidePlan).mock.calls[1][0];
+    expect(replanCall.previousPlan?.plan.summary).toBe('Original plan');
+    expect(replanCall.previousPlan?.reason).toContain('page is different');
+  });
+
+  it('ignores replan requests after maxReplans is reached', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decidePlan).mockResolvedValue({
+      summary: 'Plan',
+      milestones: [{ id: 'm1', description: 'First' }],
+      reasoning: 'ok',
+    });
+    // Every iteration asks to replan; after the first replan is consumed,
+    // subsequent ones should be ignored and the loop should eventually
+    // exhaust the iteration budget.
+    vi.mocked(llmService.decideNextAction).mockResolvedValue({
+      action: 'wait',
+      value: '100',
+      replan: true,
+      reasoning: 'always want to replan',
+    });
+
+    await expect(
+      executor.execute(aiscopeAgentStep({ maxIterations: 4, maxReplans: 1 })),
+    ).rejects.toThrow(/exhausted the 4-iteration budget/);
+
+    // One initial plan + one replan (the cap = 1). Subsequent replan requests
+    // were ignored so decidePlan was NOT called a third time.
+    expect(llmService.decidePlan).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not call decidePlan in fast mode (default)', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decideNextAction).mockResolvedValueOnce({
+      action: 'done',
+      reasoning: 'done',
+    });
+
+    await executor.execute(aiscopeSelfTerminatingStep());
+
+    expect(llmService.decidePlan).not.toHaveBeenCalled();
+    // decideNextAction should also NOT receive plan/currentMilestoneId.
+    const call = vi.mocked(llmService.decideNextAction).mock.calls[0][0];
+    expect(call.plan).toBeUndefined();
+    expect(call.currentMilestoneId).toBeUndefined();
+  });
+
+  it('throws when the planner returns an empty milestone list', async () => {
+    const { executor, llmService } = makeExecutor();
+    vi.mocked(llmService.decidePlan).mockResolvedValueOnce({
+      summary: 'Empty',
+      milestones: [],
+      reasoning: 'bug',
+    });
+
+    await expect(executor.execute(aiscopeAgentStep())).rejects.toThrow(
+      /agent-mode planner returned an empty plan/,
+    );
   });
 });
 
