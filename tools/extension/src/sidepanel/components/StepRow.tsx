@@ -230,9 +230,10 @@ function GotoEditor({
 
 /**
  * Editor for the `aiscope` step type. Exposes the goal, the success
- * check (either a deterministic check+value or an AI yes/no question),
- * the dual budgets (maxDurationSec and maxIterations), and the
- * include-screenshot toggle.
+ * check (either a deterministic check+value, an AI yes/no question, or
+ * "LLM decides" — omit successCheck entirely and let the LLM self-
+ * terminate via `done`), the dual budgets (maxDurationSec and
+ * maxIterations), and the include-screenshot toggle.
  */
 function AiScopeEditor({
   action,
@@ -242,15 +243,25 @@ function AiScopeEditor({
   onUpdate: (changes: Partial<Step>) => void;
 }) {
   const successCheck = action.successCheck ?? {};
-  const isAiCheck = successCheck.ai !== undefined;
-  const checkMode: 'ai' | 'deterministic' = isAiCheck ? 'ai' : 'deterministic';
+  const hasSuccessCheck = action.successCheck !== undefined;
+  const isAiCheck = hasSuccessCheck && successCheck.ai !== undefined;
+  const checkMode: 'ai' | 'deterministic' | 'llm_decides' = !hasSuccessCheck
+    ? 'llm_decides'
+    : isAiCheck
+      ? 'ai'
+      : 'deterministic';
 
   const updateAction = (next: Partial<AiScopeAction>) => {
     onUpdate({ action: { ...action, ...next } as Step['action'] });
   };
 
-  const setCheckMode = (mode: 'ai' | 'deterministic') => {
-    if (mode === 'ai') {
+  const setCheckMode = (mode: 'ai' | 'deterministic' | 'llm_decides') => {
+    if (mode === 'llm_decides') {
+      // Omit successCheck entirely so the cli2 runner self-terminates
+      // on the LLM's `done` emission.
+      const { successCheck: _dropped, ...rest } = action;
+      onUpdate({ action: rest as Step['action'] });
+    } else if (mode === 'ai') {
       updateAction({
         successCheck: { ai: successCheck.ai ?? '' },
       } as Partial<AiScopeAction>);
@@ -280,12 +291,24 @@ function AiScopeEditor({
         <span>Success check mode</span>
         <select
           value={checkMode}
-          onChange={(e) => setCheckMode(e.target.value as 'ai' | 'deterministic')}
+          onChange={(e) =>
+            setCheckMode(e.target.value as 'ai' | 'deterministic' | 'llm_decides')
+          }
         >
           <option value="deterministic">Deterministic (check + value)</option>
           <option value="ai">AI (plain-English question)</option>
+          <option value="llm_decides">LLM decides (cli2 only — no success check)</option>
         </select>
       </label>
+
+      {checkMode === 'llm_decides' && (
+        <p className="hint">
+          No success check. The LLM terminates the loop by emitting <code>done</code> once
+          it believes the goal is reached. Only budget caps (max duration / iterations)
+          stop an over-confident model. Use when the goal is hard to state as a concrete
+          predicate. Honored by cli2; cli v1 will reject the automation.
+        </p>
+      )}
 
       {checkMode === 'deterministic' && (
         <>

@@ -350,8 +350,14 @@ replace the automation's steps array directly, so correctness matters.
        finish condition concretely: element_exists for "banner gone",
        url_matches for "we're on /dashboard now", text_contains for
        "the success message shows up". Fall back to AI successCheck
-       only when the goal is inherently fuzzy ("is the page free of
-       any cookie or consent banner?").
+       when the finish condition is inherently fuzzy but still answerable
+       as yes/no ("is the page free of any cookie or consent banner?").
+       Only OMIT successCheck entirely when the goal is so open-ended
+       you cannot state a completion predicate at all (e.g. "triage this
+       inbox", "fill whatever fields this form has"). When omitted, the
+       cli2 runner trusts the LLM's \`done\` emission immediately — so
+       rely on the budget caps to contain an over-confident model, and
+       note that cli v1 will reject automations without a successCheck.
 
     e) includeScreenshot: true is the DEFAULT and should stay that
        way. Only set it to false when the user explicitly asks for
