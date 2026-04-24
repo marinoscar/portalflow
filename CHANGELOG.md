@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [extension 2.1.0] - 2026-04-24
+
+Tooling release: the extension's Automation Editor gains a one-click "Duplicate step" feature so users can fork an existing step when building similar ones.
+
+### Added
+
+- **Duplicate step action** (`@portalflow/extension` 2.1.0)
+  - Every step row in the Outline now has a hover-revealed ⎘ button; the StepForm editor has a "⎘ Duplicate" button in its header; Ctrl/Cmd+D on the currently selected step does the same thing.
+  - Click creates a copy of the step — new id, " (copy)" suffix on name, every other field preserved (type, action, selectors, validation, onFailure, maxRetries, timeout, aiGuidance) — inserts it immediately after the original and auto-selects the new step for editing.
+  - Loop substeps are recursively duplicated with fresh ids so a copied loop works standalone.
+  - Works identically at every scope: top-level steps, substeps inside loops, steps inside function bodies, and substeps inside loops inside function bodies.
+- **Why this exists**: authoring several similar steps (e.g., a sequence of form-field interactions) previously meant repeating the same click/type pattern by hand. Duplicating and tweaking is faster and less error-prone, especially for aiscope steps with complex selector/budget configuration.
+
 ## [3.0.0] - 2026-04-24
 
 Breaking tooling release: the aiscope `allowedActions` schema field is
