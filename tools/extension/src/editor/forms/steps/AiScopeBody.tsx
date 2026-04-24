@@ -27,7 +27,7 @@ const CHECK_OPTIONS = [
   { value: 'variable_equals', label: 'Variable equals' },
 ];
 
-const ALL_ALLOWED_ACTIONS = [
+const ALL_AISCOPE_ACTIONS = [
   'navigate',
   'click',
   'type',
@@ -41,7 +41,7 @@ const ALL_ALLOWED_ACTIONS = [
   'done',
 ] as const;
 
-type AllowedActionItem = (typeof ALL_ALLOWED_ACTIONS)[number];
+type DisallowedActionItem = (typeof ALL_AISCOPE_ACTIONS)[number];
 
 function getSuccessCheckMode(action: AiScopeAction): SuccessCheckMode {
   if (!action.successCheck) return 'llm';
@@ -51,8 +51,8 @@ function getSuccessCheckMode(action: AiScopeAction): SuccessCheckMode {
 
 export function AiScopeBody({ action, onChange, errors }: AiScopeBodyProps) {
   const successCheckMode = getSuccessCheckMode(action);
-  const allowedSet = new Set<AllowedActionItem>(
-    (action.allowedActions as AllowedActionItem[] | undefined) ?? [],
+  const disallowedSet = new Set<DisallowedActionItem>(
+    (action.disallowedActions as DisallowedActionItem[] | undefined) ?? [],
   );
 
   function handleSuccessCheckMode(mode: SuccessCheckMode) {
@@ -71,16 +71,17 @@ export function AiScopeBody({ action, onChange, errors }: AiScopeBodyProps) {
     onChange({ successCheck: { ...action.successCheck, ...partial } });
   }
 
-  function handleAllowedActionToggle(item: AllowedActionItem, checked: boolean) {
-    const next = new Set(allowedSet);
+  function handleDisallowedActionToggle(item: DisallowedActionItem, checked: boolean) {
+    const next = new Set(disallowedSet);
     if (checked) {
       next.add(item);
     } else {
       next.delete(item);
     }
-    // When all 11 or none: emit undefined (means "all allowed")
-    const arr = ALL_ALLOWED_ACTIONS.filter((a) => next.has(a));
-    onChange({ allowedActions: arr.length === 0 || arr.length === ALL_ALLOWED_ACTIONS.length ? undefined : arr });
+    // When none are blocked: emit undefined (matches the schema default — full vocabulary allowed)
+    // When any are blocked: emit the array as-is (including all-11, which means nothing is allowed)
+    const arr = ALL_AISCOPE_ACTIONS.filter((a) => next.has(a));
+    onChange({ disallowedActions: arr.length === 0 ? undefined : arr });
   }
 
   return (
@@ -231,27 +232,27 @@ export function AiScopeBody({ action, onChange, errors }: AiScopeBodyProps) {
         </div>
       </details>
 
-      {/* Allowed actions */}
+      {/* Disallowed actions */}
       <div className="field">
-        <span>Allowed actions</span>
+        <span>Disallowed actions</span>
         <span className="field-hint">
-          Leave all unchecked to allow everything. Check a subset to restrict the LLM's available
-          actions.
+          Check an action to prevent the LLM from emitting it. Leave empty to allow the full
+          vocabulary.
         </span>
         <div className="allowed-actions-grid">
-          {ALL_ALLOWED_ACTIONS.map((item) => (
+          {ALL_AISCOPE_ACTIONS.map((item) => (
             <label key={item} className="field-checkbox-label">
               <input
                 type="checkbox"
-                checked={allowedSet.has(item)}
-                onChange={(e) => handleAllowedActionToggle(item, e.target.checked)}
+                checked={disallowedSet.has(item)}
+                onChange={(e) => handleDisallowedActionToggle(item, e.target.checked)}
               />
               <span className="field-checkbox-text">{item}</span>
             </label>
           ))}
         </div>
-        {errors['allowedActions'] && (
-          <span className="field-error">{errors['allowedActions']}</span>
+        {errors['disallowedActions'] && (
+          <span className="field-error">{errors['disallowedActions']}</span>
         )}
       </div>
     </div>
