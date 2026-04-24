@@ -33,7 +33,7 @@
     "@vitejs/plugin-react": "^5.1.2",
     "@vitest/coverage-v8": "^4.0.17",
     "@vitest/ui": "^4.0.17",
-    "jsdom": "^24.x",
+    "jsdom": "^29.x",
     "msw": "^2.x",
     "typescript": "^5.x",
     "vite": "^7.3.1",
