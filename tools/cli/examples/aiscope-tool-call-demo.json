@@ -1,0 +1,73 @@
+{
+  "id": "c7d8e9f0-a1b2-4c3d-8e4f-5a6b7c8d9e0f",
+  "name": "aiscope tool_call plug-and-play demo — login with optional SMS OTP",
+  "version": "1.0.0",
+  "description": "Demonstrates aiscope tool_call plug-and-play (CLI 3.1.0+). The LLM receives a 'Tools available in this run' inventory on every iteration and autonomously decides when to call smscli:otp-wait — no tool mention is needed in the goal. Run this against your real login page by replacing https://example.com/login with the actual URL and supplying live credentials.",
+  "goal": "Log in to the target site and confirm the post-login page is visible, calling smscli autonomously if an SMS OTP is requested.",
+  "inputs": [
+    {
+      "name": "email",
+      "type": "string",
+      "source": "literal",
+      "value": "user@example.com",
+      "description": "Login email address. Replace with your actual address."
+    },
+    {
+      "name": "password",
+      "type": "secret",
+      "source": "literal",
+      "value": "change-me",
+      "description": "Login password. Replace with your actual password or switch source to 'vaultcli'."
+    }
+  ],
+  "tools": [
+    { "name": "smscli" },
+    { "name": "vaultcli" }
+  ],
+  "steps": [
+    {
+      "id": "step-1",
+      "name": "Navigate to login page",
+      "description": "Opens the login URL. Replace https://example.com/login with your real target URL.",
+      "type": "navigate",
+      "action": { "url": "https://example.com/login" },
+      "validation": { "type": "url_contains", "value": "example.com" },
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 15000
+    },
+    {
+      "id": "step-2",
+      "name": "AI: log in, handle OTP if prompted",
+      "description": "Agent-mode aiscope step. The goal names no tools — the CLI injects the full smscli and vaultcli inventory into every iteration, so the LLM calls smscli:otp-wait autonomously when it sees an OTP field. Replace the successCheck predicate with one appropriate for your site.",
+      "type": "aiscope",
+      "action": {
+        "goal": "Log in as {{email}}. Type the password when prompted. If the site shows an SMS verification or OTP field after submitting the password, obtain the code and enter it. Consider the goal complete when the post-login page or dashboard is fully visible.",
+        "mode": "agent",
+        "maxReplans": 1,
+        "successCheck": {
+          "ai": "The user is logged in and viewing a post-login page (dashboard, account overview, or home) — the login form is no longer visible."
+        },
+        "maxDurationSec": 300,
+        "maxIterations": 25,
+        "includeScreenshot": true
+      },
+      "onFailure": "abort",
+      "maxRetries": 0,
+      "timeout": 30000
+    },
+    {
+      "id": "step-3",
+      "name": "Extract page title to confirm success",
+      "description": "Captures the page title after login as a simple completion signal. The extracted value is available as the context variable 'page_title' in subsequent steps or outputs.",
+      "type": "extract",
+      "action": {
+        "target": "title",
+        "outputName": "page_title"
+      },
+      "onFailure": "skip",
+      "maxRetries": 1,
+      "timeout": 10000
+    }
+  ]
+}

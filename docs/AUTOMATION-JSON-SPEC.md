@@ -1737,6 +1737,72 @@ The executor then drives the browser turn-by-turn. If the site surprises the pla
 - `disallowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`, `tool_call`).
 - Agent mode only: planner returns zero milestones at runtime — `aiscope step "<id>" agent-mode planner returned an empty plan` is thrown.
 
+**tool_call inside aiscope:**
+
+`tool_call` is always in the default aiscope action vocabulary. Starting with CLI 3.1.0, the runner automatically introspects every registered tool at the beginning of each aiscope iteration and injects a "Tools available in this run" block into the LLM's user message. Authors no longer need to describe tools, commands, or argument names in the `goal` — the LLM receives an accurate, current inventory and infers the right call from the page state.
+
+*Available tools as of CLI 3.1.0:*
+
+| Tool | Command | Args | Result variable |
+|------|---------|------|-----------------|
+| `smscli` | `otp-wait` | `timeout` (optional, seconds, default 60) | `smscli_otp_wait_result` |
+| `smscli` | `otp-latest` | — (none) | `smscli_otp_latest_result` |
+| `smscli` | `otp-extract` | `message` (required, raw SMS body) | `smscli_otp_extract_result` |
+| `vaultcli` | `secrets-get` | `name` (required), `field` (optional) | `vaultcli_secrets_get_result` |
+
+`smscli:otp-wait` waits for a **new** OTP to arrive after the current moment — use it when the site just triggered a send. `smscli:otp-latest` returns the most recent OTP already received — use it when the code may have arrived before the loop checked. The LLM picks whichever fits the page state; authors do not need to specify which command to call.
+
+*LLM decision shape — what the model emits when it decides to call a tool:*
+
+```json
+{
+  "action": "tool_call",
+  "value": "smscli:otp-wait",
+  "toolCall": { "tool": "smscli", "command": "otp-wait", "args": { "timeout": "120" } },
+  "reasoning": "The login page is now showing an SMS verification field."
+}
+```
+
+The runner accepts both `value: "tool:command"` and the structured `toolCall` object; in practice the LLM emits both for clarity. The result is stored in context under the variable named in the table above.
+
+*Using the result on the next iteration via `inputRef`:*
+
+```json
+{
+  "action": "type",
+  "selector": "#otp-input",
+  "inputRef": "smscli_otp_wait_result",
+  "reasoning": "Typing the OTP code that smscli just returned."
+}
+```
+
+*Worked aiscope step — goal says nothing about tools:*
+
+```json
+{
+  "id": "login-with-maybe-otp",
+  "name": "Log in (handle OTP if prompted)",
+  "type": "aiscope",
+  "action": {
+    "goal": "Log in as {{email}}. After submitting the password, the site may ask for an SMS OTP — if so, obtain and enter it. Consider the goal complete when the dashboard is visible.",
+    "mode": "agent",
+    "maxDurationSec": 300,
+    "maxIterations": 25,
+    "includeScreenshot": true
+  },
+  "onFailure": "abort",
+  "maxRetries": 0,
+  "timeout": 30000
+}
+```
+
+Notice that the `goal` mentions no tool names, no commands, and no argument shapes. The CLI injects the full tool inventory into every iteration's prompt, so the LLM knows precisely what is callable and picks `smscli:otp-wait` (or `smscli:otp-latest`) on its own when an OTP field appears.
+
+*Author-side controls:*
+
+- Use a top-level `tool_call` **step** (not an aiscope action) when you need deterministic invocation with explicit args, regardless of what the LLM might decide.
+- `tool_call` is intentionally absent from the `disallowedActions` enum — it is always available. The only way to prevent the LLM from calling a tool is to not register it with the CLI; that is a runner configuration decision, not an automation field.
+
 ---
 
 ## 7. Selectors
