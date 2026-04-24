@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [cli 3.1.0] - 2026-04-24
+
+Tooling release: aiscope `tool_call` is now plug-and-play — the CLI introspects every registered tool and injects an accurate "Tools available in this run" block into the LLM prompt each iteration. Authors no longer have to describe tools in the aiscope `goal`.
+
+### Added
+
+- **Tool introspection** (`@portalflow/cli` 3.1.0) — new `describe(): ToolDescription` method on the `Tool` interface. `smscli` exposes `otp-wait`, `otp-latest`, and `otp-extract`; `vaultcli` exposes `secrets-get`. Each command advertises its args, a plain-English description, and the exact result variable name the LLM can reference via `inputRef` on the next iteration.
+- **Narrow LLM-facing surface** — smscli's advertised args are deliberately minimal: `otp-wait` exposes only `timeout`; `otp-latest` exposes zero args; `otp-extract` exposes only `message`. The adapter runtime still accepts every arg it always did (sender, number, since, device) — those remain available for hand-authored top-level `tool_call` steps — but we don't ask the LLM to reason about filters it rarely needs.
+- **Prompt injection** — both anthropic and openai providers insert the inventory block into the aiscope action-decider and agent-planner prompts right before the page HTML. Empty tool list emits no block.
+- **Example** — `tools/cli/examples/aiscope-tool-call-demo.json` shows the feature end-to-end: an aiscope goal that deliberately says nothing about tools, the LLM picks `smscli:otp-wait` (or `otp-latest`) on its own based on what it sees.
+- **Spec** — `docs/AUTOMATION-JSON-SPEC.md` §6.11 has a new "tool_call inside aiscope" sub-section covering the decision JSON shape, the `inputRef` follow-up pattern, and the full command inventory.
+
+### Fixed
+
+- The aiscope system prompt previously showed `smscli:get-otp` as its tool_call example — a command that doesn't exist (the adapter only accepts `otp-wait | otp-latest | otp-extract`). Any LLM that followed the example hit `Unknown smscli command "get-otp"`. The hardcoded example is removed; the LLM now reads the real inventory instead.
+
+### Why this exists
+
+Authoring aiscope steps that needed OTP retrieval previously meant hand-writing the tool inventory into every `goal` — "if you see an OTP field, emit tool_call with value 'smscli:otp-wait' and args `{timeout:'120'}`..." — and hoping the LLM followed along. With the inventory injected automatically, goals stay focused on the business intent and the LLM gets an accurate, current tool menu for free.
+
 ## [extension 2.1.0] - 2026-04-24
 
 Tooling release: the extension's Automation Editor gains a one-click "Duplicate step" feature so users can fork an existing step when building similar ones.
