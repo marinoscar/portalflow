@@ -62,6 +62,7 @@ program
   .option('--video-dir <dir>', 'Directory to store recorded videos')
   .option('--screenshot-dir <dir>', 'Directory to store screenshots')
   .option('--download-dir <dir>', 'Directory to store downloaded files')
+  .option('--html-dir <dir>', 'Directory to store extracted HTML files (extract saveToFile)')
   .option('--automations-dir <dir>', 'Directory to look for automation files')
   .option(
     '--input <kv>',
@@ -96,6 +97,7 @@ program
     videoDir?: string;
     screenshotDir?: string;
     downloadDir?: string;
+    htmlDir?: string;
     automationsDir?: string;
     input?: string[];
     inputsJson?: string;
@@ -154,6 +156,7 @@ program
         videoDir: opts.videoDir,
         screenshotDir: opts.screenshotDir,
         downloadDir: opts.downloadDir,
+        htmlDir: opts.htmlDir,
         automationsDir: opts.automationsDir,
         inputs: inputs.size > 0 ? inputs : undefined,
         logLevel: opts.logLevel,
@@ -373,12 +376,14 @@ settings
   .option('--screenshots <dir>', 'Directory to store screenshots')
   .option('--videos <dir>', 'Directory to store recorded videos')
   .option('--downloads <dir>', 'Directory to store downloaded files')
+  .option('--html <dir>', 'Directory to store extracted HTML files (extract saveToFile)')
   .addHelpText('after', helpText.settingsPathsHelpText())
   .action(async (opts: {
     automations?: string;
     screenshots?: string;
     videos?: string;
     downloads?: string;
+    html?: string;
   }) => {
     const config = new ConfigService();
     const update: Partial<PathsConfig> = {};
@@ -386,6 +391,7 @@ settings
     if (opts.screenshots) update.screenshots = opts.screenshots;
     if (opts.videos) update.videos = opts.videos;
     if (opts.downloads) update.downloads = opts.downloads;
+    if (opts.html) update.html = opts.html;
     if (Object.keys(update).length === 0) {
       const cfg = await config.load();
       const current = resolvePaths(cfg);
@@ -393,6 +399,7 @@ settings
       process.stdout.write(`screenshots:  ${current.screenshots}\n`);
       process.stdout.write(`videos:       ${current.videos}\n`);
       process.stdout.write(`downloads:    ${current.downloads}\n`);
+      process.stdout.write(`html:         ${current.html}\n`);
       return;
     }
     await config.setPaths(update);

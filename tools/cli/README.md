@@ -262,10 +262,7 @@ portalflow settings paths --automations ~/automations --downloads ~/Downloads/po
 | `--screenshots <dir>` | Directory for screenshots |
 | `--videos <dir>` | Directory for recorded videos |
 | `--downloads <dir>` | Directory for downloaded files |
-
-> The `html` artifact path (for `extract` steps with `saveToFile: true`) is not yet exposed as a
-> `--html` flag here. Set it directly in `~/.portalflow/config.json` under `paths.html`, or use
-> `settings.htmlDir` in the automation JSON to override it per-automation.
+| `--html <dir>` | Directory for HTML files written by `extract` steps with `saveToFile: true` |
 
 ### `portalflow settings logging`
 
