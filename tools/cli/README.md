@@ -4,6 +4,20 @@
 
 ---
 
+## Agent integration
+
+The CLI ships a stable, agent-friendly surface for coding agents (OpenClaw, opencode, Claude Code, custom harnesses):
+
+- **`--json` flag** on `portalflow run` — suppresses the human presenter and emits a single `RunResult` JSON document on stdout. Pre-flight failures emit `{ success: false, error, exitCode }` on the same channel.
+- **Exit codes** — `0` Ok, `1` Runtime, `2` Schema, `3` Auth, `4` Extension. Agents react to codes without parsing error text.
+- **`portalflow schema`** — emits the full automation file format as a JSON Schema document. Agents use it to synthesize automations without reading prose docs.
+- **`portalflow tools list`** — emits the `smscli` / `vaultcli` tool inventory as `ToolDescription[]`. Matches what the LLM sees during `aiscope` steps.
+
+Full reference: [docs/AGENT-INTEGRATION.md](../../docs/AGENT-INTEGRATION.md).
+OpenClaw on-ramp and bundled skill: [docs/OPENCLAW-INTEGRATION.md](../../docs/OPENCLAW-INTEGRATION.md) and [skills/portalflow/](skills/portalflow/).
+
+---
+
 ## Table of Contents
 
 - [Requirements](#requirements)

@@ -62,6 +62,8 @@ variability at runtime: when a selector fails to match the live page, the runtim
 HTML and the step's `aiGuidance` string to an LLM which returns a working selector. This means
 automations are resilient to minor UI changes without requiring manual updates to every selector.
 
+**For coding agents:** the schema this document describes is exposed at runtime via `portalflow schema --pretty`. Run that to get a JSON Schema document instead of (or in addition to) reading this file. Pass `--pretty` for a readable form or omit it to get a compact document suitable for `jq` queries. See [`docs/AGENT-INTEGRATION.md`](./AGENT-INTEGRATION.md) for the broader agent-friendly surface (`--json` run output, exit codes, tools list).
+
 ---
 
 ## 2. Table of Contents
