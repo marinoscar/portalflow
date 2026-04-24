@@ -45,6 +45,7 @@ export function topLevelHelpText(): string {
       `${PORTALFLOW_HOME}/artifacts/screenshots   Step failure screenshots`,
       `${PORTALFLOW_HOME}/artifacts/videos        Browser session recordings`,
       `${PORTALFLOW_HOME}/artifacts/downloads     Files downloaded during runs`,
+      `${PORTALFLOW_HOME}/artifacts/html          HTML extracts saved via saveToFile: true`,
     ]),
     section('Environment variables:', [
       'PORTALFLOW_LLM_PROVIDER   Override the active LLM provider name',
@@ -378,6 +379,7 @@ export function settingsHelpText(): string {
       `screenshots    ${PORTALFLOW_HOME}/artifacts/screenshots`,
       `videos         ${PORTALFLOW_HOME}/artifacts/videos`,
       `downloads      ${PORTALFLOW_HOME}/artifacts/downloads`,
+      `html           ${PORTALFLOW_HOME}/artifacts/html`,
     ]),
     section('Precedence (highest wins):', [
       "1. CLI flag on 'portalflow run' (e.g., --video-dir)",

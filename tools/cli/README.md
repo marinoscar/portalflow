@@ -263,6 +263,10 @@ portalflow settings paths --automations ~/automations --downloads ~/Downloads/po
 | `--videos <dir>` | Directory for recorded videos |
 | `--downloads <dir>` | Directory for downloaded files |
 
+> The `html` artifact path (for `extract` steps with `saveToFile: true`) is not yet exposed as a
+> `--html` flag here. Set it directly in `~/.portalflow/config.json` under `paths.html`, or use
+> `settings.htmlDir` in the automation JSON to override it per-automation.
+
 ### `portalflow settings logging`
 
 Configures log level, output file, formatting, and secret redaction.
@@ -330,10 +334,11 @@ This is the section that configures the WebSocket-based extension transport.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `automations` | `string` | `~/automations` | Default directory for automation files |
-| `screenshots` | `string` | `~/.portalflow/screenshots` | Screenshot output directory |
-| `videos` | `string` | `~/.portalflow/videos` | Video recording output directory |
-| `downloads` | `string` | `~/.portalflow/downloads` | Download output directory |
+| `automations` | `string` | `~/.portalflow/automations` | Default directory for automation files |
+| `screenshots` | `string` | `~/.portalflow/artifacts/screenshots` | Screenshot output directory |
+| `videos` | `string` | `~/.portalflow/artifacts/videos` | Video recording output directory |
+| `downloads` | `string` | `~/.portalflow/artifacts/downloads` | Download output directory |
+| `html` | `string` | `~/.portalflow/artifacts/html` | Output directory for HTML extracts written when `saveToFile: true` on an `extract` step. Honoured by the runner; configurable in `config.json` directly or via `settings.htmlDir` in the automation JSON. |
 
 ### `video` section
 

@@ -831,6 +831,8 @@ becomes available to later steps via template syntax (`{{outputName}}`) or `inpu
 | `target`     | `ExtractTarget` | Required    | What to extract from the page. |
 | `attribute`  | `string`        | Conditional | Required when `target` is `"attribute"`. The HTML attribute name to read. |
 | `outputName` | `string`        | Required    | The variable name under which the extracted value is stored. |
+| `saveToFile` | `boolean`       | Optional    | When `true` and `target` is `"html"`, write the (optionally transformed) content to `<htmlDir>/<outputName>.<ext>` and register the path as a run artifact. The string value is still stored in `outputs` for downstream template use. Only valid for `target: "html"`. |
+| `format`     | `'raw' \| 'simplified' \| 'markdown'` | Optional | Transform applied before saving or storing. `raw` is a pass-through (default). `simplified` strips scripts/styles/SVG/comments, keeps a semantic attribute allow-list (`id`, `role`, `aria-*`, `href`, `data-testid`, etc.), and serializes as a compact YAML tree — roughly 95% smaller than raw HTML, suitable for LLM consumption. `markdown` converts via turndown. Only meaningful for `target: "html"`. |
 
 **Extract targets:**
 
@@ -838,7 +840,7 @@ becomes available to later steps via template syntax (`{{outputName}}`) or `inpu
 |--------------|-------------------|-------------|
 | `text`       | Yes               | Inner text content of the matched element. |
 | `attribute`  | Yes               | Value of the named HTML attribute on the matched element. Also requires `attribute` field. |
-| `html`       | No (optional)     | Outer HTML. If a selector is provided, returns the element's outer HTML; otherwise returns the full page HTML. |
+| `html`       | No (optional)     | Outer HTML. If a selector is provided, returns the element's outer HTML; otherwise returns the full page HTML. Supports `saveToFile` and `format` options (see action shape above). |
 | `url`        | No                | The current page URL. |
 | `title`      | No                | The current page title (`<title>` element content). |
 | `screenshot` | No                | Captures a screenshot. Stores a marker string `[screenshot:outputName]` in the context. |
@@ -874,10 +876,36 @@ and becomes a context variable referenceable by subsequent steps.
 }
 ```
 
+**HTML extract with file save and transform:**
+
+```json
+{
+  "id": "step-7",
+  "name": "Capture page DOM (simplified)",
+  "type": "extract",
+  "action": {
+    "target": "html",
+    "outputName": "pageSnapshot",
+    "saveToFile": true,
+    "format": "simplified"
+  },
+  "onFailure": "skip",
+  "maxRetries": 0,
+  "timeout": 10000
+}
+```
+
+This writes `<htmlDir>/pageSnapshot.yaml` to disk (YAML tree, scripts and styles stripped),
+registers the path as a run artifact, and stores the same string in `outputs.pageSnapshot`
+for use in downstream template fields. Use `format: "markdown"` for readable prose pages;
+use `format: "raw"` (or omit `format`) when you need the verbatim HTML.
+
 **Gotchas:**
 - `text` and `attribute` targets require a selector. Omitting `selectors` when `target` is `text`
   or `attribute` causes a runtime error.
 - `attribute` target also requires the `attribute` field. Omitting it causes a runtime error.
+- `saveToFile` and `format` only apply when `target` is `"html"`. Setting them on other targets
+  is ignored.
 - Selectors for `extract` steps are not run through the AI resolver cascade at runtime in the
   current implementation. Provide a reliable selector. This is a known limitation tracked for a
   future fix.
@@ -2211,6 +2239,7 @@ are optional; defaults apply when not set.
 | `screenshotDir`     | `string`  | —                                            | Override directory for screenshots. Takes precedence over `artifactDir`. |
 | `videoDir`          | `string`  | —                                            | Override directory for recorded video files. |
 | `downloadDir`       | `string`  | —                                            | Override directory for downloaded files. |
+| `htmlDir`           | `string`  | —                                            | Override directory for HTML extract files written when `saveToFile: true`. Parallel to `screenshotDir`. |
 | `automationsDir`    | `string`  | —                                            | Override directory where automation files are stored. |
 | `recordVideo`       | `boolean` | —                                            | Enable Playwright video recording for this run. |
 | `videoSize`         | `{ width: number, height: number }` | — | Video dimensions when `recordVideo` is true. |
@@ -2228,10 +2257,15 @@ Built-in defaults point to:
 - `~/.portalflow/artifacts/screenshots`
 - `~/.portalflow/artifacts/videos`
 - `~/.portalflow/artifacts/downloads`
+- `~/.portalflow/artifacts/html`
 - `~/.portalflow/automations`
 
 For screenshots specifically: `settings.screenshotDir` takes precedence over `settings.artifactDir`.
 If neither is set, the user config path is used; if that is also unset, the built-in default is used.
+
+For HTML files: the effective `htmlDir` follows the same precedence —
+`settings.htmlDir` > user config `paths.html` > built-in default `~/.portalflow/artifacts/html/`.
+The directory is created lazily on first use.
 
 ### Complete example settings block
 
@@ -2245,6 +2279,7 @@ If neither is set, the user config path is used; if that is also unset, the buil
   "screenshotDir": "/home/user/downloads/screenshots",
   "videoDir": "/home/user/downloads/videos",
   "downloadDir": "/home/user/downloads/bills",
+  "htmlDir": "/home/user/downloads/html-snapshots",
   "recordVideo": false,
   "videoSize": { "width": 1280, "height": 720 }
 }
