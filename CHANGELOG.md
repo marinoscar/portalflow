@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [cli 3.4.0] - 2026-04-25
+
+Tooling release: the CLI is now first-class consumable by coding agents
+(OpenClaw, opencode, Claude Code, custom). New machine-parseable surface
+plus a bundled OpenClaw skill.
+
+### Added
+
+- **`portalflow run --json`** — emits `JSON.stringify(RunResult)` on
+  stdout, suppresses the colored presenter, forces the pino logger to
+  file-only mode. Pre-flight failures (bad input, missing config) emit
+  a `{success:false, error, exitCode}` envelope on stdout instead of a
+  human stderr message, so an agent always sees a parseable JSON
+  document on stdout regardless of where the run failed.
+- **`portalflow run --no-color`** plus auto-detection of `NO_COLOR`
+  env var and non-TTY stdout. Passing `--json` implies no color.
+- **Stable exit-code wire contract** in `tools/cli/src/exit-codes.ts`:
+  `0` Ok, `1` Runtime, `2` Schema validation failed, `3` LLM/provider
+  auth failed, `4` Chrome / extension handshake failed. Documented in
+  `docs/AGENT-INTEGRATION.md` with recommended agent reactions.
+- **`portalflow schema [--pretty]`** — converts `AutomationSchema`
+  (Zod) to a JSON Schema document via `zod-to-json-schema`. Lets
+  agents discover the automation file format without parsing
+  AUTOMATION-JSON-SPEC.md.
+- **`portalflow tools list [--pretty]`** — emits the built-in tool
+  inventory (`smscli`, `vaultcli`) as `ToolDescription[]`, identical
+  to what the LLM sees during aiscope steps.
+- **OpenClaw skill** at `tools/cli/skills/portalflow/`:
+  - `SKILL.md` — frontmatter (`requires.bins`, `requires.env`,
+    `metadata.openclaw.install`) plus the agent workflow.
+  - `README.md` — install, precedence chain, troubleshooting.
+  - `examples/demo-hello-world.json` — minimal validated automation.
+  - `examples/walkthrough.md` — annotated end-to-end transcript.
+  Install with: `cp -r tools/cli/skills/portalflow ~/.openclaw/skills/`
+- **Documentation**: new `docs/AGENT-INTEGRATION.md` (agent-agnostic
+  reference) and `docs/OPENCLAW-INTEGRATION.md` (OpenClaw on-ramp).
+  `tools/cli/README.md` and root `README.md` link to both. Small
+  introspection callout added to `docs/AUTOMATION-JSON-SPEC.md`.
+- New runtime dep: `zod-to-json-schema` (used by `schema` command).
+
+### Why this exists
+
+Coding agents consume CLIs by shelling out and parsing stdout. The
+3.3.0 surface was human-friendly: colorized text, no JSON, no schema
+export, opaque exit code 1 for every kind of failure. Agents had to
+screen-scrape ANSI output and couldn't distinguish auth failures from
+extension failures from user input errors. This release fixes all
+three: stable JSON, stable exit codes, stable introspection commands —
+plus a bundled OpenClaw skill so users get the integration without
+hand-authoring it.
+
+### Out of scope (future work)
+
+- MCP server wrapper — separate package, separate decision.
+- Streaming NDJSON progress on stdout (in-flight events).
+- Shell completions.
+
 ## [cli 3.3.0] - 2026-04-24
 
 Tooling release: the `htmlDir` setting shipped in 3.2.0 is now
