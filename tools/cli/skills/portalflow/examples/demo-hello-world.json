@@ -1,0 +1,47 @@
+{
+  "id": "11111111-2222-3333-4444-555555555555",
+  "name": "portalflow hello-world (OpenClaw skill demo)",
+  "version": "1.0.0",
+  "description": "Minimal automation an agent can run end-to-end after discovering portalflow via the OpenClaw skill. Navigates to example.com, captures the page title, and saves a simplified DOM snapshot. Designed to exercise every part of the agent surface (--json, --html-dir, schema discovery) in under 10 seconds.",
+  "goal": "Demonstrate a complete portalflow run that an agent can execute and parse without human intervention.",
+  "inputs": [],
+  "steps": [
+    {
+      "id": "navigate",
+      "name": "Open example.com",
+      "type": "navigate",
+      "action": { "url": "https://example.com" },
+      "validation": { "type": "url_contains", "value": "example.com" },
+      "onFailure": "abort",
+      "maxRetries": 2,
+      "timeout": 15000
+    },
+    {
+      "id": "capture-title",
+      "name": "Capture page title",
+      "type": "extract",
+      "action": {
+        "target": "title",
+        "outputName": "page_title"
+      },
+      "onFailure": "abort",
+      "maxRetries": 0,
+      "timeout": 5000
+    },
+    {
+      "id": "capture-dom",
+      "name": "Save simplified DOM",
+      "description": "Writes a YAML simplification of the current DOM to <htmlDir>/page_dom.yaml and registers it as a run artifact.",
+      "type": "extract",
+      "action": {
+        "target": "html",
+        "outputName": "page_dom",
+        "saveToFile": true,
+        "format": "simplified"
+      },
+      "onFailure": "abort",
+      "maxRetries": 0,
+      "timeout": 10000
+    }
+  ]
+}
