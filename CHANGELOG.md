@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [cli 3.2.0, schema 2.1.0] - 2026-04-24
+
+Tooling release: `extract` steps with `target: 'html'` can now save the
+captured DOM to a file and optionally transform it into a much smaller
+representation before writing. Makes full-page DOM snapshots a
+first-class artifact — same treatment screenshots already get.
+
+### Added
+
+- **`@portalflow/schema` 2.0.0 → 2.1.0** — `ExtractActionSchema` gains
+  two optional fields: `saveToFile: boolean` (persist the extracted
+  HTML to disk) and `format: 'raw' | 'simplified' | 'markdown'` (which
+  transform to apply before writing / storing). `SettingsSchema` gains
+  an optional `htmlDir` — per-automation override for where HTML files
+  land, parallel to `screenshotDir`. All three fields are optional and
+  existing automations parse unchanged.
+- **`@portalflow/cli` 3.1.0 → 3.2.0** — new `transforms/html.ts`
+  module wraps cheerio + turndown. `simplified` walks the DOM, drops
+  `script` / `style` / `noscript` / `svg`, keeps a narrow allow-list
+  of semantically-meaningful attributes (`id`, `role`, `aria-*`,
+  `href`, `data-testid`, …), collapses whitespace, and emits a YAML
+  tree — roughly a 95% size reduction on typical pages while
+  preserving the structure an LLM or diff tool actually uses.
+  `markdown` uses turndown. `raw` is a pass-through (you just wanted
+  the file). When `saveToFile` is true the step executor writes
+  `<htmlDir>/<outputName>.<ext>` (`.html` / `.yaml` / `.md`), registers
+  the path as a run artifact, and still populates `outputs` with the
+  transformed string so downstream templates keep working. Default
+  htmlDir is `~/.portalflow/artifacts/html/` — created lazily on
+  first run via the existing bootstrap helper.
+
+### Why this exists
+
+Before this change, the only way to get a page's DOM out of a run was
+to stash the full HTML string in a context variable — which is fine
+for a single-KB snippet, useless for a 2MB e-commerce page, and in
+either case not saved anywhere a human or follow-up tool could look at
+after the run. Screenshots already had the save-to-disk + artifact
+pipeline; bringing HTML up to parity (and optionally compressing it
+for LLM consumption) lets authors build flows that capture "what the
+page actually looked like when we got here" without stuffing
+megabytes into run logs.
+
 ## [cli 3.1.0] - 2026-04-24
 
 Tooling release: aiscope `tool_call` is now plug-and-play — the CLI introspects every registered tool and injects an accurate "Tools available in this run" block into the LLM prompt each iteration. Authors no longer have to describe tools in the aiscope `goal`.
