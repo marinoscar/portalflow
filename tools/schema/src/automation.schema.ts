@@ -37,6 +37,19 @@ export const ExtractActionSchema = z.object({
   target: z.enum(['text', 'attribute', 'html', 'url', 'title', 'screenshot']),
   attribute: z.string().optional(),
   outputName: z.string(),
+  // When true on a `target: 'html'` extract, the CLI writes the extracted
+  // HTML to disk under the run's htmlDir and registers the path as a run
+  // artifact. The outputs map keeps the (possibly transformed) string so
+  // downstream steps can template against it. Ignored on every other target.
+  saveToFile: z.boolean().optional(),
+  // Transform to apply to the extracted HTML before saving / storing.
+  //   - 'raw'        — pass-through (default)
+  //   - 'simplified' — DOM walk that drops scripts/styles/comments and most
+  //                    attributes, emits a compact YAML-ish tree suitable
+  //                    for LLM consumption
+  //   - 'markdown'   — HTML → Markdown via turndown
+  // Only applies when target is 'html'. Ignored on every other target.
+  format: z.enum(['raw', 'simplified', 'markdown']).optional(),
 });
 
 export const ToolCallActionSchema = z.object({
@@ -440,6 +453,7 @@ export const SettingsSchema = z.object({
   videoDir: z.string().optional(),
   downloadDir: z.string().optional(),
   automationsDir: z.string().optional(),
+  htmlDir: z.string().optional(),
   // Video recording
   recordVideo: z.boolean().optional(),
   videoSize: z.object({ width: z.number(), height: z.number() }).optional(),
