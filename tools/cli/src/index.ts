@@ -247,6 +247,29 @@ program
   });
 
 // ---------------------------------------------------------------------------
+// tools  (agent introspection — list available tool adapters)
+// ---------------------------------------------------------------------------
+const toolsCmd = program
+  .command('tools')
+  .description('Inspect built-in tool adapters available to automations');
+
+toolsCmd
+  .command('list')
+  .description('Print the tool inventory (smscli, vaultcli, …) as JSON')
+  .option('--pretty', 'Pretty-print the JSON with 2-space indentation', false)
+  .addHelpText(
+    'after',
+    '\nEmits the same inventory the LLM sees during aiscope steps.\n\n' +
+    'Examples:\n' +
+    '  portalflow tools list --pretty\n' +
+    '  portalflow tools list | jq -r ".[].tool"\n',
+  )
+  .action(async (opts: { pretty?: boolean }) => {
+    const { runToolsListCommand } = await import('./commands/tools-list.js');
+    runToolsListCommand(opts);
+  });
+
+// ---------------------------------------------------------------------------
 // schema  (agent introspection)
 // ---------------------------------------------------------------------------
 program
