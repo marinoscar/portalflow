@@ -13,6 +13,7 @@ import {
 } from './config/config.service.js';
 import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
 import { resolvePaths, resolveVideo } from './runner/paths.js';
+import { ExitCodes, exitCodeForError } from './exit-codes.js';
 
 // Read the CLI version from package.json at startup so `--version` can never
 // drift from the published package. Works in both the built dist layout
@@ -166,12 +167,12 @@ program
       });
 
       if (!result.success) {
-        process.exit(1);
+        process.exit(ExitCodes.Runtime);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`\nportalflow run: ${msg}\n\n`);
-      process.exit(1);
+      process.exit(exitCodeForError(err));
     }
   });
 
@@ -200,7 +201,7 @@ program
         process.stderr.write(
           `portalflow validate: schema validation failed\n${JSON.stringify(result.error.flatten(), null, 2)}\n`,
         );
-        process.exitCode = 1;
+        process.exitCode = ExitCodes.Schema;
       } else {
         process.stdout.write(
           `portalflow validate: OK — ${result.data.name} (${result.data.steps.length} steps)\n`,
