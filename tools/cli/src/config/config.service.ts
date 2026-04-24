@@ -17,6 +17,7 @@ export interface PathsConfig {
   screenshots?: string;
   videos?: string;
   downloads?: string;
+  html?: string;
 }
 
 export interface VideoConfig {

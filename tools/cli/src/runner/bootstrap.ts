@@ -41,6 +41,7 @@ export async function bootstrapDefaults(): Promise<BootstrapResult> {
     DEFAULT_PATHS.screenshots,
     DEFAULT_PATHS.videos,
     DEFAULT_PATHS.downloads,
+    DEFAULT_PATHS.html,
   ];
 
   for (const dir of dirs) {

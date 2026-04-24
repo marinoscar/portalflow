@@ -29,6 +29,7 @@ export interface RunOptions {
   screenshotDir?: string;
   downloadDir?: string;
   automationsDir?: string;
+  htmlDir?: string;
   /** CLI-supplied input overrides. Any key present here wins over the input's source. */
   inputs?: Map<string, string>;
   /** CLI-supplied log level override (--log-level flag). */
@@ -357,6 +358,7 @@ export class AutomationRunner {
       screenshots: options?.screenshotDir,
       videos: options?.videoDir,
       downloads: options?.downloadDir,
+      html: options?.htmlDir,
     });
     const effectiveVideo = resolveVideo(userConfig, settings, {
       enabled: options?.video,
@@ -367,6 +369,7 @@ export class AutomationRunner {
         screenshots: effectivePaths.screenshots,
         videos: effectivePaths.videos,
         downloads: effectivePaths.downloads,
+        html: effectivePaths.html,
         videoEnabled: effectiveVideo.enabled,
       },
       'Resolved artifact paths',
@@ -505,6 +508,7 @@ export class AutomationRunner {
       functionsMap,
       presenter,
       automation.inputs,
+      effectivePaths.html,
     );
 
     // ------------------------------------------------------------------

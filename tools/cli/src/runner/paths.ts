@@ -10,6 +10,7 @@ export const DEFAULT_PATHS = {
   screenshots: join(PORTALFLOW_HOME, 'artifacts', 'screenshots'),
   videos: join(PORTALFLOW_HOME, 'artifacts', 'videos'),
   downloads: join(PORTALFLOW_HOME, 'artifacts', 'downloads'),
+  html: join(PORTALFLOW_HOME, 'artifacts', 'html'),
 } as const;
 
 export const DEFAULT_VIDEO = {
@@ -23,6 +24,7 @@ export interface EffectivePaths {
   screenshots: string;
   videos: string;
   downloads: string;
+  html: string;
 }
 
 export interface EffectiveVideo {
@@ -36,6 +38,7 @@ export interface PathOverrides {
   screenshots?: string;
   videos?: string;
   downloads?: string;
+  html?: string;
 }
 
 export interface VideoOverrides {
@@ -78,6 +81,11 @@ export function resolvePaths(
       automationSettings?.downloadDir ??
       userConfig.paths?.downloads ??
       DEFAULT_PATHS.downloads,
+    html:
+      cliOverrides?.html ??
+      automationSettings?.htmlDir ??
+      userConfig.paths?.html ??
+      DEFAULT_PATHS.html,
   };
 }
 

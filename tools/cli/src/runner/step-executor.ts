@@ -28,8 +28,11 @@ import type {
   PageContext,
 } from '../llm/provider.interface.js';
 import type { Tool, ToolDescription } from '../tools/tool.interface.js';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { RunContext } from './run-context.js';
 import { RunPresenter } from './run-presenter.js';
+import { transformHtml, formatExtension, type HtmlFormat } from '../transforms/html.js';
 
 /**
  * Default action list for aiscope steps. Applies in full when `disallowedActions`
@@ -130,6 +133,13 @@ export class StepExecutor {
      * actual values. Defaults to empty so existing callers need not change.
      */
     private readonly automationInputs: Input[] = [],
+    /**
+     * Directory where extract steps with `saveToFile: true` (target 'html')
+     * write their transformed output. Defaults to '.' so tests and ad-hoc
+     * callers don't have to provide it; production callers plumb through
+     * the resolved effectivePaths.html.
+     */
+    private readonly htmlDir: string = '.',
   ) {}
 
   /**
@@ -770,9 +780,27 @@ export class StepExecutor {
         break;
       }
 
-      case 'html':
-        value = await this.pageClient.getHtml(selector);
+      case 'html': {
+        const rawHtml = await this.pageClient.getHtml(selector);
+        const format: HtmlFormat = action.format ?? 'raw';
+        const transformed = transformHtml(rawHtml, format);
+        if (action.saveToFile) {
+          const filePath = await this.writeHtmlFile(action.outputName, format, transformed);
+          this.context.addArtifact(filePath);
+          this.context.logger.info(
+            {
+              stepId: step.id,
+              outputName: action.outputName,
+              format,
+              filePath,
+              bytes: Buffer.byteLength(transformed, 'utf8'),
+            },
+            'Extract html: wrote transformed output to disk',
+          );
+        }
+        value = transformed;
         break;
+      }
 
       case 'url':
         value = await this.pageClient.getUrl();
@@ -830,6 +858,25 @@ export class StepExecutor {
       },
       'Extracted value stored in outputs',
     );
+  }
+
+  /**
+   * Write a transformed html-extract payload to disk. The filename is
+   * `<outputName>.<ext>` where `ext` tracks the chosen format (html, yaml,
+   * md). The directory is lazily created — htmlDir comes from bootstrap
+   * defaults but a user-supplied override may point at a path that does
+   * not yet exist.
+   */
+  private async writeHtmlFile(
+    outputName: string,
+    format: HtmlFormat,
+    content: string,
+  ): Promise<string> {
+    await mkdir(this.htmlDir, { recursive: true });
+    const safeName = outputName.replace(/[^a-zA-Z0-9._-]/g, '_') || 'extract';
+    const filePath = join(this.htmlDir, `${safeName}.${formatExtension(format)}`);
+    await writeFile(filePath, content, 'utf8');
+    return filePath;
   }
 
   // ---------------------------------------------------------------------------
