@@ -1,3 +1,5 @@
+import type { ToolDescription } from '../tools/tool.interface.js';
+
 export interface PageContext {
   url: string;
   title: string;
@@ -95,6 +97,13 @@ export interface NextActionQuery {
     description?: string;
   }>;
   /**
+   * Descriptions of all tools registered with the runner for this run.
+   * Providers inject this as a "Tools available in this run" block into
+   * the user message so the LLM knows what it can call via `tool_call`
+   * without the automation author having to describe them in the goal.
+   */
+  availableTools?: ToolDescription[];
+  /**
    * When true, the aiscope step has no successCheck and the LLM's `done`
    * emission is authoritative — the runner terminates immediately. When
    * false or undefined, `done` is a hint and the runner re-verifies with
@@ -163,6 +172,12 @@ export interface PlanQuery {
   pageContext: PageContext;
   allowedActions: string[];
   availableInputs?: NextActionQuery['availableInputs'];
+  /**
+   * Descriptions of all tools registered with the runner for this run.
+   * Injected into the planner prompt so the model can reference tool_call
+   * steps when building its milestone plan.
+   */
+  availableTools?: ToolDescription[];
   /**
    * When replanning, the old plan plus the reason the runner (or the LLM)
    * asked for a fresh one. Helps the model avoid re-emitting the same

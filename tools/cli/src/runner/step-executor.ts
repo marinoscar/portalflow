@@ -27,7 +27,7 @@ import type {
   NextActionResult,
   PageContext,
 } from '../llm/provider.interface.js';
-import type { Tool } from '../tools/tool.interface.js';
+import type { Tool, ToolDescription } from '../tools/tool.interface.js';
 import { RunContext } from './run-context.js';
 import { RunPresenter } from './run-presenter.js';
 
@@ -1013,6 +1013,11 @@ export class StepExecutor {
       (a) => !disallowed.includes(a),
     );
 
+    // Collect the tool inventory from every registered tool adapter. This is
+    // passed to the LLM on every iteration so it knows what it can call via
+    // `tool_call` without the author having to describe tools in the goal.
+    const availableTools: ToolDescription[] = [...this.tools.values()].map((t) => t.describe());
+
     // Resolve `${var}` references in the goal once up front. Every other
     // user-editable string the runner touches (navigate.url, type values,
     // condition.ai questions, etc.) passes through resolveTemplate; the
@@ -1088,6 +1093,7 @@ export class StepExecutor {
         pageContext,
         allowedActions,
         availableInputs,
+        availableTools,
         previousPlan,
       });
       if (!newPlan.milestones || newPlan.milestones.length === 0) {
@@ -1199,6 +1205,7 @@ export class StepExecutor {
           allowedActions,
           recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
           availableInputs,
+          availableTools,
           selfTerminating: true,
           ...agentContext,
         });
@@ -1219,6 +1226,7 @@ export class StepExecutor {
           allowedActions,
           recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
           availableInputs,
+          availableTools,
           ...agentContext,
         });
       } else {
@@ -1231,6 +1239,7 @@ export class StepExecutor {
             allowedActions,
             recentHistory: history.slice(-AISCOPE_HISTORY_WINDOW),
             availableInputs,
+            availableTools,
             ...agentContext,
           }),
         ]);

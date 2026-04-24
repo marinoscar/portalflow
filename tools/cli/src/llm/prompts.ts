@@ -1,3 +1,57 @@
+import type { ToolDescription } from '../tools/tool.interface.js';
+
+/**
+ * Builds the "Tools available in this run" block that is injected into the
+ * LLM user message on each aiscope iteration. Returns an empty string when
+ * the tools array is empty so callers can unconditionally append the result.
+ *
+ * Format example:
+ *
+ *   ## Tools available in this run
+ *
+ *   ### smscli — Retrieves SMS OTP codes from a connected phone.
+ *
+ *   #### smscli:otp-wait
+ *   Waits for a NEW SMS OTP to arrive after this moment. ...
+ *   Args:
+ *   - timeout (optional): Seconds to wait before giving up (default 60).
+ *   Result stored as `smscli_otp_wait_result`.
+ *
+ *   ...
+ */
+export function buildToolsInventoryBlock(tools: ToolDescription[]): string {
+  if (tools.length === 0) return '';
+
+  const sections: string[] = ['## Tools available in this run\n'];
+
+  for (const tool of tools) {
+    sections.push(`### ${tool.tool} — ${tool.description}\n`);
+
+    for (const cmd of tool.commands) {
+      // Derive the context-variable name: <tool>_<command>_result
+      // with hyphens replaced by underscores so it is a valid identifier.
+      const resultVar = `${tool.tool}_${cmd.command.replace(/-/g, '_')}_result`;
+
+      const argLines =
+        cmd.args.length > 0
+          ? 'Args:\n' +
+            cmd.args
+              .map(
+                (a) =>
+                  `- ${a.name} (${a.required ? 'required' : 'optional'}): ${a.description}`,
+              )
+              .join('\n')
+          : 'Args: none';
+
+      sections.push(
+        `#### ${tool.tool}:${cmd.command}\n${cmd.description}\n${argLines}\nResult stored as \`${resultVar}\`.\n`,
+      );
+    }
+  }
+
+  return sections.join('\n');
+}
+
 export const SYSTEM_PROMPTS = {
   elementFinder: `You are a browser automation assistant. Given an HTML page and a description of an element to find, return the best CSS selector or XPath to locate it. Be precise and prefer stable selectors (IDs, data-attributes, aria-labels) over fragile ones (nth-child, positional).
 
@@ -87,17 +141,15 @@ For non-secret inputs (type: "string"), you may use either "value" (literal) or 
 
 ## tool_call action
 
-When you need to invoke an external tool (e.g. smscli to retrieve an OTP code), emit:
+When you need to invoke an external tool, emit:
 
-{"action": "tool_call", "value": "<tool>:<command>", "reasoning": "retrieving OTP via smscli"}
+{"action": "tool_call", "value": "<tool>:<command>", "toolCall": {"tool": "<tool>", "command": "<command>", "args": {}}, "reasoning": "short explanation"}
 
-For example: {"action": "tool_call", "value": "smscli:get-otp", "reasoning": "fetching OTP code for 2FA"}
+The runner executes the tool and stores the result as a context variable named \`<tool>_<command>_result\` (e.g. \`smscli_otp_wait_result\`). On the next iteration you can reference that variable via inputRef on a type action:
 
-The runner executes the tool, stores the result as a context variable named <tool>_<command>_result (e.g. smscli_get_otp_result), and on the next iteration you can reference it via inputRef:
+{"action": "type", "selector": "#otp-input", "inputRef": "smscli_otp_wait_result", "reasoning": "typing the OTP code received from smscli"}
 
-{"action": "type", "selector": "#otp-input", "inputRef": "smscli_get_otp_result", "reasoning": "typing the OTP code received from smscli"}
-
-Note: tool_call is only available when it is not blocked. If an aiscope step sets disallowedActions and includes tool_call in that list, you cannot emit it.
+The exact tools, commands, and args available in this run are listed in the "Tools available in this run" section of each query. Only call tools that appear there. Note: tool_call is only available when it is not blocked. If an aiscope step sets disallowedActions and includes tool_call in that list, you cannot emit it.
 
 ## Agent mode (advanced)
 

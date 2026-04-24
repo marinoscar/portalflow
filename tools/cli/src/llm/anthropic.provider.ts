@@ -18,7 +18,7 @@ import type {
   PlanQuery,
 } from './provider.interface.js';
 import { classifyPingError } from './ping-error.js';
-import { SYSTEM_PROMPTS } from './prompts.js';
+import { SYSTEM_PROMPTS, buildToolsInventoryBlock } from './prompts.js';
 
 const MAX_HTML_CHARS = 50_000;
 
@@ -334,6 +334,7 @@ Question: ${question}`;
       allowedActions,
       recentHistory,
       availableInputs,
+      availableTools,
       selfTerminating,
       plan,
       currentMilestoneId,
@@ -381,6 +382,11 @@ Question: ${question}`;
             )}\n\nCurrent milestone: ${currentMilestoneId}. Pick actions that advance it. Add "milestoneComplete": true when this milestone is done so the runner advances. Add "replan": true only if the plan is materially wrong (not just a single failed action).`
         : '';
 
+    const toolsInventoryBlock =
+      availableTools && availableTools.length > 0
+        ? '\n' + buildToolsInventoryBlock(availableTools)
+        : '';
+
     const userText = `## Goal
 ${goal}
 
@@ -388,8 +394,7 @@ ${goal}
 ${allowedActions.join(', ')}
 
 ## Recent action history (oldest first)
-${historyBlock}${availableInputsBlock}${selfTerminatingBlock}${agentModeBlock}
-
+${historyBlock}${availableInputsBlock}${selfTerminatingBlock}${agentModeBlock}${toolsInventoryBlock}
 ## Current page
 URL: ${pageContext.url}
 Title: ${pageContext.title}
@@ -462,7 +467,8 @@ Pick the single next action that best advances the goal. Return strict JSON only
    * implement this with the same semantics.
    */
   async decidePlan(query: PlanQuery): Promise<AgentPlan> {
-    const { goal, pageContext, allowedActions, availableInputs, previousPlan } = query;
+    const { goal, pageContext, allowedActions, availableInputs, availableTools, previousPlan } =
+      query;
 
     const availableInputsBlock =
       availableInputs && availableInputs.length > 0
@@ -478,12 +484,16 @@ Pick the single next action that best advances the goal. Return strict JSON only
           .join('\n')}\n\nReplan reason: ${previousPlan.reason}\n\nBuild a DIFFERENT plan that avoids whatever caused the replan. Do not repeat the attempted milestones verbatim.`
       : '';
 
+    const toolsInventoryBlock =
+      availableTools && availableTools.length > 0
+        ? '\n' + buildToolsInventoryBlock(availableTools)
+        : '';
+
     const userText = `## Goal
 ${goal}
 
 ## Allowed actions in executor vocabulary
-${allowedActions.join(', ')}${availableInputsBlock}${previousPlanBlock}
-
+${allowedActions.join(', ')}${availableInputsBlock}${previousPlanBlock}${toolsInventoryBlock}
 ## Current page
 URL: ${pageContext.url}
 Title: ${pageContext.title}
