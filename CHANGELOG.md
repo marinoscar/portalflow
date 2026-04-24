@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-04-24
+
+Breaking tooling release: the aiscope `allowedActions` schema field is
+renamed to `disallowedActions` with inverted semantics — presence now
+means BLOCKED rather than ALLOWED. Omitting the field still means
+"everything allowed" (same default behavior).
+
+### Changed (breaking)
+
+- **`@portalflow/schema` 1.2.1 → 2.0.0** — aiscope action control field renamed and inverted. Same optional array of the same enum values; the semantics flip from whitelist to blocklist.
+- **`@portalflow/cli` 2.1.0 → 3.0.0** — runner computes the effective allowed list by subtracting `disallowedActions` from the default vocabulary. Internal LLM query plumbing still uses a positive `allowedActions: string[]` (the list shown to the LLM), so provider prompts and the decision-validation path are unchanged.
+- **`@portalflow/extension` 1.4.0 → 2.0.0** — editor form's action-vocabulary control flips: each checkbox now means "block this action" rather than "allow this action". The zero-checked default still emits `undefined` (all allowed); 11-checked now emits the full array (all blocked — valid, if unusual, user intent) instead of collapsing to `undefined`.
+
+### Migration
+
+- Automations that had `allowedActions: ['click', 'type', 'done']` (meaning "only these three") should change to `disallowedActions: ['navigate', 'select', 'check', 'uncheck', 'hover', 'focus', 'scroll', 'wait']` (meaning "block everything except those three"), or simply remove the field to accept the full default vocabulary.
+- The `docs/AUTOMATION-JSON-SPEC.md` aiscope section documents the new semantics with a worked migration example.
+
+### Why this exists
+
+The whitelist framing was backwards for the common case. In practice, users almost always want the full action vocabulary and occasionally need to block ONE or TWO actions for a specific step (e.g., "don't let the LLM navigate away while I'm working on this form"). The whitelist form forced them to restate all 10 other actions just to exclude one. The blocklist form is additive to the default and expresses the real intent directly.
+
 ## [extension 1.4.0] - 2026-04-24
 
 Tooling release: the PortalFlow extension gains a full-page
