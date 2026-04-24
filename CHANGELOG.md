@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [cli 3.3.0] - 2026-04-24
+
+Tooling release: the `htmlDir` setting shipped in 3.2.0 is now
+controllable from the command line, matching the existing
+`--screenshot-dir` / `--screenshots` surface.
+
+### Added
+
+- **`@portalflow/cli` 3.2.0 → 3.3.0** — `portalflow run --html-dir <dir>`
+  overrides the HTML artifact path for a single run; `portalflow
+  settings paths --html <dir>` persists the value to
+  `~/.portalflow/config.json`. The same precedence chain already in place
+  (CLI > automation settings.htmlDir > user config paths.html >
+  built-in default `~/.portalflow/artifacts/html/`) is unchanged.
+
+### Why this exists
+
+3.2.0 honoured `htmlDir` at runtime but only via automation JSON or
+config file — there was no per-run CLI override equivalent to the
+existing `--screenshot-dir` flag. This closes that gap so ad-hoc runs
+can redirect HTML artifacts without editing the automation.
+
 ## [cli 3.2.0, schema 2.1.0] - 2026-04-24
 
 Tooling release: `extract` steps with `target: 'html'` can now save the
