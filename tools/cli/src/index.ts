@@ -13,7 +13,7 @@ import {
 } from './config/config.service.js';
 import { inferKind, type ProviderKind } from './llm/provider-kinds.js';
 import { resolvePaths, resolveVideo } from './runner/paths.js';
-import { ExitCodes, exitCodeForError } from './exit-codes.js';
+import { ExitCodes, exitCodeForError, type ExitCode } from './exit-codes.js';
 
 // Read the CLI version from package.json at startup so `--version` can never
 // drift from the published package. Works in both the built dist layout
@@ -90,6 +90,11 @@ program
     '--no-color',
     'Disable ANSI color codes in presenter output (also honors NO_COLOR env var and non-TTY stdout)',
   )
+  .option(
+    '--json',
+    'Agent mode: suppress presenter, redirect logs to file, emit a single RunResult JSON document on stdout. See docs/AGENT-INTEGRATION.md for the wire shape.',
+    false,
+  )
   .option('--kill-chrome', 'Close all existing Chrome instances before launching', false)
   .option(
     '--clear-history <range>',
@@ -110,6 +115,7 @@ program
     stealth?: boolean;
     verbose?: boolean;
     color?: boolean;
+    json?: boolean;
     killChrome?: boolean;
     clearHistory?: string;
   }) => {
@@ -119,13 +125,25 @@ program
       return;
     }
 
+    // Helper: emit a structured failure on stdout in --json mode, instead
+    // of a stderr message + bare exit. Keeps the agent's stdout the single
+    // source of truth for run outcomes (success or pre-flight failure).
+    const failJson = (code: ExitCode, message: string): never => {
+      process.stdout.write(
+        JSON.stringify({ success: false, error: message, exitCode: code }) + '\n',
+      );
+      process.exit(code);
+    };
+
     // Parse --input key=value flags into a Map
     const inputs = new Map<string, string>();
     for (const kv of (opts.input ?? [])) {
       const eqIdx = kv.indexOf('=');
       if (eqIdx === -1) {
-        process.stderr.write(`portalflow: invalid --input format (expected key=value): "${kv}"\n`);
-        process.exit(1);
+        const msg = `invalid --input format (expected key=value): "${kv}"`;
+        if (opts.json) failJson(ExitCodes.Runtime, msg);
+        process.stderr.write(`portalflow: ${msg}\n`);
+        process.exit(ExitCodes.Runtime);
       }
       inputs.set(kv.slice(0, eqIdx), kv.slice(eqIdx + 1));
     }
@@ -136,8 +154,10 @@ program
           inputs.set(k, v);
         }
       } catch {
-        process.stderr.write(`portalflow: --inputs-json is not valid JSON\n`);
-        process.exit(1);
+        const msg = '--inputs-json is not valid JSON';
+        if (opts.json) failJson(ExitCodes.Runtime, msg);
+        process.stderr.write(`portalflow: ${msg}\n`);
+        process.exit(ExitCodes.Runtime);
       }
     }
 
@@ -146,11 +166,12 @@ program
     const config = await configService.load();
     const extension = config.extension;
     if (!extension || extension.profileMode === 'unset') {
-      process.stderr.write(
-        '\nportalflow: Chrome profile mode is not configured.\n' +
-        'Run `portalflow` (interactive TUI) or `portalflow settings extension` to configure it first.\n\n',
-      );
-      process.exit(1);
+      const msg =
+        'Chrome profile mode is not configured. ' +
+        'Run `portalflow` (interactive TUI) or `portalflow settings extension` to configure it first.';
+      if (opts.json) failJson(ExitCodes.Runtime, msg);
+      process.stderr.write(`\nportalflow: ${msg}\n\n`);
+      process.exit(ExitCodes.Runtime);
     }
 
     const { AutomationRunner } = await import('./runner/automation-runner.js');
@@ -168,17 +189,23 @@ program
         logLevel: opts.logLevel,
         verbose: opts.verbose,
         noColor: opts.color === false,
+        json: opts.json,
         killChrome: opts.killChrome,
         clearHistory: opts.clearHistory as import('./browser/protocol.js').ClearBrowsingDataRange | undefined,
       });
 
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(result) + '\n');
+      }
       if (!result.success) {
         process.exit(ExitCodes.Runtime);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const code = exitCodeForError(err);
+      if (opts.json) failJson(code, msg);
       process.stderr.write(`\nportalflow run: ${msg}\n\n`);
-      process.exit(exitCodeForError(err));
+      process.exit(code);
     }
   });
 

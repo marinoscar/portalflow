@@ -37,6 +37,15 @@ export interface RunOptions {
    * implies no color).
    */
   noColor?: boolean;
+  /**
+   * Agent-friendly JSON mode. When true:
+   *   - the human RunPresenter is disabled,
+   *   - pino logger is forced to file-only (no stdout pollution),
+   *   - color is forced off (implies `noColor: true`).
+   * The caller is responsible for serializing the returned RunResult
+   * to stdout — the runner itself writes nothing to stdout in JSON mode.
+   */
+  json?: boolean;
   /** CLI-supplied input overrides. Any key present here wins over the input's source. */
   inputs?: Map<string, string>;
   /** CLI-supplied log level override (--log-level flag). */
@@ -151,8 +160,15 @@ export class AutomationRunner {
     //
     // `--verbose` flips the switch: pino writes to stdout as before and
     // the presenter becomes a silent no-op.
-    const presenterEnabled = !(options?.verbose ?? false);
-    if (presenterEnabled) {
+    const isJsonMode = options?.json === true;
+    // JSON mode and verbose mode are mutually exclusive: verbose is a
+    // human-debug switch (pino → stdout, presenter off); JSON mode is the
+    // agent path (presenter off, pino → file only, structured stdout).
+    const presenterEnabled = !isJsonMode && !(options?.verbose ?? false);
+    // Whenever the presenter owns stdout OR we're in JSON mode, pino must
+    // stay out of stdout. The presenter case wants a clean human view; the
+    // JSON case wants a single parseable JSON document on stdout.
+    if (presenterEnabled || isJsonMode) {
       if (!loggingConfig.file) {
         loggingConfig.file = defaultLogFilePath(automation.name);
       }
@@ -160,9 +176,10 @@ export class AutomationRunner {
     }
 
     const logger = createRunLogger(automation.name, loggingConfig);
-    // Color decision: explicit --no-color > NO_COLOR env > non-TTY > default on.
-    // `options.noColor === true` forces off regardless of TTY.
-    const colorEnabled = options?.noColor === true ? false : defaultColorEnabled();
+    // Color decision: --json forces off; explicit --no-color forces off;
+    // otherwise NO_COLOR env / non-TTY auto-detection.
+    const colorEnabled =
+      isJsonMode || options?.noColor === true ? false : defaultColorEnabled();
     const presenter = new RunPresenter(
       presenterEnabled,
       loggingConfig.file ?? '(no log file)',
