@@ -233,11 +233,27 @@ export function App() {
           handleDownload();
         }
       }
+      if (meta && e.key === 'd') {
+        // Duplicate the currently selected step (top-level or function-body)
+        if (!state.automation || !state.selectedNodeId) return;
+        const node = parseNodeId(state.selectedNodeId);
+        if (node.kind === 'step') {
+          e.preventDefault();
+          dispatch({ type: 'DUPLICATE_STEP', payload: { path: node.path } });
+        } else if (node.kind === 'function' && node.stepPath !== undefined) {
+          e.preventDefault();
+          dispatch({
+            type: 'DUPLICATE_STEP',
+            payload: { path: node.stepPath, functionIndex: node.index },
+          });
+        }
+        // Any other node kind: ignore silently
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.automation]);
+  }, [state.automation, state.selectedNodeId]);
 
   // -------------------------------------------------------------------------
   // Toolbar handlers

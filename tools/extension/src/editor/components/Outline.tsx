@@ -266,6 +266,20 @@ export function Outline({ automation, selectedNodeId, dispatch }: OutlineProps) 
             <span className="outline-label">{step.name || `(${step.type})`}</span>
             <span className="outline-badge">{step.type}</span>
             <button
+              className="outline-duplicate"
+              type="button"
+              title="Duplicate step"
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch({
+                  type: 'DUPLICATE_STEP',
+                  payload: { path, functionIndex: fnIndex },
+                });
+              }}
+            >
+              ⎘
+            </button>
+            <button
               className="outline-remove"
               type="button"
               title="Remove step"

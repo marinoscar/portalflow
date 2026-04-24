@@ -1,6 +1,23 @@
 import { z } from 'zod';
 import { AutomationSchema } from '@portalflow/schema';
 import type { Automation, Input, Step, FunctionDefinition } from '@portalflow/schema';
+import { encodeNodeId, getStepAtPath, getFunctionStepAtPath } from './selection';
+
+// ---------------------------------------------------------------------------
+// duplicateStep — deep-clone a step with a fresh id (and fresh ids for all
+// nested substeps). Exported so callers can unit-test it in isolation.
+// ---------------------------------------------------------------------------
+
+export function duplicateStep(step: Step): Step {
+  // Use JSON round-trip as a safe deep-clone (all step fields are JSON-serialisable).
+  const copy: Step = JSON.parse(JSON.stringify(step));
+  copy.id = crypto.randomUUID();
+  copy.name = step.name ? `${step.name} (copy)` : 'Step (copy)';
+  if (copy.type === 'loop' && Array.isArray(copy.substeps)) {
+    copy.substeps = copy.substeps.map((s) => duplicateStep(s));
+  }
+  return copy;
+}
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -34,7 +51,8 @@ export type EditorAction =
   | { type: 'REMOVE_STEP'; payload: { path: number[]; functionIndex?: number } }
   | { type: 'UPDATE_FUNCTION'; payload: { index: number; changes: Partial<FunctionDefinition> } }
   | { type: 'ADD_FUNCTION'; payload: FunctionDefinition }
-  | { type: 'REMOVE_FUNCTION'; payload: { index: number } };
+  | { type: 'REMOVE_FUNCTION'; payload: { index: number } }
+  | { type: 'DUPLICATE_STEP'; payload: { path: number[]; functionIndex?: number } };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -329,6 +347,54 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       );
       const automation: Automation = { ...state.automation, functions };
       return { ...state, automation, validation: revalidate(automation), dirty: true };
+    }
+
+    case 'DUPLICATE_STEP': {
+      if (!state.automation) return state;
+      const { path: dupPath, functionIndex: dupFnIdx } = action.payload;
+
+      // Resolve the source step
+      const source =
+        dupFnIdx !== undefined
+          ? getFunctionStepAtPath(state.automation, dupFnIdx, dupPath)
+          : getStepAtPath(state.automation, dupPath);
+      if (!source) return state; // out-of-bounds — no crash
+
+      const copy = duplicateStep(source);
+
+      // Insertion path: same parent array, at index + 1 after the source
+      const insertionPath = [...dupPath];
+      // insertStepAtPath with position 'after' uses head + 1 for the last segment
+      // so we pass the same path and position: 'after'
+      let newSteps: Step[];
+      let newAutomation: Automation;
+
+      if (dupFnIdx !== undefined) {
+        const functions = (state.automation.functions ?? []).map((fn, fi) => {
+          if (fi !== dupFnIdx) return fn;
+          return { ...fn, steps: insertStepAtPath(fn.steps, insertionPath, copy, 'after') };
+        });
+        newAutomation = { ...state.automation, functions };
+      } else {
+        newSteps = insertStepAtPath(state.automation.steps, insertionPath, copy, 'after');
+        newAutomation = { ...state.automation, steps: newSteps };
+      }
+
+      // Compute the new step's encoded node id for auto-selection
+      const newIndex = dupPath[dupPath.length - 1] + 1;
+      const newPath = [...dupPath.slice(0, -1), newIndex];
+      const selectedNodeId =
+        dupFnIdx !== undefined
+          ? encodeNodeId({ kind: 'function', index: dupFnIdx, stepPath: newPath })
+          : encodeNodeId({ kind: 'step', path: newPath });
+
+      return {
+        ...state,
+        automation: newAutomation,
+        selectedNodeId,
+        validation: revalidate(newAutomation),
+        dirty: true,
+      };
     }
 
     default: {

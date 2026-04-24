@@ -248,10 +248,24 @@ export function StepForm({ step, path, functionIndex, dispatch, validation, auto
     });
   }
 
+  function handleDuplicate() {
+    dispatch({ type: 'DUPLICATE_STEP', payload: { path, functionIndex } });
+  }
+
   return (
     <div className="form-section">
       {/* Identity block */}
-      <div className="form-section-title">Step</div>
+      <div className="form-section-title step-form-title-row">
+        <span>Step</span>
+        <button
+          className="btn-ghost btn-duplicate"
+          type="button"
+          title="Create a copy of this step directly after it (Ctrl/Cmd+D)"
+          onClick={handleDuplicate}
+        >
+          ⎘ Duplicate
+        </button>
+      </div>
 
       <SelectField
         label="Type"

@@ -5,6 +5,7 @@ import {
   editorReducer,
   initialState,
   newEmptyAutomation,
+  duplicateStep,
   type EditorState,
 } from '../editor-state';
 
@@ -440,6 +441,7 @@ describe('mutating actions', () => {
     { type: 'ADD_FUNCTION' as const, payload: { name: 'fn', steps: [] } },
     { type: 'UPDATE_FUNCTION' as const, payload: { index: 0, changes: {} } },
     { type: 'REMOVE_FUNCTION' as const, payload: { index: 0 } },
+    { type: 'DUPLICATE_STEP' as const, payload: { path: [0] } },
   ] as const;
 
   for (const action of MUTATING_ACTIONS) {
@@ -455,4 +457,314 @@ describe('mutating actions', () => {
       expect(next.dirty).toBe(true);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// duplicateStep — pure function tests
+// ---------------------------------------------------------------------------
+
+describe('duplicateStep (pure helper)', () => {
+  it('returns a new step with a different id', () => {
+    const src = makeStep('orig', 'Original');
+    const copy = duplicateStep(src);
+    expect(copy.id).not.toBe(src.id);
+  });
+
+  it('appends " (copy)" to the name', () => {
+    const src = makeStep('orig', 'My Step');
+    const copy = duplicateStep(src);
+    expect(copy.name).toBe('My Step (copy)');
+  });
+
+  it('uses fallback name "Step (copy)" when source name is empty', () => {
+    const src: Step = { ...makeStep('orig'), name: '' };
+    const copy = duplicateStep(src);
+    expect(copy.name).toBe('Step (copy)');
+  });
+
+  it('deep-copies all other fields', () => {
+    const src = makeStep('orig', 'Src');
+    const copy = duplicateStep(src);
+    expect(copy.type).toBe(src.type);
+    expect(copy.action).toEqual(src.action);
+    expect(copy.onFailure).toBe(src.onFailure);
+    expect(copy.maxRetries).toBe(src.maxRetries);
+    expect(copy.timeout).toBe(src.timeout);
+  });
+
+  it('recursively assigns fresh ids to substeps inside a loop', () => {
+    const sub1 = makeStep('sub1', 'Sub 1');
+    const sub2 = makeStep('sub2', 'Sub 2');
+    const loop = makeLoopStep('loop1', [sub1, sub2]);
+    const copy = duplicateStep(loop);
+
+    expect(copy.id).not.toBe(loop.id);
+    const copySubs = copy.substeps!;
+    expect(copySubs).toHaveLength(2);
+    expect(copySubs[0].id).not.toBe(sub1.id);
+    expect(copySubs[1].id).not.toBe(sub2.id);
+    // Ids in the copy must also differ from each other
+    expect(copySubs[0].id).not.toBe(copySubs[1].id);
+  });
+
+  it('recursively renames substeps', () => {
+    const sub = makeStep('sub1', 'Inner');
+    const loop = makeLoopStep('loop1', [sub]);
+    const copy = duplicateStep(loop);
+    expect(copy.substeps![0].name).toBe('Inner (copy)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DUPLICATE_STEP reducer
+// ---------------------------------------------------------------------------
+
+describe('DUPLICATE_STEP', () => {
+  // --- top-level step ---
+
+  it('inserts a new step at index + 1 when duplicating a top-level step', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [1] },
+    });
+    const steps = next.automation!.steps;
+    expect(steps).toHaveLength(4);
+    expect(steps[1].id).toBe('s1');        // original still in place
+    expect(steps[2].id).not.toBe('s1');    // new copy after it
+    expect(steps[3].id).toBe('s2');        // old index 2 shifted to 3
+  });
+
+  it('gives the duplicate a new id (not equal to source)', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0] },
+    });
+    const original = BASE_AUTOMATION.steps[0];
+    const copy = next.automation!.steps[1];
+    expect(copy.id).not.toBe(original.id);
+  });
+
+  it('names the duplicate "<source.name> (copy)"', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0] },
+    });
+    expect(next.automation!.steps[1].name).toBe('Step 0 (copy)');
+  });
+
+  it('all other fields match the source (deep equality on action)', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0] },
+    });
+    const src = BASE_AUTOMATION.steps[0];
+    const copy = next.automation!.steps[1];
+    expect(copy.type).toBe(src.type);
+    expect(copy.action).toEqual(src.action);
+    expect(copy.onFailure).toBe(src.onFailure);
+    expect(copy.maxRetries).toBe(src.maxRetries);
+    expect(copy.timeout).toBe(src.timeout);
+  });
+
+  it('sets dirty to true', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    expect(state.dirty).toBe(false);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0] },
+    });
+    expect(next.dirty).toBe(true);
+  });
+
+  it('sets selectedNodeId to the encoded id of the new step (e.g. "step:3" when duplicating at [2])', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [2] },
+    });
+    // Duplicating at [2] → new step lands at [3]
+    expect(next.selectedNodeId).toBe('step:3');
+  });
+
+  it('selectedNodeId is "step:1" when duplicating at [0]', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0] },
+    });
+    expect(next.selectedNodeId).toBe('step:1');
+  });
+
+  it('reruns validation and returns a valid SafeParseReturnType', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0] },
+    });
+    expect(next.validation).toHaveProperty('success');
+    expect(typeof next.validation.success).toBe('boolean');
+  });
+
+  // --- loop substeps ---
+
+  it('recursively duplicates loop substeps with fresh ids', () => {
+    const sub1 = makeStep('sub1', 'Sub 1');
+    const sub2 = makeStep('sub2', 'Sub 2');
+    const loopAuto: Automation = {
+      ...BASE_AUTOMATION,
+      steps: [makeLoopStep('loop0', [sub1, sub2])],
+    };
+    const state = stateWith(loopAuto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0] },
+    });
+    const copy = next.automation!.steps[1];
+    expect(copy.substeps).toHaveLength(2);
+    expect(copy.substeps![0].id).not.toBe(sub1.id);
+    expect(copy.substeps![1].id).not.toBe(sub2.id);
+    // Ensure original is unchanged
+    expect(next.automation!.steps[0].substeps![0].id).toBe(sub1.id);
+  });
+
+  // --- substep inside a loop ---
+
+  it('inserts at [0, 2] when duplicating substep at path [0, 1]', () => {
+    const sub0 = makeStep('sub0', 'Sub 0');
+    const sub1 = makeStep('sub1', 'Sub 1');
+    const sub2 = makeStep('sub2', 'Sub 2');
+    const loopAuto: Automation = {
+      ...BASE_AUTOMATION,
+      steps: [makeLoopStep('loop0', [sub0, sub1, sub2])],
+    };
+    const state = stateWith(loopAuto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0, 1] },
+    });
+    const substeps = next.automation!.steps[0].substeps!;
+    expect(substeps).toHaveLength(4);
+    expect(substeps[1].id).toBe(sub1.id);     // original still at [0,1]
+    expect(substeps[2].id).not.toBe(sub1.id); // copy inserted at [0,2]
+    expect(substeps[2].name).toBe('Sub 1 (copy)');
+    expect(substeps[3].id).toBe(sub2.id);     // old [0,2] shifted to [0,3]
+  });
+
+  it('selectedNodeId encodes the substep position when duplicating a substep', () => {
+    const loopAuto: Automation = {
+      ...BASE_AUTOMATION,
+      steps: [makeLoopStep('loop0', [makeStep('sub0'), makeStep('sub1')])],
+    };
+    const state = stateWith(loopAuto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0, 1] },
+    });
+    // Duplicating [0,1] → new step at [0,2]
+    expect(next.selectedNodeId).toBe('step:0.2');
+  });
+
+  // --- function-body steps ---
+
+  it('duplicates a function-body step and inserts at the next index', () => {
+    const fn0: FunctionDefinition = {
+      name: 'fn0',
+      steps: [makeStep('fn0s0', 'Fn Step 0'), makeStep('fn0s1', 'Fn Step 1')],
+    };
+    const auto: Automation = { ...BASE_AUTOMATION, functions: [fn0] };
+    const state = stateWith(auto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0], functionIndex: 0 },
+    });
+    const fnSteps = next.automation!.functions![0].steps;
+    expect(fnSteps).toHaveLength(3);
+    expect(fnSteps[0].id).toBe('fn0s0');          // original at [0]
+    expect(fnSteps[1].id).not.toBe('fn0s0');       // copy inserted at [1]
+    expect(fnSteps[1].name).toBe('Fn Step 0 (copy)');
+    expect(fnSteps[2].id).toBe('fn0s1');           // old [1] shifted to [2]
+  });
+
+  it('selectedNodeId encodes the function step position', () => {
+    const fn0: FunctionDefinition = {
+      name: 'fn0',
+      steps: [makeStep('fn0s0', 'Fn Step 0'), makeStep('fn0s1', 'Fn Step 1')],
+    };
+    const auto: Automation = { ...BASE_AUTOMATION, functions: [fn0] };
+    const state = stateWith(auto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0], functionIndex: 0 },
+    });
+    // Duplicating functions[0].steps[0] → copy lands at steps[1]
+    expect(next.selectedNodeId).toBe('function:0:step:1');
+  });
+
+  it('top-level steps are not affected when duplicating a function-body step', () => {
+    const fn0: FunctionDefinition = {
+      name: 'fn0',
+      steps: [makeStep('fn0s0', 'Fn Step 0')],
+    };
+    const auto: Automation = { ...BASE_AUTOMATION, functions: [fn0] };
+    const state = stateWith(auto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0], functionIndex: 0 },
+    });
+    expect(next.automation!.steps).toHaveLength(BASE_AUTOMATION.steps.length);
+  });
+
+  // --- function-body substeps (loop inside a function) ---
+
+  it('duplicates a substep inside a loop inside a function body', () => {
+    const innerSub0 = makeStep('is0', 'Inner 0');
+    const innerSub1 = makeStep('is1', 'Inner 1');
+    const fn0: FunctionDefinition = {
+      name: 'fn0',
+      steps: [makeLoopStep('fnLoop', [innerSub0, innerSub1])],
+    };
+    const auto: Automation = { ...BASE_AUTOMATION, functions: [fn0] };
+    const state = stateWith(auto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0, 1], functionIndex: 0 },
+    });
+    const substeps = next.automation!.functions![0].steps[0].substeps!;
+    expect(substeps).toHaveLength(3);
+    expect(substeps[1].id).toBe(innerSub1.id);      // original at [0,1]
+    expect(substeps[2].id).not.toBe(innerSub1.id);  // copy at [0,2]
+    expect(substeps[2].name).toBe('Inner 1 (copy)');
+  });
+
+  it('selectedNodeId encodes function body substep position', () => {
+    const fn0: FunctionDefinition = {
+      name: 'fn0',
+      steps: [makeLoopStep('fnLoop', [makeStep('is0'), makeStep('is1')])],
+    };
+    const auto: Automation = { ...BASE_AUTOMATION, functions: [fn0] };
+    const state = stateWith(auto);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [0, 1], functionIndex: 0 },
+    });
+    // Copy lands at functions[0].steps[0].substeps[2] → function:0:step:0.2
+    expect(next.selectedNodeId).toBe('function:0:step:0.2');
+  });
+
+  // --- out-of-bounds path ---
+
+  it('returns the same state without crashing when path is out of bounds', () => {
+    const state = stateWith(BASE_AUTOMATION);
+    const next = editorReducer(state, {
+      type: 'DUPLICATE_STEP',
+      payload: { path: [99] },
+    });
+    // State is returned unchanged (no crash)
+    expect(next.automation!.steps).toHaveLength(BASE_AUTOMATION.steps.length);
+    expect(next.dirty).toBe(false); // unchanged from loaded state
+  });
 });

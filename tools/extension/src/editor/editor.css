@@ -587,6 +587,30 @@ details[open] > .outline-section-header::before {
   flex-shrink: 0;
 }
 
+/* Duplicate button — hidden until hover (mirrors outline-remove) */
+.outline-duplicate {
+  display: none;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.outline-item:hover .outline-duplicate,
+.outline-item--section:hover .outline-duplicate {
+  display: inline-flex;
+}
+
+.outline-duplicate:hover {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
 /* Remove button — hidden until hover */
 .outline-remove {
   display: none;
@@ -609,6 +633,20 @@ details[open] > .outline-section-header::before {
 .outline-remove:hover {
   color: #dc2626;
   background: #fee2e2;
+}
+
+/* Step form title row — aligns the "Step" heading with the Duplicate button */
+.step-form-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Inline duplicate button inside StepForm header */
+.btn-duplicate {
+  font-size: 12px;
+  color: #475569;
+  padding: 2px 7px;
 }
 
 /* Nested substep list */
