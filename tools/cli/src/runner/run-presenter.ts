@@ -1,4 +1,16 @@
-import pc from 'picocolors';
+import pcLib from 'picocolors';
+
+/**
+ * Decide whether ANSI color codes should be emitted by default. Used by
+ * the CLI and the presenter. Precedence: NO_COLOR env var (any value) wins,
+ * then the TTY check. Callers that need to force a specific answer (e.g.
+ * --no-color flag, --json mode) compute their own boolean and pass it to
+ * the presenter explicitly.
+ */
+export function defaultColorEnabled(): boolean {
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== '') return false;
+  return !!process.stdout.isTTY;
+}
 import type { Step } from '@portalflow/schema';
 import type { RunResult } from './run-context.js';
 
@@ -31,10 +43,20 @@ export class RunPresenter {
     | { stepId: string; iteration: number; maxIterations: number; iterationCount: number }
     | undefined;
 
+  private readonly pc: ReturnType<typeof pcLib.createColors>;
+
   constructor(
     private readonly enabled: boolean,
     private readonly logFilePath: string,
-  ) {}
+    /**
+     * When false, all pc.* helpers return the input string unchanged.
+     * Defaults to `defaultColorEnabled()` (TTY + NO_COLOR aware). Callers
+     * that want to force-off (agents, --no-color, --json) pass `false`.
+     */
+    colorEnabled: boolean = defaultColorEnabled(),
+  ) {
+    this.pc = pcLib.createColors(colorEnabled);
+  }
 
   /** True when the presenter is writing to stdout. Callers can use this
    *  to suppress their own duplicate summary lines in verbose mode. */
@@ -50,47 +72,47 @@ export class RunPresenter {
     this.startedAt = Date.now();
     this.line('');
     this.line(
-      pc.bold(pc.cyan('▶ ')) +
-        pc.bold(name) +
-        pc.dim(`  (${totalSteps} step${totalSteps === 1 ? '' : 's'})`),
+      this.pc.bold(this.pc.cyan('▶ ')) +
+        this.pc.bold(name) +
+        this.pc.dim(`  (${totalSteps} step${totalSteps === 1 ? '' : 's'})`),
     );
     this.line('');
   }
 
   runEnd(result: RunResult): void {
     const durationMs = result.completedAt.getTime() - result.startedAt.getTime();
-    this.line(pc.dim('─'.repeat(60)));
+    this.line(this.pc.dim('─'.repeat(60)));
     if (result.success) {
       this.line(
-        pc.green('✓ complete') +
+        this.pc.green('✓ complete') +
           '  ' +
-          pc.dim(`${result.stepsCompleted}/${result.stepsTotal} steps`) +
+          this.pc.dim(`${result.stepsCompleted}/${result.stepsTotal} steps`) +
           '  ' +
-          pc.dim(this.formatDuration(durationMs)),
+          this.pc.dim(this.formatDuration(durationMs)),
       );
     } else {
       this.line(
-        pc.red('✗ failed') +
+        this.pc.red('✗ failed') +
           '  ' +
-          pc.dim(`${result.stepsCompleted}/${result.stepsTotal} steps`) +
+          this.pc.dim(`${result.stepsCompleted}/${result.stepsTotal} steps`) +
           '  ' +
-          pc.dim(this.formatDuration(durationMs)),
+          this.pc.dim(this.formatDuration(durationMs)),
       );
       if (result.errors.length > 0) {
         for (const e of result.errors) {
-          this.line('  ' + pc.red('· ') + pc.red(`${e.stepId}: `) + e.message);
+          this.line('  ' + this.pc.red('· ') + this.pc.red(`${e.stepId}: `) + e.message);
         }
       }
     }
     if (this.llmCalls > 0) {
       const tokens = this.llmInputTokens + this.llmOutputTokens;
       this.line(
-        pc.dim(
+        this.pc.dim(
           `  ${this.llmCalls} LLM call${this.llmCalls === 1 ? '' : 's'} · ${tokens.toLocaleString()} tokens`,
         ),
       );
     }
-    this.line(pc.dim(`  log: ${this.logFilePath}`));
+    this.line(this.pc.dim(`  log: ${this.logFilePath}`));
     this.line('');
   }
 
@@ -100,9 +122,9 @@ export class RunPresenter {
   runFatal(err: unknown): void {
     this.line('');
     this.line(
-      pc.red('✗ run failed: ') + pc.red(err instanceof Error ? err.message : String(err)),
+      this.pc.red('✗ run failed: ') + this.pc.red(err instanceof Error ? err.message : String(err)),
     );
-    this.line(pc.dim(`  log: ${this.logFilePath}`));
+    this.line(this.pc.dim(`  log: ${this.logFilePath}`));
     this.line('');
   }
 
@@ -112,26 +134,26 @@ export class RunPresenter {
 
   stepStart(step: Step, index: number, total: number): void {
     const header =
-      pc.cyan('▸ ') +
-      pc.dim(`${index + 1}/${total}  `) +
-      pc.bold(step.type.padEnd(9)) +
-      pc.dim(step.id);
+      this.pc.cyan('▸ ') +
+      this.pc.dim(`${index + 1}/${total}  `) +
+      this.pc.bold(step.type.padEnd(9)) +
+      this.pc.dim(step.id);
     this.line(header);
     const label = step.name || step.description;
-    if (label) this.line('  ' + pc.dim(label));
+    if (label) this.line('  ' + this.pc.dim(label));
   }
 
   stepEnd(step: Step, durationMs: number, status: StepStatus, error?: string): void {
     const ms = this.formatDuration(durationMs);
     const suffix = this.consumeAiScopeSuffix();
     if (status === 'success') {
-      this.line('  ' + pc.green('✓ ') + pc.dim(ms) + suffix);
+      this.line('  ' + this.pc.green('✓ ') + this.pc.dim(ms) + suffix);
     } else if (status === 'skipped') {
-      const reason = error ? pc.dim(` — ${this.truncate(error, 120)}`) : '';
-      this.line('  ' + pc.yellow('↷ skipped ') + pc.dim(ms) + reason);
+      const reason = error ? this.pc.dim(` — ${this.truncate(error, 120)}`) : '';
+      this.line('  ' + this.pc.yellow('↷ skipped ') + this.pc.dim(ms) + reason);
     } else {
-      this.line('  ' + pc.red('✗ failed ') + pc.dim(ms));
-      if (error) this.line('  ' + pc.red(this.truncate(error, 240)));
+      this.line('  ' + this.pc.red('✗ failed ') + this.pc.dim(ms));
+      if (error) this.line('  ' + this.pc.red(this.truncate(error, 240)));
     }
     this.line('');
     // Discard in-step state for the next step.
@@ -157,20 +179,20 @@ export class RunPresenter {
   aiscopeDecision(action: string, selector: string | undefined, reasoning: string): void {
     const itr =
       this.currentAiScope !== undefined
-        ? pc.dim(`[${this.currentAiScope.iteration}/${this.currentAiScope.maxIterations}] `)
+        ? this.pc.dim(`[${this.currentAiScope.iteration}/${this.currentAiScope.maxIterations}] `)
         : '';
-    const actionPart = pc.magenta(action.padEnd(8));
-    const selPart = selector ? ' ' + pc.cyan(selector) : '';
-    const reason = reasoning ? pc.dim(' — ' + this.truncate(reasoning, 100)) : '';
-    this.line('  ' + pc.dim('🤖 ') + itr + actionPart + selPart + reason);
+    const actionPart = this.pc.magenta(action.padEnd(8));
+    const selPart = selector ? ' ' + this.pc.cyan(selector) : '';
+    const reason = reasoning ? this.pc.dim(' — ' + this.truncate(reasoning, 100)) : '';
+    this.line('  ' + this.pc.dim('🤖 ') + itr + actionPart + selPart + reason);
   }
 
   aiscopeGoalReached(durationMs: number, iteration: number): void {
     if (this.currentAiScope) this.currentAiScope.iterationCount = iteration;
     this.line(
       '  ' +
-        pc.green('✓ goal reached ') +
-        pc.dim(`(${iteration} iter, ${this.formatDuration(durationMs)})`),
+        this.pc.green('✓ goal reached ') +
+        this.pc.dim(`(${iteration} iter, ${this.formatDuration(durationMs)})`),
     );
   }
 
@@ -180,7 +202,7 @@ export class RunPresenter {
   private consumeAiScopeSuffix(): string {
     if (!this.currentAiScope || this.currentAiScope.iterationCount === 0) return '';
     const iters = this.currentAiScope.iterationCount;
-    return pc.dim(`  (${iters} iter${iters === 1 ? '' : 's'})`);
+    return this.pc.dim(`  (${iters} iter${iters === 1 ? '' : 's'})`);
   }
 
   // ---------------------------------------------------------------------
@@ -188,18 +210,18 @@ export class RunPresenter {
   // ---------------------------------------------------------------------
 
   toolCallStart(tool: string, command: string): void {
-    this.line('  ' + pc.magenta('⚙ ') + pc.bold(`${tool} ${command}`));
+    this.line('  ' + this.pc.magenta('⚙ ') + this.pc.bold(`${tool} ${command}`));
   }
 
   toolCallResult(outputName: string | undefined, value: unknown): void {
     if (!outputName) return;
     const preview = this.previewValue(value, 100);
-    this.line('    ' + pc.dim('→ ') + pc.cyan(outputName) + pc.dim(' = ') + pc.dim(preview));
+    this.line('    ' + this.pc.dim('→ ') + this.pc.cyan(outputName) + this.pc.dim(' = ') + this.pc.dim(preview));
   }
 
   extractResult(outputName: string, value: unknown): void {
     const preview = this.previewValue(value, 120);
-    this.line('  ' + pc.dim('→ ') + pc.cyan(outputName) + pc.dim(' = ') + pc.dim(preview));
+    this.line('  ' + this.pc.dim('→ ') + this.pc.cyan(outputName) + this.pc.dim(' = ') + this.pc.dim(preview));
   }
 
   // ---------------------------------------------------------------------

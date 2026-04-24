@@ -86,6 +86,10 @@ program
     'Print the full pino log stream to stdout. Useful for debugging the runner itself.',
     false,
   )
+  .option(
+    '--no-color',
+    'Disable ANSI color codes in presenter output (also honors NO_COLOR env var and non-TTY stdout)',
+  )
   .option('--kill-chrome', 'Close all existing Chrome instances before launching', false)
   .option(
     '--clear-history <range>',
@@ -105,6 +109,7 @@ program
     logLevel?: string;
     stealth?: boolean;
     verbose?: boolean;
+    color?: boolean;
     killChrome?: boolean;
     clearHistory?: string;
   }) => {
@@ -162,6 +167,7 @@ program
         inputs: inputs.size > 0 ? inputs : undefined,
         logLevel: opts.logLevel,
         verbose: opts.verbose,
+        noColor: opts.color === false,
         killChrome: opts.killChrome,
         clearHistory: opts.clearHistory as import('./browser/protocol.js').ClearBrowsingDataRange | undefined,
       });

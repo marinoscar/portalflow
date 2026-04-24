@@ -16,7 +16,7 @@ import { RunContext, type RunResult } from './run-context.js';
 // StepExecutor is imported below — see commit 2 of task 7 where it is created.
 import { StepExecutor } from './step-executor.js';
 import { createRunLogger, defaultLogFilePath, resolveLoggingConfig } from './logger.js';
-import { RunPresenter } from './run-presenter.js';
+import { RunPresenter, defaultColorEnabled } from './run-presenter.js';
 import { ConfigService } from '../config/config.service.js';
 import { defaultExtensionConfig } from '../config/config.service.js';
 import { resolvePaths, resolveVideo } from './paths.js';
@@ -30,6 +30,13 @@ export interface RunOptions {
   downloadDir?: string;
   automationsDir?: string;
   htmlDir?: string;
+  /**
+   * Force-disable ANSI color codes in presenter output. Defaults to the
+   * value of `defaultColorEnabled()` (TTY + NO_COLOR aware) when omitted.
+   * The CLI wires this from `--no-color` and from `--json` (JSON mode
+   * implies no color).
+   */
+  noColor?: boolean;
   /** CLI-supplied input overrides. Any key present here wins over the input's source. */
   inputs?: Map<string, string>;
   /** CLI-supplied log level override (--log-level flag). */
@@ -153,9 +160,13 @@ export class AutomationRunner {
     }
 
     const logger = createRunLogger(automation.name, loggingConfig);
+    // Color decision: explicit --no-color > NO_COLOR env > non-TTY > default on.
+    // `options.noColor === true` forces off regardless of TTY.
+    const colorEnabled = options?.noColor === true ? false : defaultColorEnabled();
     const presenter = new RunPresenter(
       presenterEnabled,
       loggingConfig.file ?? '(no log file)',
+      colorEnabled,
     );
 
     logger.info(
