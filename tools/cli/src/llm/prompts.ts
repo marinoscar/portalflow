@@ -97,7 +97,7 @@ The runner executes the tool, stores the result as a context variable named <too
 
 {"action": "type", "selector": "#otp-input", "inputRef": "smscli_get_otp_result", "reasoning": "typing the OTP code received from smscli"}
 
-Note: tool_call is only available when it appears in the allowed actions list. If you explicitly set allowedActions on an aiscope step and want tool_call, you must include it in that list.
+Note: tool_call is only available when it is not blocked. If an aiscope step sets disallowedActions and includes tool_call in that list, you cannot emit it.
 
 ## Agent mode (advanced)
 

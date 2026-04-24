@@ -195,7 +195,7 @@ export const AiScopeActionSchema = z.object({
   maxReplans: z.number().int().min(0).max(10).default(2),
   maxDurationSec: z.number().int().min(1).max(3600).default(300),
   maxIterations: z.number().int().min(1).max(200).default(25),
-  allowedActions: z
+  disallowedActions: z
     .array(
       z.enum([
         'navigate',
@@ -211,7 +211,11 @@ export const AiScopeActionSchema = z.object({
         'done',
       ]),
     )
-    .optional(),
+    .optional()
+    .describe(
+      'Actions the LLM must NOT emit. When omitted or empty, the full action vocabulary is allowed. ' +
+        'Use this to block specific actions (e.g., [\'navigate\'] to prevent the LLM from navigating away from the current page).',
+    ),
   includeScreenshot: z.boolean().default(true),
 });
 

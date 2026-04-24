@@ -32,9 +32,10 @@ import { RunContext } from './run-context.js';
 import { RunPresenter } from './run-presenter.js';
 
 /**
- * Default action whitelist for aiscope steps when `allowedActions` is
- * not explicitly set in the step's action block. Matches the vocabulary
- * documented in `aiScopeActionDecider` system prompt.
+ * Default action list for aiscope steps. Applies in full when `disallowedActions`
+ * is omitted or empty. When `disallowedActions` is set, the effective list is
+ * this default minus the blocked actions. Matches the vocabulary documented in
+ * the `aiScopeActionDecider` system prompt.
  */
 const DEFAULT_AISCOPE_ACTIONS = [
   'navigate',
@@ -1007,8 +1008,10 @@ export class StepExecutor {
     const deadlineMs = startedAt + action.maxDurationSec * 1000;
     const history: AgentActionHistoryEntry[] = [];
     const logger = this.context.logger;
-    const allowedActions =
-      action.allowedActions ?? (DEFAULT_AISCOPE_ACTIONS as readonly string[] as string[]);
+    const disallowed: string[] = action.disallowedActions ?? [];
+    const allowedActions: string[] = (DEFAULT_AISCOPE_ACTIONS as readonly string[]).filter(
+      (a) => !disallowed.includes(a),
+    );
 
     // Resolve `${var}` references in the goal once up front. Every other
     // user-editable string the runner touches (navigate.url, type values,
@@ -1334,7 +1337,7 @@ export class StepExecutor {
       }
 
       // 4. Dispatch — validate against the allowed list FIRST so that a
-      // user who explicitly excludes `done` from `allowedActions` actually
+      // user who explicitly includes `done` in `disallowedActions` actually
       // gets the exclusion they asked for. The default list does include
       // `done`, so the usual behavior (loop re-verifies success check on
       // the next iteration) is unchanged.
