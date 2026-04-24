@@ -1,4 +1,4 @@
-import type { Tool, ToolResult, ToolExecutionOptions } from './tool.interface.js';
+import type { Tool, ToolResult, ToolExecutionOptions, ToolDescription } from './tool.interface.js';
 import { ToolExecutor } from './tool-executor.js';
 
 const BINARY = 'smscli';
@@ -87,6 +87,56 @@ export class SmscliAdapter implements Tool {
     _config?: Record<string, string>,
   ) {
     void _config;
+  }
+
+  /**
+   * Returns the LLM-facing description of this tool. The advertised arg
+   * surface is deliberately narrow — sender/number/since/device are runtime
+   * plumbing the LLM should not have to reason about. The adapter's
+   * `execute()` still accepts those args unchanged.
+   */
+  describe(): ToolDescription {
+    return {
+      tool: 'smscli',
+      description: 'Retrieves SMS OTP codes from a connected phone.',
+      commands: [
+        {
+          command: 'otp-wait',
+          description:
+            'Waits for a NEW SMS OTP to arrive after this moment. Use when the site just triggered an OTP send.',
+          args: [
+            {
+              name: 'timeout',
+              required: false,
+              description: 'Seconds to wait before giving up (default 60).',
+            },
+          ],
+          resultDescription:
+            'The OTP code extracted from the SMS body. Stored as smscli_otp_wait_result.',
+        },
+        {
+          command: 'otp-latest',
+          description:
+            'Returns the most recent OTP already received. Use when the OTP may have arrived before you checked.',
+          args: [],
+          resultDescription:
+            'The most recent OTP code. Stored as smscli_otp_latest_result.',
+        },
+        {
+          command: 'otp-extract',
+          description: 'Parses an OTP out of a literal SMS body text. Rarely needed from aiscope.',
+          args: [
+            {
+              name: 'message',
+              required: true,
+              description: 'The raw SMS text to parse.',
+            },
+          ],
+          resultDescription:
+            'The OTP code extracted from the given message. Stored as smscli_otp_extract_result.',
+        },
+      ],
+    };
   }
 
   /**

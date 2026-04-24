@@ -1,4 +1,4 @@
-import type { Tool, ToolResult, ToolExecutionOptions } from './tool.interface.js';
+import type { Tool, ToolResult, ToolExecutionOptions, ToolDescription } from './tool.interface.js';
 import { ToolExecutor } from './tool-executor.js';
 
 const BINARY = 'vaultcli';
@@ -64,6 +64,38 @@ export class VaultcliAdapter implements Tool {
     _config?: Record<string, string>,
   ) {
     void _config;
+  }
+
+  /**
+   * Returns the LLM-facing description of this tool. Matches the actual
+   * adapter contract exactly — no narrowing needed for vaultcli.
+   */
+  describe(): ToolDescription {
+    return {
+      tool: 'vaultcli',
+      description: 'Retrieves secrets from the local vault.',
+      commands: [
+        {
+          command: 'secrets-get',
+          description: 'Fetches a secret by name. Returns all fields or a single field.',
+          args: [
+            {
+              name: 'name',
+              required: true,
+              description: 'The name of the secret to retrieve.',
+            },
+            {
+              name: 'field',
+              required: false,
+              description:
+                'If provided, returns only this field from the secret (e.g. "password").',
+            },
+          ],
+          resultDescription:
+            'The secret value(s). Stored as vaultcli_secrets_get_result.',
+        },
+      ],
+    };
   }
 
   /**
