@@ -1528,8 +1528,10 @@ This is **not** a general-purpose autonomous agent. The action vocabulary is fix
 | `maxReplans`        | `number` (int, 0–10)       | No       | `2`      | Agent mode only. How many times the LLM may emit `replan: true` to rebuild the plan mid-run. Additional replan requests after the cap are logged and ignored so the loop keeps making progress on the existing plan rather than failing the step. |
 | `maxDurationSec`    | `number` (int, 1–3600)     | No       | `300`   | Wall-clock budget in seconds. Whichever cap fires first aborts the step with a clear error. |
 | `maxIterations`     | `number` (int, 1–200)      | No       | `25`    | Maximum number of observe → decide → dispatch cycles. Whichever cap fires first aborts. In agent mode the initial planning call and any replan calls do NOT count against this budget — it counts *actions*, not *LLM calls*. |
-| `allowedActions`    | `string[]`                 | No       | (all)   | Whitelist restricting which actions the LLM may emit. When omitted, the full vocabulary (see below) is permitted. |
+| `disallowedActions` | `string[]`                 | No       | `[]`    | Blocklist of actions the LLM is forbidden from emitting. When omitted or set to `[]`, the full vocabulary (see below) is permitted. When populated, those specific actions are blocked and every other vocabulary action remains available. For example, set `["navigate"]` to prevent the LLM from navigating away from the current page while it works on the goal. |
 | `includeScreenshot` | `boolean`                  | No       | `true`  | When true, a base64 PNG viewport screenshot is sent to the LLM on every iteration alongside the HTML. Requires a vision-capable model (Claude 3.5+ / GPT-4o+). Set to `false` for text-only. |
+
+> **Breaking change (schema 2.0.0):** the `allowedActions` field was renamed to `disallowedActions` with inverted semantics. The old field was a whitelist ("only these actions are allowed"); the new field is a blocklist ("these actions are forbidden, everything else is allowed"). Existing automations that set `allowedActions: ["click", "type", "done"]` (meaning "only these three") should migrate to `disallowedActions: ["navigate", "select", "check", "uncheck", "hover", "focus", "scroll", "wait", "tool_call"]` (meaning "block everything except those three"). Or simply remove the field entirely — omitting `disallowedActions` allows the full vocabulary, which is the same behavior as the old `allowedActions` omitted case.
 
 **`successCheck` shape:**
 
@@ -1577,7 +1579,7 @@ In **agent mode** (`mode: "agent"`), the LLM may additionally include these flag
 | `milestoneComplete` | `boolean` | The current milestone is finished. The runner advances the pointer before dispatching the chosen action. Chain with the first action of the next milestone, or with `done` if it was the last milestone. |
 | `replan` | `boolean` | The plan is materially wrong (not just a single failed action). The runner rebuilds the plan via `decidePlan`, passing the old plan as `previousPlan`, and resumes on the new plan's first milestone. Capped by `maxReplans`. |
 
-When `allowedActions` is set, only actions in the list (plus implicit `done`) are dispatched. The LLM is told about the restriction and any out-of-list emissions are logged as warnings and fed back as failures in the recent-history buffer on the next iteration.
+When `disallowedActions` is set, those actions are blocked — the LLM is told it cannot emit them, and if it does anyway the attempt is logged as a failure and fed back into the next iteration's recent-history buffer so the model can self-correct.
 
 **Budget semantics and error messages:**
 
@@ -1732,7 +1734,7 @@ The executor then drives the browser turn-by-turn. If the site surprises the pla
 - `mode` outside `'fast' | 'agent'` — schema rejects.
 - `maxReplans` outside 0–10 — schema rejects.
 - `maxDurationSec` outside 1–3600 or `maxIterations` outside 1–200 — schema rejects.
-- `allowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`, `tool_call`).
+- `disallowedActions` containing an unknown action name — schema rejects (valid names: `navigate`, `click`, `type`, `select`, `check`, `uncheck`, `hover`, `focus`, `scroll`, `wait`, `done`, `tool_call`).
 - Agent mode only: planner returns zero milestones at runtime — `aiscope step "<id>" agent-mode planner returned an empty plan` is thrown.
 
 ---
