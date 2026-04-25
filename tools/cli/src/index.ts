@@ -640,6 +640,71 @@ settings
   });
 
 settings
+  .command('agent')
+  .description('Set defaults for `portalflow agent` (any subset of flags; omit all flags to show current values)')
+  .option('--mode <mode>', 'Default LLM strategy: "fast" or "agent"')
+  .option('--max-iterations <n>', 'Default cap on actions (1-200)', parseIntArg)
+  .option('--max-duration <sec>', 'Default wall-clock cap in seconds (1-3600)', parseIntArg)
+  .option('--max-replans <n>', 'Default replans for agent mode (0-10)', parseIntArg)
+  .option('--screenshot', 'Capture per-iteration viewport screenshot (default true)')
+  .option('--no-screenshot', 'Skip per-iteration viewport screenshot')
+  .option('--start-url <url>', 'Default URL to navigate to before handing off to the agent')
+  .option('--no-start-url', 'Clear any persisted startUrl')
+  .addHelpText('after', helpText.settingsAgentHelpText())
+  .action(async (opts: {
+    mode?: string;
+    maxIterations?: number;
+    maxDuration?: number;
+    maxReplans?: number;
+    screenshot?: boolean;
+    startUrl?: string | false;
+  }) => {
+    const config = new ConfigService();
+    const { resolveAgentDefaults } = await import('./runner/agent-defaults.js');
+
+    // Validate mode if provided
+    if (opts.mode !== undefined && opts.mode !== 'fast' && opts.mode !== 'agent') {
+      process.stderr.write(`portalflow: --mode must be "fast" or "agent" (got "${opts.mode}")\n`);
+      process.exit(ExitCodes.Runtime);
+    }
+
+    // Build the partial update. `null` clears a field (commander's
+    // --no-X negation surfaces as opts.X === false; --no-start-url is
+    // the explicit "clear" form, opts.startUrl === false in that case).
+    type AgentUpdate = {
+      mode?: 'fast' | 'agent';
+      maxIterations?: number;
+      maxDuration?: number;
+      maxReplans?: number;
+      includeScreenshot?: boolean;
+      startUrl?: string | null;
+    };
+    const update: AgentUpdate = {};
+    if (opts.mode !== undefined) update.mode = opts.mode as 'fast' | 'agent';
+    if (opts.maxIterations !== undefined) update.maxIterations = opts.maxIterations;
+    if (opts.maxDuration !== undefined) update.maxDuration = opts.maxDuration;
+    if (opts.maxReplans !== undefined) update.maxReplans = opts.maxReplans;
+    if (opts.screenshot === true) update.includeScreenshot = true;
+    if (opts.screenshot === false) update.includeScreenshot = false;
+    if (opts.startUrl === false) update.startUrl = null;
+    else if (typeof opts.startUrl === 'string') update.startUrl = opts.startUrl;
+
+    if (Object.keys(update).length === 0) {
+      const cfg = await config.load();
+      const current = resolveAgentDefaults(cfg);
+      process.stdout.write(`mode:               ${current.mode}\n`);
+      process.stdout.write(`maxIterations:      ${current.maxIterations}\n`);
+      process.stdout.write(`maxDuration:        ${current.maxDuration}s\n`);
+      process.stdout.write(`maxReplans:         ${current.maxReplans}\n`);
+      process.stdout.write(`includeScreenshot:  ${current.includeScreenshot}\n`);
+      process.stdout.write(`startUrl:           ${current.startUrl ?? '(none — LLM decides)'}\n`);
+      return;
+    }
+    await config.setAgentDefaults(update);
+    process.stdout.write(`Agent defaults updated: ${JSON.stringify(update)}\n`);
+  });
+
+settings
   .command('logging')
   .description('Configure logging for automation runs')
   .option('-l, --level <level>', 'Log level: trace, debug, info, warn, error, fatal, silent')

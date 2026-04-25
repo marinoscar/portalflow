@@ -495,6 +495,43 @@ export function settingsPathsHelpText(): string {
   ]);
 }
 
+export function settingsAgentHelpText(): string {
+  return assemble([
+    section('Description:', [
+      `View or update defaults for \`portalflow agent\` in ${PORTALFLOW_HOME}/config.json.`,
+      'Running with no flags prints the current effective values (CLI > config > built-in).',
+      'Running with any subset of flags updates only those fields.',
+      '',
+      'Defaults are tuned for top-level goals (50 iterations, 900s wall clock, agent mode,',
+      'screenshots on, no start URL). Tweak them once instead of passing flags every run.',
+    ]),
+    section('Examples:', [
+      'portalflow settings agent                                          Print current values',
+      'portalflow settings agent --mode fast                              Switch to cheap one-shot strategy',
+      'portalflow settings agent --max-iterations 100 --max-duration 1800 Bigger budgets',
+      'portalflow settings agent --no-screenshot                          Skip viewport capture (faster, no vision)',
+      'portalflow settings agent --start-url https://app.example.com      Always start here unless overridden',
+      'portalflow settings agent --no-start-url                           Clear the persisted start URL',
+    ]),
+    section('Field reference:', [
+      'mode               "fast" or "agent". agent = planner+milestones; fast = one call/iter.',
+      'maxIterations      1-200. Cap on actions the LLM can take.',
+      'maxDuration        1-3600 seconds. Wall-clock cap; whichever cap trips first wins.',
+      'maxReplans         0-10. Replans allowed in agent mode.',
+      'includeScreenshot  Whether to capture the viewport every iteration (true / false).',
+      'startUrl           URL to navigate to before handing off (omit for LLM-decides).',
+    ]),
+    section('Exit codes:', [
+      '0   Defaults updated or printed',
+      '1   Invalid --mode value',
+    ]),
+    section('See also:', [
+      'portalflow agent --help              Per-run flag overrides',
+      'docs/AGENT-INTEGRATION.md            How agents shell out to portalflow',
+    ]),
+  ]);
+}
+
 export function settingsVideoHelpText(): string {
   return assemble([
     section('Description:', [
