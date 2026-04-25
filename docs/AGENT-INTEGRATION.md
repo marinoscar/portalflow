@@ -84,6 +84,115 @@ In practice: agents piping stdout or redirecting to a file get clean output auto
 
 ---
 
+## Goal-driven mode (`portalflow agent`)
+
+For ad-hoc goals where authoring a JSON file is not worth the effort, use `portalflow agent`. Pass a plain-English goal; the CLI synthesizes a single `aiscope` step in memory and runs it through the same pipeline as `portalflow run`.
+
+### When to use `agent` vs `run`
+
+| | `portalflow agent` | `portalflow run <file>` |
+|---|---|---|
+| Use case | Ad-hoc, one-off goals | Repeatable, version-controlled flows |
+| JSON authoring | Not required — synthesized internally | Required |
+| Caching / reuse | No persistent file | File lives in `~/.portalflow/automations/` |
+| Parameterization | `--input` / `--inputs-json` flags | Declared `inputs[]` in the JSON |
+
+For anything that will be run more than once, invest the time to author a JSON file and use `portalflow run`. For exploratory tasks or when an outer agent wants a quick result without managing files, `portalflow agent` is the right tool.
+
+### How it works
+
+`portalflow agent` calls `synthesizeAgentAutomation` to build an in-memory `Automation` object containing:
+
+1. An optional `navigate` step (when `--start-url` is set).
+2. A single `aiscope` step carrying the goal and the resolved defaults.
+
+The result goes through `AutomationSchema.safeParse` so every field default (`onFailure`, `maxRetries`, `timeout`, etc.) is applied automatically. The synthesized automation then executes through the normal runner — same step executor, same WebSocket transport, same telemetry.
+
+### `--json` output
+
+`--json` output from `portalflow agent` is **identical to `portalflow run --json`** — the same `RunResult` wire shape, the same exit codes, and the same pre-flight failure envelope. Agents that already consume `portalflow run --json` can consume `portalflow agent --json` without changes.
+
+```bash
+portalflow agent "open example.com and report the title" --json | jq .outputs
+```
+
+### Quick example
+
+```bash
+# Ad-hoc title fetch — no JSON file needed
+portalflow agent "open example.com and report the page title" --json --no-color
+```
+
+```json
+{
+  "success": true,
+  "startedAt": "2026-04-25T18:00:01.000Z",
+  "completedAt": "2026-04-25T18:00:09.412Z",
+  "stepsCompleted": 1,
+  "stepsTotal": 1,
+  "outputs": { "page_title": "Example Domain" },
+  "artifacts": [],
+  "errors": []
+}
+```
+
+Parse the answer:
+
+```bash
+portalflow agent "open example.com and report the page title" --json | jq -r '.outputs.page_title'
+# Example Domain
+```
+
+### Agent-specific flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--start-url <url>` | — | Navigate here before handing off to the LLM |
+| `--no-start-url` | — | Clear any persisted `startUrl` from config for this run |
+| `--mode <mode>` | `agent` | `fast` = one LLM call/iteration; `agent` = planner + milestones |
+| `--max-iterations <n>` | `50` | Action cap (1–200) |
+| `--max-duration <sec>` | `900` | Wall-clock cap in seconds (1–3600) |
+| `--max-replans <n>` | `2` | Replans allowed in agent mode (0–10) |
+| `--no-screenshot` | — | Skip per-iteration viewport capture |
+
+All `portalflow run` flags also work (`--video`, `--screenshot-dir`, `--download-dir`, `--html-dir`, `--input`, `--inputs-json`, `--no-color`, `--kill-chrome`, etc.).
+
+Run `portalflow agent --help` for the full flag list.
+
+### Precedence chain
+
+At run time, effective values are resolved as:
+
+```
+CLI flag  >  agent.* in ~/.portalflow/config.json  >  built-in default
+```
+
+**Built-in defaults:**
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `mode` | `agent` | Planner + milestones; handles multi-phase goals well |
+| `maxIterations` | `50` | 2× the aiscope sub-step default — top-level goals need more headroom |
+| `maxDuration` | `900` | 900s (15 min); 3× the aiscope sub-step default |
+| `maxReplans` | `2` | Conservative; most goals don't need more than one replan |
+| `includeScreenshot` | `true` | Vision helps the LLM orient on unfamiliar pages |
+| `startUrl` | (none) | LLM decides the starting page |
+
+These defaults are intentionally higher than the aiscope sub-step defaults because a top-level goal has no surrounding automation to do the heavy lifting first.
+
+### Persisting defaults
+
+Use `portalflow settings agent` to write any of these to `~/.portalflow/config.json` so you do not repeat them on every run:
+
+```bash
+portalflow settings agent --mode fast --max-iterations 30
+portalflow settings agent --start-url https://app.example.com
+```
+
+Or configure interactively via the TUI: `portalflow` → Settings → "Configure agent defaults".
+
+---
+
 ## `portalflow schema`
 
 `portalflow schema` emits the full automation file format as a JSON Schema document. Use it to synthesize new automation files without reading the prose spec.

@@ -64,6 +64,8 @@ automations are resilient to minor UI changes without requiring manual updates t
 
 **For coding agents:** the schema this document describes is exposed at runtime via `portalflow schema --pretty`. Run that to get a JSON Schema document instead of (or in addition to) reading this file. Pass `--pretty` for a readable form or omit it to get a compact document suitable for `jq` queries. See [`docs/AGENT-INTEGRATION.md`](./AGENT-INTEGRATION.md) for the broader agent-friendly surface (`--json` run output, exit codes, tools list).
 
+**Ad-hoc goals without authoring JSON:** `portalflow agent "<goal>"` provides a way to run one-step LLM-driven automations without authoring any JSON. The CLI synthesizes the automation in memory from the goal and resolved defaults, then runs it through the same pipeline as `portalflow run`. Use this for exploratory tasks where defining the full schema is not worth the effort; use a JSON file when the automation will be run more than once or needs version control.
+
 ---
 
 ## 2. Table of Contents
