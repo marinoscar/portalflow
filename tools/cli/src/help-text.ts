@@ -95,6 +95,10 @@ export function runHelpText(): string {
       'portalflow run automation.json --automations-dir ./wf       Override automations lookup directory',
       'portalflow run automation.json --input billCount=3                 Pass an input value',
       "portalflow run automation.json --inputs-json '{\"user\":\"alice\"}'    Pass multiple inputs as JSON",
+      'portalflow run automation.json --html-dir ./html-dumps      Override HTML extract directory',
+      'portalflow run automation.json --no-color                   Disable ANSI color (or set NO_COLOR=1)',
+      'portalflow run automation.json --json                       Emit RunResult JSON on stdout (agent mode)',
+      "portalflow run automation.json --json --inputs-json '{\"u\":\"a\"}'",
     ]),
     section('Precedence (highest wins):', [
       '1. CLI flag on this command (e.g., --video-dir)',
