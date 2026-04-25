@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [cli 3.5.0] - 2026-04-25
+
+Goal-driven mode: a one-line CLI command and a top-menu TUI entry that
+let users run an agent without authoring or picking an automation file.
+Defaults are configurable at the user-config level (and from the TUI)
+so common preferences don't need to be respecified each run.
+
+### Added
+
+- **`portalflow agent "<goal>"`** — new top-level CLI command. Internally
+  synthesizes a one-step `aiscope` automation in memory and runs it
+  through the existing `AutomationRunner` pipeline, so every flag from
+  `portalflow run` (`--json`, `--no-color`, `--inputs-json`, `--html-dir`,
+  `--screenshot-dir`, `--download-dir`, `--video`, `--kill-chrome`,
+  `--clear-history`, `-l/--log-level`, `-v/--verbose`) works identically.
+  Agent-specific flags layered on top:
+  - `--start-url <url>` / `--no-start-url` (when set, the runner navigates
+    here first; otherwise the LLM picks where to go from the goal text)
+  - `--mode fast|agent` (default `agent` for compound goals)
+  - `--max-iterations <n>` (1-200), `--max-duration <sec>` (1-3600),
+    `--max-replans <n>` (0-10)
+  - `--no-screenshot` (skip per-iteration viewport capture)
+- **`portalflow settings agent`** — persist defaults to the new `agent`
+  section of `~/.portalflow/config.json`. Same flags as the run-time
+  command (minus the run-time-only ones); pass nothing to print current
+  effective values.
+- **TUI: "Run from goal" top-menu entry** — between "Run an automation"
+  and "Validate". Same shape as the file-based run flow but sources the
+  work from a multi-line goal input instead of a file picker. Resolved
+  defaults are shown up front; a single "Customize for this run" toggle
+  walks the user through per-run overrides for mode, start URL, max
+  iterations, max duration, and screenshot capture.
+- **TUI: "Configure agent defaults" entry under Settings** — between
+  Logging and Browser. Edit-one-or-all flow over the same six fields,
+  with input validation matching the CLI flag bounds.
+- **Config: `agent.*` section** in `~/.portalflow/config.json`.
+  Optional fields: `mode`, `maxIterations`, `maxDuration`, `maxReplans`,
+  `includeScreenshot`, `startUrl`. Precedence at runtime: CLI flag >
+  this config > built-in default. Built-in defaults: agent mode, 50
+  iterations, 900s wall clock, 2 replans, screenshots on, no start URL —
+  tuned 2-3× higher than aiscope sub-step defaults because top-level
+  goals need more headroom.
+- **`AutomationRunner.runFromAutomation(automation, opts)`** — new public
+  method that takes an already-parsed `Automation` instead of a file
+  path. The legacy `run(path)` is now a 3-line wrapper. Lets agent mode
+  (and any future caller) skip the file round-trip.
+- **`synthesizeAgentAutomation({ goal, defaults, inputKeys })`** —
+  pure synthesizer that builds a schema-valid `Automation` (optional
+  navigate step + aiscope step) from a goal and resolved defaults.
+- **OpenClaw skill update** — `tools/cli/skills/portalflow/SKILL.md`
+  gains a "Goal-driven mode (preferred for ad-hoc tasks)" section
+  pointing agents at `portalflow agent` for one-off goals so they don't
+  have to author automation JSON. Walkthrough demonstrates both paths
+  side by side.
+- **Documentation** — new "Goal-driven mode" section in
+  `docs/AGENT-INTEGRATION.md`; OpenClaw on-ramp updated; tools/cli
+  README adds `### portalflow agent` and `### portalflow settings agent`
+  subsections; root README links to the feature; AUTOMATION-JSON-SPEC
+  callout notes the no-JSON path.
+
+### Why this exists
+
+Authoring an automation JSON file is overkill for one-shot tasks ("open
+this page and tell me X", "log in and grab a number"). The aiscope step
+type already supported handing a goal to the LLM mid-automation; this
+release exposes that capability as a top-level command so the user
+never has to write JSON for ad-hoc goals. Configurable defaults cover
+the ergonomic complaint that follows: tuning a 50-iteration cap or a
+mode preference should be a one-time setup, not a per-run flag.
+
+### Out of scope (future work)
+
+- Saving the synthesized automation to disk (deferred — the user
+  explicitly asked us to skip this for now).
+- Streaming agent decisions over stdout in real time. The final
+  `RunResult` summary is enough for the first cut.
+- Mid-run human override / pause / "what should I do next?" interaction.
+
 ## [cli 3.4.1] - 2026-04-25
 
 Documentation patch closing four reference-surface gaps in the 3.4.0
