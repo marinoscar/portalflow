@@ -7,7 +7,7 @@ import { providerDisplayName } from './helpers.js';
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json') as { version: string };
 
-type MainAction = 'run' | 'validate' | 'provider' | 'settings' | 'exit';
+type MainAction = 'run' | 'agent' | 'validate' | 'provider' | 'settings' | 'exit';
 
 export async function runMainTui(): Promise<void> {
   p.intro(pc.bgCyan(pc.black(` PortalFlow v${version} `)));
@@ -32,6 +32,7 @@ export async function runMainTui(): Promise<void> {
       message: 'What would you like to do?',
       options: [
         { value: 'run' as MainAction, label: 'Run an automation', hint: 'execute a JSON workflow in a browser' },
+        { value: 'agent' as MainAction, label: 'Run from goal', hint: 'describe what you want; the agent figures it out' },
         { value: 'validate' as MainAction, label: 'Validate an automation', hint: 'check JSON against the schema' },
         { value: 'provider' as MainAction, label: 'Manage LLM providers', hint: 'Anthropic, OpenAI, Kimi, DeepSeek, Groq, etc.' },
         { value: 'settings' as MainAction, label: 'Settings', hint: 'storage paths, video recording' },
@@ -48,6 +49,11 @@ export async function runMainTui(): Promise<void> {
       case 'run': {
         const { runRunFlow } = await import('./flows/run.js');
         await runRunFlow({ nested: true });
+        break;
+      }
+      case 'agent': {
+        const { runAgentFlow } = await import('./flows/agent.js');
+        await runAgentFlow({ nested: true });
         break;
       }
       case 'validate': {
