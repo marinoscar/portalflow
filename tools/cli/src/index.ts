@@ -210,6 +210,175 @@ program
   });
 
 // ---------------------------------------------------------------------------
+// agent <goal>  (goal-driven mode)
+// ---------------------------------------------------------------------------
+program
+  .command('agent <goal>')
+  .description('Run a one-step agent automation: pass a goal in plain English and let the LLM accomplish it')
+  .option('--start-url <url>', 'Navigate here before handing off to the agent (omit to let the LLM decide)')
+  .option('--no-start-url', 'Clear any persisted startUrl from config for this run')
+  .option('--mode <mode>', 'LLM strategy: "fast" (one call/iter) or "agent" (planner + milestones)')
+  .option('--max-iterations <n>', 'Cap on actions the LLM can take (1-200)', parseIntArg)
+  .option('--max-duration <sec>', 'Wall-clock cap in seconds (1-3600)', parseIntArg)
+  .option('--max-replans <n>', 'Replans allowed in agent mode (0-10)', parseIntArg)
+  .option('--no-screenshot', 'Skip the per-iteration viewport screenshot')
+  .option('--video', 'Enable video recording of the browser session')
+  .option('--no-video', 'Disable video recording even if enabled in config')
+  .option('--video-dir <dir>', 'Directory to store recorded videos')
+  .option('--screenshot-dir <dir>', 'Directory to store screenshots')
+  .option('--download-dir <dir>', 'Directory to store downloaded files')
+  .option('--html-dir <dir>', 'Directory to store extracted HTML files')
+  .option(
+    '--input <kv>',
+    'Pass an input value as key=value (repeatable). The key becomes a context variable the LLM can reference via inputRef.',
+    (val: string, prev: string[] = []) => [...prev, val],
+    [] as string[],
+  )
+  .option('--inputs-json <json>', 'Pass multiple input values as a JSON object')
+  .option('-l, --log-level <level>', 'Log verbosity: trace, debug, info, warn, error, fatal, silent')
+  .option('-v, --verbose', 'Print the full pino log stream to stdout', false)
+  .option('--no-color', 'Disable ANSI color codes (also honors NO_COLOR env var and non-TTY stdout)')
+  .option('--json', 'Agent mode: emit a single RunResult JSON document on stdout', false)
+  .option('--kill-chrome', 'Close all existing Chrome instances before launching', false)
+  .option(
+    '--clear-history <range>',
+    'Clear browsing history and cache before running. Ranges: none, last15min, last1hour, last24hour, last7days, all',
+    'none',
+  )
+  .addHelpText('after', helpText.agentHelpText())
+  .action(async (
+    goal: string,
+    opts: {
+      startUrl?: string | false;
+      mode?: string;
+      maxIterations?: number;
+      maxDuration?: number;
+      maxReplans?: number;
+      screenshot?: boolean;
+      video?: boolean;
+      videoDir?: string;
+      screenshotDir?: string;
+      downloadDir?: string;
+      htmlDir?: string;
+      input?: string[];
+      inputsJson?: string;
+      logLevel?: string;
+      verbose?: boolean;
+      color?: boolean;
+      json?: boolean;
+      killChrome?: boolean;
+      clearHistory?: string;
+    },
+  ) => {
+    const failJson = (code: ExitCode, message: string): never => {
+      process.stdout.write(
+        JSON.stringify({ success: false, error: message, exitCode: code }) + '\n',
+      );
+      process.exit(code);
+    };
+
+    // Parse inputs (same shape as `run`)
+    const inputs = new Map<string, string>();
+    for (const kv of (opts.input ?? [])) {
+      const eqIdx = kv.indexOf('=');
+      if (eqIdx === -1) {
+        const msg = `invalid --input format (expected key=value): "${kv}"`;
+        if (opts.json) failJson(ExitCodes.Runtime, msg);
+        process.stderr.write(`portalflow: ${msg}\n`);
+        process.exit(ExitCodes.Runtime);
+      }
+      inputs.set(kv.slice(0, eqIdx), kv.slice(eqIdx + 1));
+    }
+    if (opts.inputsJson) {
+      try {
+        const obj = JSON.parse(opts.inputsJson) as Record<string, string>;
+        for (const [k, v] of Object.entries(obj)) inputs.set(k, v);
+      } catch {
+        const msg = '--inputs-json is not valid JSON';
+        if (opts.json) failJson(ExitCodes.Runtime, msg);
+        process.stderr.write(`portalflow: ${msg}\n`);
+        process.exit(ExitCodes.Runtime);
+      }
+    }
+
+    // Validate mode flag if passed
+    if (opts.mode !== undefined && opts.mode !== 'fast' && opts.mode !== 'agent') {
+      const msg = `--mode must be "fast" or "agent" (got "${opts.mode}")`;
+      if (opts.json) failJson(ExitCodes.Runtime, msg);
+      process.stderr.write(`portalflow: ${msg}\n`);
+      process.exit(ExitCodes.Runtime);
+    }
+
+    // Resolve config + agent defaults
+    const configService = new ConfigService();
+    const cfg = await configService.load();
+    const ext = cfg.extension;
+    if (!ext || ext.profileMode === 'unset') {
+      const msg =
+        'Chrome profile mode is not configured. ' +
+        'Run `portalflow` (interactive TUI) or `portalflow settings extension` to configure it first.';
+      if (opts.json) failJson(ExitCodes.Runtime, msg);
+      process.stderr.write(`\nportalflow: ${msg}\n\n`);
+      process.exit(ExitCodes.Runtime);
+    }
+
+    const { resolveAgentDefaults } = await import('./runner/agent-defaults.js');
+    const defaults = resolveAgentDefaults(cfg, {
+      mode: opts.mode as 'fast' | 'agent' | undefined,
+      maxIterations: opts.maxIterations,
+      maxDuration: opts.maxDuration,
+      maxReplans: opts.maxReplans,
+      includeScreenshot: opts.screenshot === false ? false : undefined,
+      // commander negation: opts.startUrl === false means --no-start-url was passed
+      startUrl: opts.startUrl === false ? null : opts.startUrl,
+    });
+
+    // Synthesize the automation in memory
+    const { synthesizeAgentAutomation } = await import('./commands/agent.js');
+    let automation;
+    try {
+      automation = synthesizeAgentAutomation({
+        goal,
+        defaults,
+        inputKeys: [...inputs.keys()],
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (opts.json) failJson(ExitCodes.Schema, msg);
+      process.stderr.write(`portalflow agent: ${msg}\n`);
+      process.exit(ExitCodes.Schema);
+    }
+
+    // Hand off to the existing runner via the new in-memory entry point
+    const { AutomationRunner } = await import('./runner/automation-runner.js');
+    const runner = new AutomationRunner();
+    try {
+      const result = await runner.runFromAutomation(automation, {
+        video: opts.video,
+        videoDir: opts.videoDir,
+        screenshotDir: opts.screenshotDir,
+        downloadDir: opts.downloadDir,
+        htmlDir: opts.htmlDir,
+        inputs: inputs.size > 0 ? inputs : undefined,
+        logLevel: opts.logLevel,
+        verbose: opts.verbose,
+        noColor: opts.color === false,
+        json: opts.json,
+        killChrome: opts.killChrome,
+        clearHistory: opts.clearHistory as import('./browser/protocol.js').ClearBrowsingDataRange | undefined,
+      });
+      if (opts.json) process.stdout.write(JSON.stringify(result) + '\n');
+      if (!result.success) process.exit(ExitCodes.Runtime);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = exitCodeForError(err);
+      if (opts.json) failJson(code, msg);
+      process.stderr.write(`\nportalflow agent: ${msg}\n\n`);
+      process.exit(code);
+    }
+  });
+
+// ---------------------------------------------------------------------------
 // validate [file]
 // ---------------------------------------------------------------------------
 program

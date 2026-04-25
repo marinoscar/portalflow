@@ -167,6 +167,50 @@ export function runHelpText(): string {
   ]);
 }
 
+export function agentHelpText(): string {
+  return assemble([
+    section('Description:', [
+      'Run a one-step agent automation: pass a goal in plain English and the LLM',
+      'figures out how to accomplish it. Internally synthesizes a single aiscope step',
+      'and runs it through the same pipeline as `portalflow run`, so every flag from',
+      'that command (--json, --no-color, --html-dir, --kill-chrome, etc.) works here too.',
+      '',
+      'Defaults are tuned for top-level goals (50 iterations / 900s wall clock) and',
+      'can be overridden either with flags below or persisted via',
+      '`portalflow settings agent` so you do not have to repeat them every run.',
+    ]),
+    section('Examples:', [
+      'portalflow agent "Open example.com and report the page title"',
+      'portalflow agent "Login to gmail and tell me my unread count" --start-url https://mail.google.com',
+      'portalflow agent "Find the cheapest flight to Tokyo" --mode fast --max-iterations 25',
+      'portalflow agent "Submit the contact form" --inputs-json \'{"email":"a@b.c","name":"A B"}\'',
+      'portalflow agent "Capture the dashboard data" --json --no-color  # agent-friendly invocation',
+    ]),
+    section('Mode selection:', [
+      'agent (default)  LLM opens with a planning call, tracks milestones, may replan.',
+      '                 Costs 1.5–3× tokens of fast mode but handles compound goals well.',
+      'fast             One LLM call per iteration. Cheaper; best for single-phase goals.',
+    ]),
+    section('Precedence (highest wins):', [
+      '1. CLI flag on this command (e.g., --max-iterations)',
+      '2. agent.* in ~/.portalflow/config.json',
+      '3. Built-in defaults (mode=agent, maxIterations=50, maxDuration=900, includeScreenshot=true)',
+    ]),
+    section('Exit codes:', [
+      '0   Goal achieved',
+      '1   Runtime error or budget exhausted before goal reached',
+      '2   Internal synthesis error (should never happen — file a bug)',
+      '3   LLM provider auth / pre-flight failure',
+      '4   Chrome / extension handshake failure',
+    ]),
+    section('See also:', [
+      'portalflow settings agent     Persist defaults to ~/.portalflow/config.json',
+      'portalflow run <file>         Run a pre-authored automation JSON file',
+      'docs/AGENT-INTEGRATION.md     Wire contract for shelling out to portalflow',
+    ]),
+  ]);
+}
+
 export function validateHelpText(): string {
   return assemble([
     section('Description:', [
