@@ -114,10 +114,14 @@ function waitForExtensionConnection(
 }
 
 export class AutomationRunner {
-  async run(automationPath: string, options?: RunOptions): Promise<RunResult> {
-    // ------------------------------------------------------------------
-    // 1. Read and parse the automation file
-    // ------------------------------------------------------------------
+  /**
+   * Load + parse + schema-validate an automation from a file path. Pure
+   * helper; no side effects beyond the file read. Used by `run(path)` and
+   * by callers that want validation only (e.g. the validate subcommand
+   * could share this in a follow-up). The error messages embed the path
+   * so the caller doesn't have to reconstruct it.
+   */
+  async loadAutomationFromPath(automationPath: string): Promise<Automation> {
     let raw: string;
     try {
       raw = await readFile(automationPath, 'utf-8');
@@ -132,9 +136,6 @@ export class AutomationRunner {
       throw new Error(`Automation file "${automationPath}" is not valid JSON: ${String(err)}`);
     }
 
-    // ------------------------------------------------------------------
-    // 2. Validate with AutomationSchema
-    // ------------------------------------------------------------------
     const parsed = AutomationSchema.safeParse(json);
     if (!parsed.success) {
       throw new Error(
@@ -143,8 +144,30 @@ export class AutomationRunner {
       );
     }
 
-    const automation: Automation = parsed.data;
+    return parsed.data;
+  }
 
+  /**
+   * Wrapper for the legacy file-based entry: reads the file, parses it,
+   * and forwards to `runFromAutomation`. New callers (e.g. agent-mode
+   * synthesizing in memory) should call `runFromAutomation` directly so
+   * they don't pay the unnecessary file round-trip.
+   */
+  async run(automationPath: string, options?: RunOptions): Promise<RunResult> {
+    const automation = await this.loadAutomationFromPath(automationPath);
+    return this.runFromAutomation(automation, options);
+  }
+
+  /**
+   * Execute an already-parsed `Automation` object. The body of this method
+   * is the original `run()` implementation minus the file-read+parse +
+   * schema-validate front matter — the caller is now responsible for
+   * producing a valid `Automation`. Lets `portalflow agent "<goal>"`
+   * synthesize a one-step automation in memory and run it through the
+   * exact same pipeline (logger, presenter, --json, RunResult, exit codes,
+   * everything) as a file-based run.
+   */
+  async runFromAutomation(automation: Automation, options?: RunOptions): Promise<RunResult> {
     // ------------------------------------------------------------------
     // 3. Load user config early so the logger picks up logging settings
     // ------------------------------------------------------------------
