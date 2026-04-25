@@ -257,13 +257,7 @@ toolsCmd
   .command('list')
   .description('Print the tool inventory (smscli, vaultcli, …) as JSON')
   .option('--pretty', 'Pretty-print the JSON with 2-space indentation', false)
-  .addHelpText(
-    'after',
-    '\nEmits the same inventory the LLM sees during aiscope steps.\n\n' +
-    'Examples:\n' +
-    '  portalflow tools list --pretty\n' +
-    '  portalflow tools list | jq -r ".[].tool"\n',
-  )
+  .addHelpText('after', helpText.toolsListHelpText())
   .action(async (opts: { pretty?: boolean }) => {
     const { runToolsListCommand } = await import('./commands/tools-list.js');
     runToolsListCommand(opts);
@@ -276,14 +270,7 @@ program
   .command('schema')
   .description('Print the automation JSON Schema (for coding agents to consume)')
   .option('--pretty', 'Pretty-print the JSON Schema with 2-space indentation', false)
-  .addHelpText(
-    'after',
-    '\nEmits a JSON Schema document describing the full automation file format.\n' +
-    'Useful for agents that need to synthesize automations without reading docs.\n\n' +
-    'Examples:\n' +
-    '  portalflow schema --pretty | less\n' +
-    '  portalflow schema | jq .properties.steps\n',
-  )
+  .addHelpText('after', helpText.schemaHelpText())
   .action(async (opts: { pretty?: boolean }) => {
     const { runSchemaCommand } = await import('./commands/schema.js');
     runSchemaCommand(opts);

@@ -567,3 +567,53 @@ export function settingsLoggingHelpText(): string {
     ]),
   ]);
 }
+
+export function schemaHelpText(): string {
+  return assemble([
+    section('Description:', [
+      'Emit a JSON Schema document describing the full automation file format.',
+      'Useful for agents that need to synthesize automations without reading docs.',
+      '',
+      'The output is derived from the AutomationSchema Zod definition and is',
+      'draft-07 compatible, so jq, ajv, or any standard JSON Schema tool can',
+      'consume it directly.',
+      '',
+      'Stable across minor versions; safe to cache the output.',
+      'See docs/AGENT-INTEGRATION.md for the wire shape agents expect.',
+    ]),
+    section('Examples:', [
+      'portalflow schema --pretty | less',
+      'portalflow schema | jq .properties.steps',
+    ]),
+    section('Exit codes:', [
+      '0   Always',
+    ]),
+    section('See also:', [
+      'portalflow tools list   Emit the tool inventory the LLM sees during aiscope steps',
+      'docs/AGENT-INTEGRATION.md',
+    ]),
+  ]);
+}
+
+export function toolsListHelpText(): string {
+  return assemble([
+    section('Description:', [
+      'Emit the built-in tool inventory as a ToolDescription[] JSON array.',
+      'Includes every adapter the runner registers (smscli, vaultcli, …).',
+      '',
+      'Same shape as the LLM sees during aiscope steps.',
+      'Stable across minor versions; safe to cache the output.',
+    ]),
+    section('Examples:', [
+      'portalflow tools list --pretty',
+      'portalflow tools list | jq -r ".[].tool"',
+    ]),
+    section('Exit codes:', [
+      '0   Always',
+    ]),
+    section('See also:', [
+      'portalflow schema       Emit the automation JSON Schema (full file format)',
+      'docs/AGENT-INTEGRATION.md',
+    ]),
+  ]);
+}
