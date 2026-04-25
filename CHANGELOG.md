@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [cli 3.4.1] - 2026-04-25
+
+Documentation patch closing four reference-surface gaps in the 3.4.0
+agent-friendly release. No code behavior change.
+
+### Fixed
+
+- **`tools/cli/README.md` `portalflow run` flag table** now lists
+  `--html-dir` (was missed in 3.3.0), `--no-color`, and `--json`
+  alongside the existing flags.
+- **`tools/cli/README.md` Commands section** gains
+  `### portalflow schema` and `### portalflow tools list` subsections
+  matching the style of the existing per-command reference. The
+  high-level "Agent integration" intro still links to
+  `docs/AGENT-INTEGRATION.md` for the full wire contract.
+- **`portalflow run --help`** curated example block (in
+  `tools/cli/src/help-text.ts`) now demonstrates `--html-dir`,
+  `--no-color`, `--json`, and a combined `--json --inputs-json`
+  invocation.
+- **`portalflow schema --help`** and **`portalflow tools list --help`**
+  now use proper `schemaHelpText()` / `toolsListHelpText()` helpers
+  matching `runHelpText()` / `validateHelpText()` style instead of the
+  3.4.0 inline strings.
+
+### Why this exists
+
+The 3.4.0 release added `--json`, `--no-color`, `schema`, and
+`tools list` plus the bundled OpenClaw skill, but the CLI's own
+reference docs (the README flag table + per-command subsections + the
+curated `--help` examples) weren't updated in lock-step. A user
+running `portalflow run --help` saw only the auto-generated flag
+listing without curated examples for the new flags, and the README
+table was the wrong source of truth. This patch makes the in-repo
+reference docs match what shipped.
+
 ## [cli 3.4.0] - 2026-04-25
 
 Tooling release: the CLI is now first-class consumable by coding agents
