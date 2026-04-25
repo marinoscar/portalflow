@@ -8,6 +8,7 @@
 
 The CLI ships a stable, agent-friendly surface for coding agents (OpenClaw, opencode, Claude Code, custom harnesses):
 
+- **`portalflow agent "<goal>"`** — goal-driven mode: pass a plain-English goal and let the LLM accomplish it. The simplest on-ramp for ad-hoc agent tasks — no JSON authoring required.
 - **`--json` flag** on `portalflow run` — suppresses the human presenter and emits a single `RunResult` JSON document on stdout. Pre-flight failures emit `{ success: false, error, exitCode }` on the same channel.
 - **Exit codes** — `0` Ok, `1` Runtime, `2` Schema, `3` Auth, `4` Extension. Agents react to codes without parsing error text.
 - **`portalflow schema`** — emits the full automation file format as a JSON Schema document. Agents use it to synthesize automations without reading prose docs.
@@ -24,6 +25,9 @@ OpenClaw on-ramp and bundled skill: [docs/OPENCLAW-INTEGRATION.md](../../docs/OP
 - [First-time setup](#first-time-setup)
 - [Running an automation](#running-an-automation)
 - [Commands](#commands)
+  - [portalflow agent](#portalflow-agent-goal)
+  - [portalflow run](#portalflow-run-file)
+  - [portalflow settings agent](#portalflow-settings-agent)
 - [Configuration reference](#configuration-reference)
 - [Architecture](#architecture)
 - [aiscope: credentials and tool integration](#aiscope-credentials-and-tool-integration)
@@ -204,6 +208,34 @@ portalflow run ~/automations/export.json --download-dir ~/Downloads/reports
 
 > **Note:** `--kill-chrome` and `--clear-history` are per-run runtime options. They are not persisted in `~/.portalflow/config.json`. Pass them on the command line each time, or answer the corresponding TUI prompts before each run.
 
+### `portalflow agent <goal>`
+
+Runs a one-step agent automation: pass a goal in plain English and the LLM figures out how to accomplish it. Internally synthesizes a single `aiscope` step and runs it through the same pipeline as `portalflow run`, so all flags from that command (`--json`, `--no-color`, `--html-dir`, `--kill-chrome`, etc.) work here too.
+
+```bash
+portalflow agent "Open example.com and report the page title"
+portalflow agent "Login to Gmail and tell me my unread count" --start-url https://mail.google.com
+portalflow agent "Capture the dashboard data" --json --no-color
+```
+
+Agent-specific flags:
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--start-url <url>` | string | — | Navigate to this URL before handing off to the LLM |
+| `--no-start-url` | boolean | — | Clear any persisted `startUrl` from config for this run |
+| `--mode <mode>` | string | `agent` | LLM strategy: `fast` (one call/iteration) or `agent` (planner + milestones) |
+| `--max-iterations <n>` | number | `50` | Cap on actions the LLM can take (1–200) |
+| `--max-duration <sec>` | number | `900` | Wall-clock cap in seconds (1–3600); whichever cap trips first wins |
+| `--max-replans <n>` | number | `2` | Replans allowed in agent mode (0–10) |
+| `--no-screenshot` | boolean | — | Skip the per-iteration viewport screenshot |
+
+All `portalflow run` flags (`--video`, `--screenshot-dir`, `--download-dir`, `--html-dir`, `--input`, `--inputs-json`, `--json`, `--no-color`, `--kill-chrome`, `--clear-history`, `-l/--log-level`, `-v/--verbose`) also work on this command.
+
+**Precedence chain (highest wins):** CLI flag > `agent.*` in `~/.portalflow/config.json` > built-in defaults. Use `portalflow settings agent` to persist any of the agent-specific flags so you do not repeat them on every invocation.
+
+**`--json` output** is identical to `portalflow run --json` — same `RunResult` wire shape, same exit codes. See `docs/AGENT-INTEGRATION.md` for the contract.
+
 ### `portalflow validate [file]`
 
 Validates an automation JSON file against `AutomationSchema`. Omit `file` to use the interactive file picker.
@@ -307,6 +339,40 @@ portalflow settings paths --automations ~/automations --downloads ~/Downloads/po
 | `--downloads <dir>` | Directory for downloaded files |
 | `--html <dir>` | Directory for HTML files written by `extract` steps with `saveToFile: true` |
 
+### `portalflow settings agent`
+
+Views or updates defaults for `portalflow agent` in `~/.portalflow/config.json`. Running with no flags prints current effective values. Running with any subset of flags updates only those fields.
+
+```bash
+portalflow settings agent                                         # print current values
+portalflow settings agent --mode fast                             # switch to cheap one-shot strategy
+portalflow settings agent --max-iterations 100 --max-duration 1800
+portalflow settings agent --no-screenshot                         # skip viewport capture (faster)
+portalflow settings agent --start-url https://app.example.com     # always start here unless overridden
+portalflow settings agent --no-start-url                          # clear the persisted start URL
+```
+
+| Flag | Description |
+|------|-------------|
+| `--mode <mode>` | Default LLM strategy: `fast` or `agent` |
+| `--max-iterations <n>` | Default action cap (1–200) |
+| `--max-duration <sec>` | Default wall-clock cap in seconds (1–3600) |
+| `--max-replans <n>` | Default replans allowed in agent mode (0–10) |
+| `--screenshot` / `--no-screenshot` | Whether to capture the viewport each iteration (default: on) |
+| `--start-url <url>` | Default URL to navigate to before handing off |
+| `--no-start-url` | Clear any persisted `startUrl` |
+
+Field reference for `~/.portalflow/config.json` `agent` section:
+
+| Field | Type | Built-in default | Description |
+|-------|------|-----------------|-------------|
+| `mode` | `"fast" \| "agent"` | `"agent"` | LLM strategy |
+| `maxIterations` | number | `50` | Action cap |
+| `maxDuration` | number | `900` | Wall-clock cap in seconds |
+| `maxReplans` | number | `2` | Replans in agent mode |
+| `includeScreenshot` | boolean | `true` | Viewport capture per iteration |
+| `startUrl` | string | (none) | URL to open before handing off |
+
 ### `portalflow settings logging`
 
 Configures log level, output file, formatting, and secret redaction.
@@ -396,6 +462,21 @@ This is the section that configures the WebSocket-based extension transport.
 | `file` | `string \| undefined` | (none) | Log file path (in addition to stdout) |
 | `pretty` | `boolean` | `true` | Pretty-print stdout logs |
 | `redactSecrets` | `boolean` | `true` | Redact secret-typed input values in log output |
+
+### `agent` section
+
+Defaults for `portalflow agent`. All fields are optional; the built-in values apply when a field is absent.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | `'fast' \| 'agent'` | `'agent'` | LLM strategy: `fast` = one call/iteration; `agent` = planner + milestones + replanning |
+| `maxIterations` | `number` | `50` | Maximum actions the LLM can take before the run is aborted |
+| `maxDuration` | `number` | `900` | Wall-clock cap in seconds; whichever cap trips first wins |
+| `maxReplans` | `number` | `2` | Number of replans allowed when the LLM determines the current plan is wrong (agent mode only) |
+| `includeScreenshot` | `boolean` | `true` | Capture and send a viewport screenshot to the LLM on every iteration |
+| `startUrl` | `string \| undefined` | (none) | URL to navigate to before handing off to the LLM; omit to let the LLM decide the starting page |
+
+Managed via `portalflow settings agent` or edited directly in `~/.portalflow/config.json`.
 
 ### `providers` and `activeProvider`
 
