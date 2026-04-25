@@ -26,6 +26,29 @@ export interface VideoConfig {
   height?: number;
 }
 
+/**
+ * Persisted defaults for `portalflow agent "<goal>"` (goal-driven mode).
+ * Every field is optional; `resolveAgentDefaults` fills missing fields
+ * from built-in defaults. Lets users tune budgets and mode once instead
+ * of passing flags on every invocation.
+ *
+ * Precedence at runtime: CLI flag > this config > built-in default.
+ */
+export interface AgentDefaultsConfig {
+  /** 'fast' = one LLM call per iteration; 'agent' = planner+milestones. */
+  mode?: 'fast' | 'agent';
+  /** Cap on actions the LLM can take. Top-level goals usually need >25. */
+  maxIterations?: number;
+  /** Wall-clock cap in seconds. Top-level goals usually need >300. */
+  maxDuration?: number;
+  /** Replans allowed in 'agent' mode before the runner gives up. */
+  maxReplans?: number;
+  /** Whether to capture the viewport and feed it to the LLM each iteration. */
+  includeScreenshot?: boolean;
+  /** Optional default URL to navigate to before handing off to the LLM. */
+  startUrl?: string;
+}
+
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
 
 export interface LoggingConfig {
@@ -121,6 +144,7 @@ export interface CliConfig {
   logging?: LoggingConfig;
   browser?: BrowserConfig;
   extension?: ExtensionConfig;
+  agent?: AgentDefaultsConfig;
 }
 
 export class ConfigService {
@@ -213,6 +237,32 @@ export class ConfigService {
   async setLogging(logging: Partial<LoggingConfig>): Promise<void> {
     const config = await this.load();
     config.logging = { ...(config.logging ?? {}), ...logging };
+    await this.save(config);
+  }
+
+  async getAgentDefaults(): Promise<AgentDefaultsConfig> {
+    const config = await this.load();
+    return config.agent ?? {};
+  }
+
+  /**
+   * Merge `partial` into the persisted agent defaults. Pass a field as
+   * `null` to clear it (e.g. `setAgentDefaults({ startUrl: null })`).
+   * Any field not mentioned is left untouched.
+   */
+  async setAgentDefaults(
+    partial: Partial<{ [K in keyof AgentDefaultsConfig]: AgentDefaultsConfig[K] | null }>,
+  ): Promise<void> {
+    const config = await this.load();
+    const current: AgentDefaultsConfig = { ...(config.agent ?? {}) };
+    for (const [k, v] of Object.entries(partial)) {
+      if (v === null) {
+        delete (current as Record<string, unknown>)[k];
+      } else if (v !== undefined) {
+        (current as Record<string, unknown>)[k] = v;
+      }
+    }
+    config.agent = current;
     await this.save(config);
   }
 
