@@ -6,6 +6,28 @@ For the skill body that OpenClaw reads directly, see `tools/cli/skills/portalflo
 
 ---
 
+## Two ways to drive portalflow
+
+**File-based** — author or cache a JSON automation file, then run it:
+
+```bash
+portalflow run <file> --json
+```
+
+Best for: repeatable workflows, anything version-controlled, tasks with complex multi-step logic.
+
+**Goal-driven** — pass a plain-English goal with no JSON file:
+
+```bash
+portalflow agent "<goal>" --json
+```
+
+Best for: ad-hoc tasks, one-off information retrieval, anything where writing and managing a JSON file is overhead the skill author wants to avoid.
+
+Both produce identical `RunResult` JSON on stdout and use the same exit codes. See [AGENT-INTEGRATION.md](./AGENT-INTEGRATION.md) for the wire contract.
+
+---
+
 ## Prerequisites
 
 Before installing the skill, confirm these three things:
@@ -82,6 +104,38 @@ echo "$RESULT" | jq -r '.artifacts[0]'
 ```
 
 The agent checks the process exit code first, then parses `RESULT` for `outputs`, `artifacts`, and `errors`. See [AGENT-INTEGRATION.md](./AGENT-INTEGRATION.md) for the full `RunResult` field reference and the exit code reaction map.
+
+#### Goal-driven alternative (no JSON file required)
+
+For skill authors who want to avoid synthesizing automation JSON on the fly, `portalflow agent` is a major simplification. Instead of:
+
+1. Calling `portalflow schema --pretty` to understand the file format
+2. Constructing a valid automation JSON object
+3. Writing the file to disk (or a temp path)
+4. Running `portalflow validate` on it
+5. Running `portalflow run <file> --json`
+
+…the skill can do this:
+
+```bash
+RESULT=$(portalflow agent "<user's goal>" --json --no-color)
+echo "$RESULT" | jq -r '.outputs'
+```
+
+The `RunResult` shape is identical — the same fields, the same exit codes. Exit-code reaction map from SKILL.md applies without changes.
+
+**Example:** a user asks "how many unread GitHub notifications do I have?"
+
+```bash
+RESULT=$(portalflow agent \
+  "open https://github.com/notifications and count how many unread notifications are visible" \
+  --json --no-color)
+
+# Check exit code, then extract the answer
+echo "$RESULT" | jq -r '.outputs'
+```
+
+Use the goal-driven form when the task is ad-hoc and the JSON overhead isn't justified. Use the file-based form when the automation needs to be cached, version-controlled, or parameterized with complex inputs.
 
 ---
 

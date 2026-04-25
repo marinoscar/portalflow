@@ -121,3 +121,95 @@ would have been:
 
 That's the entire happy-path contract: discover → validate → run →
 parse. No log-tailing, no ANSI parsing, no follow-up commands needed.
+
+---
+
+# Walkthrough: agent uses goal-driven mode
+
+This transcript shows how an OpenClaw agent fulfils the user request
+"fetch the title of example.com" using `portalflow agent` instead of
+the file-based flow. The agent recognises this is an ad-hoc task and
+skips JSON authoring entirely.
+
+## 1. User intent
+
+> What's the page title of example.com?
+
+The skill triggers (same `description` predicate as before). The agent
+sees that this is a one-off information-retrieval task — no
+multi-step logic, no need for a saved automation file.
+
+## 2. Preflight
+
+```
+$ portalflow --version
+3.5.0
+```
+
+Binary present.
+
+## 3. Decision: goal-driven vs file-based
+
+The task is:
+- Single-phase (navigate + extract title)
+- Ad-hoc (not going to be repeated)
+- Expressible in one sentence
+
+The agent uses `portalflow agent` and skips the schema → author →
+validate cycle.
+
+## 4. Run with goal-driven mode
+
+```
+$ portalflow agent \
+    "open example.com and report the page title" \
+    --json --no-color
+```
+
+Stdout (single line, expanded for readability):
+
+```json
+{
+  "success": true,
+  "startedAt": "2026-04-25T18:05:01.000Z",
+  "completedAt": "2026-04-25T18:05:09.218Z",
+  "stepsCompleted": 1,
+  "stepsTotal": 1,
+  "outputs": {
+    "page_title": "Example Domain"
+  },
+  "artifacts": [],
+  "errors": []
+}
+```
+
+Exit code: `0`.
+
+## 5. Parse and reply
+
+```
+$ echo "$RESULT" | jq -r '.outputs.page_title'
+Example Domain
+```
+
+The agent replies to the user:
+
+> The page title of example.com is **Example Domain**.
+
+## What happened on the failure path?
+
+If Chrome wasn't reachable, stdout would have been:
+
+```json
+{ "success": false, "error": "Chrome / extension handshake failed: …", "exitCode": 4 }
+```
+
+…and the exit code would be `4`. Same exit-code reaction map as the
+file-based flow: suggest closing Chrome windows and retrying.
+
+## Contrast with the file-based walkthrough
+
+The file-based walkthrough above (steps 1–7) required: preflight,
+schema discovery, file authoring, validation, run, and parse — six
+steps. This walkthrough required: preflight, run, parse — three steps.
+The `RunResult` output is identical in both cases.

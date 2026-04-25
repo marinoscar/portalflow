@@ -168,6 +168,70 @@ on a busy page, dismissing a banner with unpredictable HTML), prefer
 an `aiscope` step over hand-coded selectors — the LLM observes the
 page and chooses the action.
 
+## Goal-driven mode (preferred for ad-hoc tasks)
+
+For one-off tasks where authoring and managing a JSON file is overhead,
+use `portalflow agent` instead of the file-based flow. A single command
+replaces the schema → author → validate → run cycle:
+
+```bash
+portalflow agent "<user's goal>" --json --no-color
+```
+
+The synthesized automation runs through the same pipeline as
+`portalflow run`. The `RunResult` shape is identical — same fields,
+same exit codes, same exit-code reaction map.
+
+**When to prefer goal-driven over file-based:**
+
+- The task is ad-hoc and will not be run again.
+- You do not want to author, write, and clean up a JSON file.
+- The goal is simple enough to express in one sentence.
+
+**When to prefer file-based (`portalflow run`):**
+
+- The automation will be run more than once.
+- The task needs complex multi-step logic, input declarations, or
+  reusable functions.
+- The user wants to store the automation under
+  `~/.portalflow/automations/` for future reuse.
+
+### Goal-driven exit codes
+
+The exit-code reaction map from the [Running an automation](#running-an-automation)
+section applies identically:
+
+| Code | Reaction |
+|-----:|---------|
+| 0 | Read `outputs` from the JSON body |
+| 1 | Read the JSON `error` field; decide whether to retry |
+| 2 | Should not occur (synthesis validates against schema) |
+| 3 | Ask the user to check their LLM provider key |
+| 4 | Tell the user Chrome isn't ready; suggest `--kill-chrome` |
+
+### Worked example
+
+User: "open my GitHub notifications and tell me how many are unread"
+
+The task is ad-hoc — no need for a JSON file. The agent runs:
+
+```bash
+RESULT=$(portalflow agent \
+  "open https://github.com/notifications and tell me how many unread notifications are visible" \
+  --json --no-color)
+EXIT_CODE=$?
+```
+
+On success (`EXIT_CODE=0`):
+
+```bash
+echo "$RESULT" | jq -r '.outputs'
+# { "unread_count": "12" }  (or whatever the LLM captured)
+```
+
+The agent parses `outputs` and replies to the user with the count.
+No JSON file was written, validated, or cleaned up.
+
 ## When NOT to invoke this skill
 
 - The user wants to make an HTTP request, not drive a browser. Use
