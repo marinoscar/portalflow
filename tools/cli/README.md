@@ -215,6 +215,32 @@ portalflow validate ~/automations/my-flow.json
 
 Exits 0 on valid, 1 on invalid, with structured validation errors to stderr.
 
+### `portalflow schema`
+
+Emits the full automation file format as a JSON Schema document. Useful for coding agents that need to synthesize automation JSON without reading prose docs. The output is a stable wire contract — safe to cache across minor versions. See `docs/AGENT-INTEGRATION.md` for how agents use this output.
+
+```bash
+portalflow schema --pretty | less
+portalflow schema | jq .properties.steps
+```
+
+| Flag | Description |
+|------|-------------|
+| `--pretty` | Pretty-print the JSON Schema with 2-space indentation |
+
+### `portalflow tools list`
+
+Emits the built-in tool inventory (`smscli`, `vaultcli`, …) as a `ToolDescription[]` JSON array. This is the same inventory the LLM sees during `aiscope` steps. Note: `portalflow tools` with no subcommand describes the namespace only.
+
+```bash
+portalflow tools list --pretty
+portalflow tools list | jq -r '.[].tool'
+```
+
+| Flag | Description |
+|------|-------------|
+| `--pretty` | Pretty-print the JSON with 2-space indentation |
+
 ### `portalflow provider list`
 
 Lists all configured LLM providers and marks the active one.
