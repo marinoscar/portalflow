@@ -5,12 +5,15 @@ import { resolvePaths, resolveVideo } from '../runner/paths.js';
 import { runSettingsPathsFlow } from './flows/settings-paths.js';
 import { runSettingsVideoFlow } from './flows/settings-video.js';
 import { runSettingsLoggingFlow } from './flows/settings-logging.js';
+import { runSettingsAgentFlow } from './flows/settings-agent.js';
+import { resolveAgentDefaults } from '../runner/agent-defaults.js';
 
 type SettingsAction =
   | 'view'
   | 'paths'
   | 'video'
   | 'logging'
+  | 'agent'
   | 'browser'
   | 'reset'
   | 'exit';
@@ -53,6 +56,11 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
           hint: 'level, file output, pretty print, secret redaction',
         },
         {
+          value: 'agent' as SettingsAction,
+          label: 'Configure agent defaults',
+          hint: 'mode, budgets, screenshots, start URL for `portalflow agent`',
+        },
+        {
           value: 'browser' as SettingsAction,
           label: 'Extension settings',
           hint: 'Chrome profile, host, port, close-on-finish',
@@ -79,6 +87,7 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
         const cfg = await configService.load();
         const paths = resolvePaths(cfg);
         const video = resolveVideo(cfg);
+        const agent = resolveAgentDefaults(cfg);
         const logging = cfg.logging ?? {};
         const browser = cfg.browser ?? {};
         const extension = cfg.extension;
@@ -94,6 +103,14 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
             `  Enabled: ${video.enabled ? pc.green('yes') : pc.dim('no')}`,
             `  Width:   ${video.width}`,
             `  Height:  ${video.height}`,
+            '',
+            pc.dim('Agent defaults (`portalflow agent`):'),
+            `  Mode:               ${agent.mode}`,
+            `  Max iterations:     ${agent.maxIterations}`,
+            `  Max duration:       ${agent.maxDuration}s`,
+            `  Max replans:        ${agent.maxReplans}`,
+            `  Include screenshot: ${agent.includeScreenshot ? 'yes' : 'no'}`,
+            `  Start URL:          ${agent.startUrl ?? pc.dim('(none — LLM decides)')}`,
             '',
             pc.dim('Logging:'),
             `  Level:          ${logging.level ?? 'info (default)'}`,
@@ -127,6 +144,10 @@ export async function runSettingsTui(options: SettingsTuiOptions = {}): Promise<
 
       case 'logging':
         await runSettingsLoggingFlow(configService);
+        break;
+
+      case 'agent':
+        await runSettingsAgentFlow(configService);
         break;
 
       case 'browser': {
