@@ -190,12 +190,15 @@ portalflow run ~/automations/export.json --download-dir ~/Downloads/reports
 | `--video-dir <dir>` | string | — | Directory to store recorded videos |
 | `--screenshot-dir <dir>` | string | — | Directory to store screenshots |
 | `--download-dir <dir>` | string | — | Directory to store downloaded files |
+| `--html-dir <dir>` | string | — | Directory for HTML files written by `extract` steps with `saveToFile: true` |
 | `--automations-dir <dir>` | string | — | Directory to search for automation files |
 | `--input <key=value>` | string | — | Pass an input value (repeatable) |
 | `--inputs-json <json>` | string | — | Pass multiple inputs as a JSON object |
 | `-l, --log-level <level>` | string | — | Log verbosity: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent` |
 | `--stealth` | boolean | `false` | Apply anti-detection patches (opt-in) |
 | `-v, --verbose` | boolean | — | Print the full pino log stream to stdout |
+| `--no-color` | boolean | — | Disable ANSI color codes in presenter output (also honors `NO_COLOR` env var and non-TTY stdout) |
+| `--json` | boolean | `false` | Agent mode: suppress presenter, redirect logs to file, emit a single `RunResult` JSON document on stdout. Implies `--no-color`. See `docs/AGENT-INTEGRATION.md` for the wire shape. |
 | `--kill-chrome` | boolean | `false` | Close all existing Chrome/Chromium processes before launching Chrome. Ensures a clean start with no stale singleton locks or leftover sessions. Uses `pkill` on Linux/macOS, `taskkill` on Windows, followed by a 1.5 s pause to let processes release file locks. |
 | `--clear-history <range>` | string | `none` | Clear browsing history and cache (not cookies or passwords) after the extension connects but before steps execute. Preserves logged-in sessions. Accepted values: `none`, `last15min`, `last1hour`, `last24hour`, `last7days`, `all`. |
 
