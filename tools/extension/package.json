@@ -18,14 +18,14 @@
   "dependencies": {
     "@portalflow/schema": "*",
     "fflate": "^0.8.2",
-    "react": "^18.3.1",
+    "react": "^19.2.5",
     "react-dom": "^18.3.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",
     "@types/chrome": "^0.0.287",
-    "@types/react": "^18.3.18",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
